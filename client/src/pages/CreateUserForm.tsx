@@ -52,6 +52,7 @@ export default function CreateUserForm({ onSuccess }: CreateUserFormProps) {
         <Input
           id="name"
           placeholder="Full name"
+          aria-invalid={!!form.formState.errors.name}
           {...form.register("name")}
         />
         {form.formState.errors.name && (
@@ -67,6 +68,7 @@ export default function CreateUserForm({ onSuccess }: CreateUserFormProps) {
           type="email"
           placeholder="user@example.com"
           autoComplete="off"
+          aria-invalid={!!form.formState.errors.email}
           {...form.register("email")}
         />
         {form.formState.errors.email && (
@@ -82,6 +84,7 @@ export default function CreateUserForm({ onSuccess }: CreateUserFormProps) {
           type="password"
           placeholder="Minimum 8 characters"
           autoComplete="new-password"
+          aria-invalid={!!form.formState.errors.password}
           {...form.register("password")}
         />
         {form.formState.errors.password && (
