@@ -1,20 +1,11 @@
-import { Router, type Response } from "express";
-import type { ZodType } from "zod/v4";
+import { Router } from "express";
 import { hashPassword } from "better-auth/crypto";
 import { createUserSchema, updateUserSchema } from "core/schemas/users.ts";
 import { Role } from "core/constants/role.ts";
 import { requireAuth } from "../middleware/require-auth";
 import { requireAdmin } from "../middleware/require-admin";
+import { validate } from "../lib/validate";
 import prisma from "../db";
-
-function validate<T>(schema: ZodType<T>, body: unknown, res: Response): T | null {
-  const result = schema.safeParse(body);
-  if (!result.success) {
-    res.status(400).json({ error: result.error.issues[0]?.message ?? "Validation failed" });
-    return null;
-  }
-  return result.data;
-}
 
 const router = Router();
 

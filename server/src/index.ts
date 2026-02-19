@@ -6,6 +6,7 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "./lib/auth";
 import { requireAuth } from "./middleware/require-auth";
 import usersRouter from "./routes/users";
+import webhooksRouter from "./routes/webhooks";
 
 if (!process.env.BETTER_AUTH_SECRET) {
   throw new Error("BETTER_AUTH_SECRET environment variable is required");
@@ -52,6 +53,11 @@ app.get("/api/me", requireAuth, (req, res) => {
 });
 
 app.use("/api/users", usersRouter);
+app.use("/api/webhooks", webhooksRouter);
+
+if (!process.env.WEBHOOK_SECRET) {
+  console.warn("Warning: WEBHOOK_SECRET is not set. Webhook endpoints will return 500.");
+}
 
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
