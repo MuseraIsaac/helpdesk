@@ -22,8 +22,10 @@ const sortableColumns = [
 
 export type TicketSortField = (typeof sortableColumns)[number];
 
-export const assignTicketSchema = z.object({
-  assignedToId: z.string().nullable(),
+export const updateTicketSchema = z.object({
+  assignedToId: z.string().nullable().optional(),
+  status: z.enum(ticketStatuses).optional(),
+  category: z.enum(ticketCategories).nullable().optional(),
 });
 
 export const ticketListQuerySchema = z.object({

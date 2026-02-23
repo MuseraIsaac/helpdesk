@@ -1,10 +1,9 @@
 import { useParams, Link } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
-import { type TicketStatus, statusVariant } from "core/constants/ticket-status.ts";
-import { type TicketCategory } from "core/constants/ticket-category.ts";
+import { type TicketStatus, ticketStatuses, statusLabel } from "core/constants/ticket-status.ts";
+import { type TicketCategory, ticketCategories, categoryLabel } from "core/constants/ticket-category.ts";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -61,11 +60,12 @@ export default function TicketDetailPage() {
     },
   });
 
-  const assignMutation = useMutation({
-    mutationFn: async (assignedToId: string | null) => {
-      const { data } = await axios.patch<TicketDetail>(`/api/tickets/${id}`, {
-        assignedToId,
-      });
+  const updateMutation = useMutation({
+    mutationFn: async (body: Record<string, unknown>) => {
+      const { data } = await axios.patch<TicketDetail>(
+        `/api/tickets/${id}`,
+        body
+      );
       return data;
     },
     onSuccess: () => {
@@ -106,35 +106,102 @@ export default function TicketDetailPage() {
       )}
 
       {ticket && (
-        <>
-          <div>
-            <h1 className="text-2xl font-bold">{ticket.subject}</h1>
-            <div className="flex items-center gap-2 mt-2">
-              <Badge variant={statusVariant[ticket.status]}>
-                {ticket.status}
-              </Badge>
-              {ticket.category && (
-                <Badge variant="secondary">
-                  {ticket.category.replace(/_/g, " ")}
-                </Badge>
-              )}
+        <div className="grid grid-cols-[1fr_auto] gap-6">
+          <div className="space-y-6">
+            <div>
+              <h1 className="text-2xl font-bold">{ticket.subject}</h1>
+              <div className="mt-2 space-y-1 text-sm">
+                <div>
+                  <span className="text-muted-foreground">From: </span>
+                  {ticket.senderName} ({ticket.senderEmail})
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Created: </span>
+                  {new Date(ticket.createdAt).toLocaleString()}
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Updated: </span>
+                  {new Date(ticket.updatedAt).toLocaleString()}
+                </div>
+              </div>
             </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Message</CardTitle>
+                <CardDescription>
+                  From {ticket.senderName}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {ticket.bodyHtml ? (
+                  <div
+                    dangerouslySetInnerHTML={{ __html: ticket.bodyHtml }}
+                  />
+                ) : (
+                  <p className="whitespace-pre-wrap">{ticket.body}</p>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-muted-foreground">From: </span>
-              {ticket.senderName} ({ticket.senderEmail})
+          <div className="w-48 space-y-4 text-sm">
+            <div className="space-y-1">
+              <span className="text-muted-foreground">Status</span>
+              <Select
+                value={ticket.status}
+                onValueChange={(value) =>
+                  updateMutation.mutate({ status: value })
+                }
+              >
+                <SelectTrigger size="sm" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ticketStatuses.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {statusLabel[s]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Assigned to: </span>
+
+            <div className="space-y-1">
+              <span className="text-muted-foreground">Category</span>
+              <Select
+                value={ticket.category ?? "none"}
+                onValueChange={(value) =>
+                  updateMutation.mutate({
+                    category: value === "none" ? null : value,
+                  })
+                }
+              >
+                <SelectTrigger size="sm" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {ticketCategories.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {categoryLabel[c]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-muted-foreground">Assigned To</span>
               <Select
                 value={ticket.assignedTo?.id ?? "unassigned"}
                 onValueChange={(value) =>
-                  assignMutation.mutate(value === "unassigned" ? null : value)
+                  updateMutation.mutate({
+                    assignedToId: value === "unassigned" ? null : value,
+                  })
                 }
               >
-                <SelectTrigger size="sm">
+                <SelectTrigger size="sm" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -147,34 +214,8 @@ export default function TicketDetailPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <span className="text-muted-foreground">Created: </span>
-              {new Date(ticket.createdAt).toLocaleString()}
-            </div>
-            <div>
-              <span className="text-muted-foreground">Updated: </span>
-              {new Date(ticket.updatedAt).toLocaleString()}
-            </div>
           </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Message</CardTitle>
-              <CardDescription>
-                From {ticket.senderName}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {ticket.bodyHtml ? (
-                <div
-                  dangerouslySetInnerHTML={{ __html: ticket.bodyHtml }}
-                />
-              ) : (
-                <p className="whitespace-pre-wrap">{ticket.body}</p>
-              )}
-            </CardContent>
-          </Card>
-        </>
+        </div>
       )}
     </div>
   );

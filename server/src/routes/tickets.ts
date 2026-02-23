@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/require-auth";
 import { validate } from "../lib/validate";
-import { ticketListQuerySchema, assignTicketSchema } from "core/schemas/tickets.ts";
+import { ticketListQuerySchema, updateTicketSchema } from "core/schemas/tickets.ts";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -80,7 +80,7 @@ router.patch("/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  const data = validate(assignTicketSchema, req.body, res);
+  const data = validate(updateTicketSchema, req.body, res);
   if (!data) return;
 
   if (data.assignedToId) {
@@ -101,7 +101,11 @@ router.patch("/:id", requireAuth, async (req, res) => {
 
   const updated = await prisma.ticket.update({
     where: { id },
-    data: { assignedToId: data.assignedToId },
+    data: {
+      ...("assignedToId" in data && { assignedToId: data.assignedToId }),
+      ...("status" in data && { status: data.status }),
+      ...("category" in data && { category: data.category }),
+    },
     include: { assignedTo: { select: { id: true, name: true } } },
   });
 

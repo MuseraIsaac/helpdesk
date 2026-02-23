@@ -88,8 +88,9 @@ describe("TicketDetailPage", () => {
       ).toBeInTheDocument();
     });
 
-    expect(screen.getByText("open")).toBeInTheDocument();
-    expect(screen.getByText("technical question")).toBeInTheDocument();
+    const comboboxes = screen.getAllByRole("combobox");
+    expect(comboboxes[0]).toHaveTextContent("Open");
+    expect(comboboxes[1]).toHaveTextContent("Technical Question");
     expect(
       screen.getByText(/Alice Smith \(alice@example\.com\)/)
     ).toBeInTheDocument();
@@ -133,7 +134,7 @@ describe("TicketDetailPage", () => {
     });
   });
 
-  it("should show 'Unassigned' in the dropdown when ticket has no assignee", async () => {
+  it("should show 'Unassigned' in the assignee dropdown when ticket has no assignee", async () => {
     mockedAxios.get.mockImplementation((url: string) => {
       if (url === "/api/tickets/1") return Promise.resolve({ data: mockTicket });
       if (url === "/api/agents")
@@ -148,8 +149,8 @@ describe("TicketDetailPage", () => {
       ).toBeInTheDocument();
     });
 
-    const trigger = screen.getByRole("combobox");
-    expect(trigger).toHaveTextContent("Unassigned");
+    const comboboxes = screen.getAllByRole("combobox");
+    expect(comboboxes[2]).toHaveTextContent("Unassigned");
   });
 
   it("should show the assigned agent name in the dropdown", async () => {
@@ -172,8 +173,8 @@ describe("TicketDetailPage", () => {
       ).toBeInTheDocument();
     });
 
-    const trigger = screen.getByRole("combobox");
-    expect(trigger).toHaveTextContent("Jane Doe");
+    const comboboxes = screen.getAllByRole("combobox");
+    expect(comboboxes[2]).toHaveTextContent("Jane Doe");
   });
 
   it("should call PATCH with assignedToId when selecting an agent", async () => {
@@ -195,7 +196,8 @@ describe("TicketDetailPage", () => {
       ).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("combobox"));
+    const comboboxes = screen.getAllByRole("combobox");
+    await user.click(comboboxes[2]);
 
     await waitFor(() => {
       expect(screen.getByRole("option", { name: "Jane Doe" })).toBeInTheDocument();
@@ -234,7 +236,8 @@ describe("TicketDetailPage", () => {
       ).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("combobox"));
+    const comboboxes = screen.getAllByRole("combobox");
+    await user.click(comboboxes[2]);
 
     await waitFor(() => {
       expect(
@@ -247,6 +250,168 @@ describe("TicketDetailPage", () => {
     await waitFor(() => {
       expect(mockedAxios.patch).toHaveBeenCalledWith("/api/tickets/1", {
         assignedToId: null,
+      });
+    });
+  });
+
+  it("should display current status and all status options in dropdown", async () => {
+    const user = userEvent.setup();
+    mockedAxios.get.mockImplementation((url: string) => {
+      if (url === "/api/tickets/1") return Promise.resolve({ data: mockTicket });
+      if (url === "/api/agents")
+        return Promise.resolve({ data: { agents: mockAgents } });
+      return Promise.reject(new Error("unexpected url"));
+    });
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Cannot login to my account")
+      ).toBeInTheDocument();
+    });
+
+    const comboboxes = screen.getAllByRole("combobox");
+    expect(comboboxes[0]).toHaveTextContent("Open");
+
+    await user.click(comboboxes[0]);
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "Open" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "Resolved" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "Closed" })).toBeInTheDocument();
+    });
+  });
+
+  it("should call PATCH with status when selecting a status", async () => {
+    const user = userEvent.setup();
+    mockedAxios.get.mockImplementation((url: string) => {
+      if (url === "/api/tickets/1") return Promise.resolve({ data: mockTicket });
+      if (url === "/api/agents")
+        return Promise.resolve({ data: { agents: mockAgents } });
+      return Promise.reject(new Error("unexpected url"));
+    });
+    mockedAxios.patch.mockResolvedValue({
+      data: { ...mockTicket, status: "resolved" },
+    });
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Cannot login to my account")
+      ).toBeInTheDocument();
+    });
+
+    const comboboxes = screen.getAllByRole("combobox");
+    await user.click(comboboxes[0]);
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "Resolved" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("option", { name: "Resolved" }));
+
+    await waitFor(() => {
+      expect(mockedAxios.patch).toHaveBeenCalledWith("/api/tickets/1", {
+        status: "resolved",
+      });
+    });
+  });
+
+  it("should display current category and all category options in dropdown", async () => {
+    const user = userEvent.setup();
+    mockedAxios.get.mockImplementation((url: string) => {
+      if (url === "/api/tickets/1") return Promise.resolve({ data: mockTicket });
+      if (url === "/api/agents")
+        return Promise.resolve({ data: { agents: mockAgents } });
+      return Promise.reject(new Error("unexpected url"));
+    });
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Cannot login to my account")
+      ).toBeInTheDocument();
+    });
+
+    const comboboxes = screen.getAllByRole("combobox");
+    expect(comboboxes[1]).toHaveTextContent("Technical Question");
+
+    await user.click(comboboxes[1]);
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "None" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "General Question" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "Technical Question" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "Refund Request" })).toBeInTheDocument();
+    });
+  });
+
+  it("should call PATCH with category when selecting a category", async () => {
+    const user = userEvent.setup();
+    mockedAxios.get.mockImplementation((url: string) => {
+      if (url === "/api/tickets/1") return Promise.resolve({ data: mockTicket });
+      if (url === "/api/agents")
+        return Promise.resolve({ data: { agents: mockAgents } });
+      return Promise.reject(new Error("unexpected url"));
+    });
+    mockedAxios.patch.mockResolvedValue({
+      data: { ...mockTicket, category: "refund_request" },
+    });
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Cannot login to my account")
+      ).toBeInTheDocument();
+    });
+
+    const comboboxes = screen.getAllByRole("combobox");
+    await user.click(comboboxes[1]);
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "Refund Request" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("option", { name: "Refund Request" }));
+
+    await waitFor(() => {
+      expect(mockedAxios.patch).toHaveBeenCalledWith("/api/tickets/1", {
+        category: "refund_request",
+      });
+    });
+  });
+
+  it("should call PATCH with null category when selecting None", async () => {
+    const user = userEvent.setup();
+    mockedAxios.get.mockImplementation((url: string) => {
+      if (url === "/api/tickets/1") return Promise.resolve({ data: mockTicket });
+      if (url === "/api/agents")
+        return Promise.resolve({ data: { agents: mockAgents } });
+      return Promise.reject(new Error("unexpected url"));
+    });
+    mockedAxios.patch.mockResolvedValue({
+      data: { ...mockTicket, category: null },
+    });
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Cannot login to my account")
+      ).toBeInTheDocument();
+    });
+
+    const comboboxes = screen.getAllByRole("combobox");
+    await user.click(comboboxes[1]);
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "None" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("option", { name: "None" }));
+
+    await waitFor(() => {
+      expect(mockedAxios.patch).toHaveBeenCalledWith("/api/tickets/1", {
+        category: null,
       });
     });
   });
