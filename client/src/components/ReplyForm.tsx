@@ -21,12 +21,17 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
     register,
     handleSubmit,
     reset,
+    getValues,
+    setValue,
+    watch,
     formState: { errors },
   } = useForm<CreateReplyInput>({
     resolver: zodResolver(createReplySchema),
   });
 
-  const mutation = useMutation({
+  const bodyValue = watch("body");
+
+  const replyMutation = useMutation({
     mutationFn: async (data: CreateReplyInput) => {
       const { data: reply } = await axios.post(
         `/api/tickets/${ticketId}/replies`,
@@ -40,10 +45,25 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
     },
   });
 
+  const polishMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await axios.post(`/api/tickets/${ticketId}/replies/polish`, {
+        body: getValues("body"),
+      });
+      return data.body as string;
+    },
+    onSuccess: (polishedText) => {
+      setValue("body", polishedText, { shouldValidate: true });
+    },
+  });
+
   return (
-    <form onSubmit={handleSubmit((data) => mutation.mutate(data))} className="space-y-3">
-      {mutation.error && (
-        <ErrorAlert error={mutation.error} fallback="Failed to send reply" />
+    <form onSubmit={handleSubmit((data) => replyMutation.mutate(data))} className="space-y-3">
+      {replyMutation.error && (
+        <ErrorAlert error={replyMutation.error} fallback="Failed to send reply" />
+      )}
+      {polishMutation.error && (
+        <ErrorAlert error={polishMutation.error} fallback="Failed to polish reply" />
       )}
 
       <div className="space-y-1">
@@ -55,9 +75,19 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
         {errors.body && <ErrorMessage message={errors.body.message} />}
       </div>
 
-      <Button type="submit" disabled={mutation.isPending}>
-        {mutation.isPending ? "Sending..." : "Send Reply"}
-      </Button>
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={!bodyValue?.trim() || polishMutation.isPending || replyMutation.isPending}
+          onClick={() => polishMutation.mutate()}
+        >
+          {polishMutation.isPending ? "Polishing..." : "Polish"}
+        </Button>
+        <Button type="submit" disabled={!bodyValue?.trim() || replyMutation.isPending || polishMutation.isPending}>
+          {replyMutation.isPending ? "Sending..." : "Send Reply"}
+        </Button>
+      </div>
     </form>
   );
 }
