@@ -3,6 +3,7 @@ import { inboundEmailSchema } from "core/schemas/tickets.ts";
 import { requireWebhookSecret } from "../middleware/require-webhook-secret";
 import { validate } from "../lib/validate";
 import prisma from "../db";
+import { classifyTicket } from "../lib/classify-ticket";
 
 function stripSubjectPrefixes(subject: string): string {
   return subject.replace(/^(Re:\s*|Fwd:\s*)+/i, "").trim();
@@ -50,6 +51,8 @@ router.post("/inbound-email", requireWebhookSecret, async (req, res) => {
   });
 
   res.status(201).json({ ticket });
+
+  classifyTicket(ticket);
 });
 
 export default router;
