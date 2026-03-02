@@ -5,6 +5,7 @@ import { validate } from "../lib/validate";
 import prisma from "../db";
 import { sendClassifyJob } from "../lib/classify-ticket";
 import { sendAutoResolveJob } from "../lib/auto-resolve-ticket";
+import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 
 function stripSubjectPrefixes(subject: string): string {
   return subject.replace(/^(Re:\s*|Fwd:\s*)+/i, "").trim();
@@ -48,6 +49,7 @@ router.post("/inbound-email", requireWebhookSecret, async (req, res) => {
       bodyHtml: data.bodyHtml ?? null,
       senderName: data.fromName,
       senderEmail: data.from,
+      assignedToId: AI_AGENT_ID,
     },
   });
 

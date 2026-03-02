@@ -5,8 +5,60 @@ import { parseId } from "../lib/parse-id";
 import { ticketListQuerySchema, updateTicketSchema } from "core/schemas/tickets.ts";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
+import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
+
+interface TicketStatsRow {
+  totalTickets: bigint;
+  openTickets: bigint;
+  resolvedByAI: bigint;
+  aiResolutionRate: number;
+  avgResolutionTime: number;
+}
 
 const router = Router();
+
+router.get("/stats", requireAuth, async (_req, res) => {
+  const [row] = await prisma.$queryRaw<
+    [TicketStatsRow]
+  >`SELECT * FROM get_ticket_stats(${AI_AGENT_ID})`;
+
+  res.json({
+    totalTickets: Number(row.totalTickets),
+    openTickets: Number(row.openTickets),
+    resolvedByAI: Number(row.resolvedByAI),
+    aiResolutionRate: row.aiResolutionRate,
+    avgResolutionTime: row.avgResolutionTime,
+  });
+});
+
+router.get("/stats/daily-volume", requireAuth, async (_req, res) => {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
+  thirtyDaysAgo.setHours(0, 0, 0, 0);
+
+  const tickets = await prisma.ticket.findMany({
+    where: { createdAt: { gte: thirtyDaysAgo } },
+    select: { createdAt: true },
+  });
+
+  // Build a map of date -> count
+  const countsByDate = new Map<string, number>();
+  for (const t of tickets) {
+    const dateKey = t.createdAt.toISOString().slice(0, 10);
+    countsByDate.set(dateKey, (countsByDate.get(dateKey) ?? 0) + 1);
+  }
+
+  // Fill in all 30 days (including zeros)
+  const data: { date: string; tickets: number }[] = [];
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(thirtyDaysAgo);
+    d.setDate(d.getDate() + i);
+    const dateKey = d.toISOString().slice(0, 10);
+    data.push({ date: dateKey, tickets: countsByDate.get(dateKey) ?? 0 });
+  }
+
+  res.json({ data });
+});
 
 router.get("/", requireAuth, async (req, res) => {
   const query = validate(ticketListQuerySchema, req.query, res);
