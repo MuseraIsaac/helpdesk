@@ -65,52 +65,71 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-muted/50">
-      <Card className="w-full max-w-[400px]">
-        <CardHeader>
-          <CardTitle className="text-2xl">Helpdesk</CardTitle>
-          <CardDescription>Sign in to your account</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit(onSubmit)} noValidate>
-            {serverError && (
-              <ErrorAlert message={serverError} className="mb-4" />
-            )}
-            <div className="grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="admin@example.com"
-                  {...register("email")}
-                />
-                {errors.email && (
-                  <ErrorMessage message={errors.email.message} />
-                )}
+    <div className="flex items-center justify-center min-h-screen bg-background">
+      <div className="w-full max-w-[400px] px-4 animate-in-page">
+        <div className="flex flex-col items-center mb-10">
+          <div className="h-12 w-12 rounded-2xl bg-primary flex items-center justify-center mb-5">
+            <span className="text-primary-foreground font-bold text-xl">H</span>
+          </div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Welcome back
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1.5">
+            Sign in to your helpdesk account
+          </p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Sign in</CardTitle>
+            <CardDescription>
+              Enter your credentials to continue
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit(onSubmit)} noValidate>
+              {serverError && (
+                <ErrorAlert message={serverError} className="mb-4" />
+              )}
+              <div className="grid gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="admin@example.com"
+                    {...register("email")}
+                  />
+                  {errors.email && (
+                    <ErrorMessage message={errors.email.message} />
+                  )}
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="Enter your password"
+                    {...register("password")}
+                  />
+                  {errors.password && (
+                    <ErrorMessage message={errors.password.message} />
+                  )}
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting && (
+                    <Loader2 className="animate-spin mr-2 h-4 w-4" />
+                  )}
+                  {isSubmitting ? "Signing in..." : "Sign in"}
+                </Button>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Enter your password"
-                  {...register("password")}
-                />
-                {errors.password && (
-                  <ErrorMessage message={errors.password.message} />
-                )}
-              </div>
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting && (
-                  <Loader2 className="animate-spin mr-2 h-4 w-4" />
-                )}
-                {isSubmitting ? "Signing in..." : "Sign in"}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

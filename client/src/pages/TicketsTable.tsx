@@ -11,8 +11,8 @@ import {
   flexRender,
 } from "@tanstack/react-table";
 import { type Ticket } from "core/constants/ticket.ts";
-import { statusVariant } from "core/constants/ticket-status.ts";
 import ErrorAlert from "@/components/ErrorAlert";
+import StatusBadge from "@/components/StatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -70,11 +70,7 @@ const columns: ColumnDef<Ticket>[] = [
   {
     accessorKey: "status",
     header: "Status",
-    cell: ({ row }) => (
-      <Badge variant={statusVariant[row.original.status]}>
-        {row.original.status}
-      </Badge>
-    ),
+    cell: ({ row }) => <StatusBadge status={row.original.status} />,
   },
   {
     accessorKey: "category",

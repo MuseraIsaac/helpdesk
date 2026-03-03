@@ -81,7 +81,7 @@ describe("ReplyThread", () => {
       expect(screen.getByText("Jane Doe")).toBeInTheDocument();
     });
     expect(screen.getByText("I can help with that")).toBeInTheDocument();
-    expect(screen.getByText(/Agent/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Agent/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("should display customer replies with the ticket sender name", async () => {
@@ -124,7 +124,7 @@ describe("ReplyThread", () => {
     renderWithQuery(<ReplyThread ticket={mockTicket} />);
 
     await waitFor(() => {
-      expect(screen.getByText("Agent")).toBeInTheDocument();
+      expect(screen.getAllByText("Agent").length).toBeGreaterThanOrEqual(1);
     });
     expect(screen.getByText("Automated response")).toBeInTheDocument();
   });

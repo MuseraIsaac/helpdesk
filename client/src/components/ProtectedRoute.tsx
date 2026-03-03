@@ -6,7 +6,7 @@ export default function ProtectedRoute() {
 
   if (isPending) {
     return (
-      <div className="flex items-center justify-center h-screen text-lg text-gray-500">
+      <div className="flex items-center justify-center h-screen text-lg text-muted-foreground">
         Loading...
       </div>
     );

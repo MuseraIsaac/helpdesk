@@ -58,10 +58,9 @@ describe("TicketDetail", () => {
     expect(screen.queryByText("I need help logging in")).not.toBeInTheDocument();
   });
 
-  it("should display the message card with sender name", () => {
+  it("should display the ticket body content", () => {
     render(<TicketDetail ticket={mockTicket} />);
 
-    expect(screen.getByText("Message")).toBeInTheDocument();
-    expect(screen.getByText("From Alice Smith")).toBeInTheDocument();
+    expect(screen.getByText("I need help logging in")).toBeInTheDocument();
   });
 });

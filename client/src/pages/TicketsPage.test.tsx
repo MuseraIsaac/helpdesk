@@ -100,11 +100,11 @@ describe("TicketsPage", () => {
     renderWithQuery(<TicketsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("open")).toBeInTheDocument();
+      expect(screen.getByText("Open")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("resolved")).toBeInTheDocument();
-    expect(screen.getByText("closed")).toBeInTheDocument();
+    expect(screen.getByText("Resolved")).toBeInTheDocument();
+    expect(screen.getByText("Closed")).toBeInTheDocument();
   });
 
   it("should display category with underscores replaced by spaces", async () => {

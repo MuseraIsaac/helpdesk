@@ -50,7 +50,7 @@ export default function TicketDetailPage() {
               <ReplyThread ticket={ticket} />
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3 pb-16">
               <h2>Add a Reply</h2>
               <ReplyForm ticket={ticket} />
             </div>
