@@ -5,6 +5,22 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET!;
 const API_BASE_URL = process.env.BETTER_AUTH_URL!;
 
 /**
+ * Converts an InboundEmailInput to multipart form fields matching SendGrid's format
+ */
+function toMultipart(payload: InboundEmailInput): Record<string, string> {
+  const from = payload.fromName?.trim()
+    ? `${payload.fromName} <${payload.from}>`
+    : (payload.from ?? "");
+  const result: Record<string, string> = {
+    from,
+    subject: payload.subject,
+    text: payload.body,
+  };
+  if (payload.bodyHtml) result.html = payload.bodyHtml;
+  return result;
+}
+
+/**
  * Helper to create a valid inbound email payload
  */
 function createValidPayload(
@@ -30,7 +46,7 @@ test.describe("Webhook: Inbound Email", () => {
       const response = await request.post(
         `${API_BASE_URL}/api/webhooks/inbound-email`,
         {
-          data: payload,
+          multipart: toMultipart(payload),
           failOnStatusCode: false,
         }
       );
@@ -52,7 +68,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": "wrong-secret",
           },
-          data: payload,
+          multipart: toMultipart(payload),
           failOnStatusCode: false,
         }
       );
@@ -71,7 +87,7 @@ test.describe("Webhook: Inbound Email", () => {
       const response = await request.post(
         `${API_BASE_URL}/api/webhooks/inbound-email?secret=wrong-secret`,
         {
-          data: payload,
+          multipart: toMultipart(payload),
           failOnStatusCode: false,
         }
       );
@@ -93,7 +109,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: payload,
+          multipart: toMultipart(payload),
         }
       );
 
@@ -110,7 +126,7 @@ test.describe("Webhook: Inbound Email", () => {
       const response = await request.post(
         `${API_BASE_URL}/api/webhooks/inbound-email?secret=${WEBHOOK_SECRET}`,
         {
-          data: payload,
+          multipart: toMultipart(payload),
         }
       );
 
@@ -132,7 +148,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: payload,
+          multipart: toMultipart(payload),
           failOnStatusCode: false,
         }
       );
@@ -156,7 +172,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: payload,
+          multipart: toMultipart(payload),
           failOnStatusCode: false,
         }
       );
@@ -164,7 +180,7 @@ test.describe("Webhook: Inbound Email", () => {
       expect(response.status()).toBe(400);
     });
 
-    test("should reject request with empty fromName", async ({ request }) => {
+    test("should use email as sender name when from field has no name", async ({ request }) => {
       const payload = createValidPayload({ fromName: "" });
 
       const response = await request.post(
@@ -173,18 +189,16 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: payload,
-          failOnStatusCode: false,
+          multipart: toMultipart(payload),
         }
       );
 
-      expect(response.status()).toBe(400);
+      expect(response.status()).toBe(201);
       const body = await response.json();
-      expect(body).toHaveProperty("error");
-      expect(body.error).toMatch(/sender name is required/i);
+      expect(body.ticket.senderName).toBe(payload.from);
     });
 
-    test("should reject request with whitespace-only fromName", async ({
+    test("should use email as sender name when from field has whitespace-only name", async ({
       request,
     }) => {
       const payload = createValidPayload({ fromName: "   " });
@@ -195,15 +209,13 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: payload,
-          failOnStatusCode: false,
+          multipart: toMultipart(payload),
         }
       );
 
-      expect(response.status()).toBe(400);
+      expect(response.status()).toBe(201);
       const body = await response.json();
-      expect(body).toHaveProperty("error");
-      expect(body.error).toMatch(/sender name is required/i);
+      expect(body.ticket.senderName).toBe(payload.from);
     });
 
     test("should reject request with empty subject", async ({ request }) => {
@@ -215,7 +227,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: payload,
+          multipart: toMultipart(payload),
           failOnStatusCode: false,
         }
       );
@@ -237,7 +249,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: payload,
+          multipart: toMultipart(payload),
           failOnStatusCode: false,
         }
       );
@@ -257,7 +269,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: payload,
+          multipart: toMultipart(payload),
           failOnStatusCode: false,
         }
       );
@@ -280,7 +292,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: payload,
+          multipart: toMultipart(payload),
         }
       );
 
@@ -309,7 +321,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: payload,
+          multipart: toMultipart(payload),
         }
       );
 
@@ -324,7 +336,7 @@ test.describe("Webhook: Inbound Email", () => {
       expect(ticket.body).toBe(payload.body);
       expect(ticket.senderName).toBe(payload.fromName);
       expect(ticket.senderEmail).toBe(payload.from);
-      expect(ticket.status).toBe("open");
+      expect(ticket.status).toBe("new");
       expect(ticket.category).toBeNull();
       expect(ticket.bodyHtml).toBeNull(); // Not provided in payload
 
@@ -353,7 +365,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: payload,
+          multipart: toMultipart(payload),
         }
       );
 
@@ -387,7 +399,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: firstPayload,
+          multipart: toMultipart(firstPayload),
         }
       );
 
@@ -409,7 +421,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: secondPayload,
+          multipart: toMultipart(secondPayload),
         }
       );
 
@@ -444,7 +456,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: firstPayload,
+          multipart: toMultipart(firstPayload),
         }
       );
 
@@ -466,7 +478,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: replyPayload,
+          multipart: toMultipart(replyPayload),
         }
       );
 
@@ -497,7 +509,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: firstPayload,
+          multipart: toMultipart(firstPayload),
         }
       );
 
@@ -519,7 +531,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: forwardPayload,
+          multipart: toMultipart(forwardPayload),
         }
       );
 
@@ -549,7 +561,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: firstPayload,
+          multipart: toMultipart(firstPayload),
         }
       );
 
@@ -569,7 +581,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: replyPayload,
+          multipart: toMultipart(replyPayload),
         }
       );
 
@@ -598,7 +610,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: firstPayload,
+          multipart: toMultipart(firstPayload),
         }
       );
 
@@ -618,7 +630,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: lowercasePayload,
+          multipart: toMultipart(lowercasePayload),
         }
       );
 
@@ -647,7 +659,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: firstPayload,
+          multipart: toMultipart(firstPayload),
         }
       );
 
@@ -668,7 +680,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: secondPayload,
+          multipart: toMultipart(secondPayload),
         }
       );
 
@@ -699,7 +711,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: firstPayload,
+          multipart: toMultipart(firstPayload),
         }
       );
 
@@ -720,7 +732,7 @@ test.describe("Webhook: Inbound Email", () => {
           headers: {
             "x-webhook-secret": WEBHOOK_SECRET,
           },
-          data: secondPayload,
+          multipart: toMultipart(secondPayload),
         }
       );
 

@@ -65,6 +65,15 @@ The client proxies `/api/*` requests to the server via Vite config (target is co
 - To add a new background job: create a queue with `boss.createQueue()`, register a worker with `boss.work()` in `startQueue()`, and export a `send*Job()` function
 - **Existing queues**:
   - `classify-ticket` — classifies inbound tickets via GPT (retryLimit: 3, retryDelay: 30s, exponential backoff)
+  - `auto-resolve-ticket` — attempts to auto-resolve tickets via GPT; if unsuccessful, transitions status to `open`
+
+## Ticket Lifecycle
+
+- Inbound emails arrive via the `/api/webhooks/inbound-email` endpoint (SendGrid multipart format) and are created with status `new`
+- The system enqueues `classify-ticket` and `auto-resolve-ticket` background jobs automatically
+- Status flow: `new` → `processing` (AI working) → `open` (if not auto-resolved) or `resolved` (if auto-resolved)
+- `new` and `processing` tickets are system-managed and never shown in the agent UI — agents only see `open`, `resolved`, and `closed` tickets
+- The `/api/tickets` endpoint excludes `new` and `processing` tickets by default (no `status` filter param)
 
 ## Authentication
 

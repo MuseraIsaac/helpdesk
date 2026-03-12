@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIRequestContext } from "@playwright/test";
 import { loginAsAdmin } from "../fixtures/auth";
 import type { InboundEmailInput } from "core/schemas/tickets.ts";
 
@@ -9,14 +9,22 @@ const API_BASE_URL = process.env.BETTER_AUTH_URL!;
  * Creates a ticket via the inbound email webhook and returns the ticket object.
  */
 async function createTicketViaWebhook(
-  request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+  request: APIRequestContext,
   payload: InboundEmailInput
 ) {
+  const from = payload.fromName?.trim()
+    ? `${payload.fromName} <${payload.from}>`
+    : payload.from;
   const response = await request.post(
     `${API_BASE_URL}/api/webhooks/inbound-email`,
     {
       headers: { "x-webhook-secret": WEBHOOK_SECRET },
-      data: payload,
+      multipart: {
+        from,
+        subject: payload.subject,
+        text: payload.body,
+        ...(payload.bodyHtml ? { html: payload.bodyHtml } : {}),
+      },
     }
   );
   expect(response.status()).toBe(201);
@@ -76,6 +84,9 @@ test.describe("Ticket Detail Page", () => {
     );
 
     await loginAsAdmin(page);
+    await page.request.patch(`${API_BASE_URL}/api/tickets/${ticket.id}`, {
+      data: { status: "open" },
+    });
     await page.goto(`/tickets/${ticket.id}`);
 
     // Update status
@@ -107,10 +118,7 @@ test.describe("Ticket Detail Page", () => {
         resp.request().method() === "PATCH" &&
         resp.status() === 200
     );
-    await page
-      .getByRole("combobox")
-      .filter({ hasText: "Unassigned" })
-      .click();
+    await page.getByRole("combobox").nth(2).click();
     await page.getByRole("option", { name: /^Admin$/ }).click();
     await assignPatch;
 
@@ -170,6 +178,9 @@ test.describe("Ticket Detail Page", () => {
     const ticket = await createTicketViaWebhook(request, payload);
 
     await loginAsAdmin(page);
+    await page.request.patch(`${API_BASE_URL}/api/tickets/${ticket.id}`, {
+      data: { status: "open" },
+    });
 
     // Navigate from list to detail
     await page.goto("/tickets");

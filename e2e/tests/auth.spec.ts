@@ -16,8 +16,8 @@ test.describe("Authentication", () => {
 
     test("should display login form with all elements", async ({ page }) => {
       // Check page title and description
-      await expect(page.getByText("Helpdesk")).toBeVisible();
-      await expect(page.getByText(/sign in to your account/i)).toBeVisible();
+      await expect(page.getByText("Welcome back")).toBeVisible();
+      await expect(page.getByText(/sign in to your helpdesk account/i)).toBeVisible();
 
       // Check form fields
       await expect(page.getByLabel("Email")).toBeVisible();
@@ -129,18 +129,27 @@ test.describe("Authentication", () => {
     });
 
     test("should show loading state during login", async ({ page }) => {
+      // Delay the auth response so we can observe the loading state
+      let resolveDelay!: () => void;
+      const delay = new Promise<void>((resolve) => {
+        resolveDelay = resolve;
+      });
+
+      await page.route("**/api/auth/sign-in/email", async (route) => {
+        await delay;
+        await route.continue();
+      });
+
       await page.getByLabel("Email").fill(TEST_USERS.admin.email);
       await page.getByLabel("Password").fill(TEST_USERS.admin.password);
-
-      // Start login
-      const loginPromise = page
-        .getByRole("button", { name: /sign in/i })
-        .click();
+      await page.getByRole("button", { name: /sign in/i }).click();
 
       // Check loading state appears (button disabled with loading text)
       await expect(page.getByText(/signing in.../i)).toBeVisible();
 
-      await loginPromise;
+      // Allow the request to complete
+      resolveDelay();
+      await page.unrouteAll({ behavior: "ignoreErrors" });
     });
 
     test("should redirect to home if already authenticated", async ({

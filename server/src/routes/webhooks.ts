@@ -48,7 +48,7 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
   const existingTicket = await prisma.ticket.findFirst({
     where: {
       senderEmail: data.from,
-      status: "open",
+      status: { notIn: ["resolved", "closed"] },
       subject: { equals: normalizedSubject, mode: "insensitive" },
     },
   });

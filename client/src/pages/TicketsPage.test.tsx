@@ -107,15 +107,15 @@ describe("TicketsPage", () => {
     expect(screen.getByText("Closed")).toBeInTheDocument();
   });
 
-  it("should display category with underscores replaced by spaces", async () => {
+  it("should display category using category labels", async () => {
     mockedAxios.get.mockResolvedValue(mockResponse());
     renderWithQuery(<TicketsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("technical question")).toBeInTheDocument();
+      expect(screen.getByText("Technical")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("refund request")).toBeInTheDocument();
+    expect(screen.getByText("Refund")).toBeInTheDocument();
   });
 
   it("should show dash for null category", async () => {
