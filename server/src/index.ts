@@ -14,15 +14,33 @@ import webhooksRouter from "./routes/webhooks";
 import repliesRouter from "./routes/replies";
 import { startQueue, stopQueue } from "./lib/queue";
 
-
 if (!process.env.BETTER_AUTH_SECRET) {
   throw new Error("BETTER_AUTH_SECRET environment variable is required");
 }
 
 const app = express();
 const port = process.env.PORT || 3000;
+const isProduction = process.env.NODE_ENV === "production";
 
-app.use(helmet());
+const publicAppUrl =
+  process.env.BETTER_AUTH_URL ||
+  process.env.BETTER_AUTH_BASE_URL ||
+  process.env.APP_URL ||
+  "";
+
+const isHttps = publicAppUrl.startsWith("https://");
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        "upgrade-insecure-requests": isHttps ? [] : null,
+        "script-src": ["'self'", "'unsafe-inline'"],
+      },
+    },
+  })
+);
+
 app.use(
   cors({
     origin: process.env.TRUSTED_ORIGINS?.split(",") ?? [],
@@ -30,10 +48,8 @@ app.use(
   })
 );
 
-const isProduction = process.env.NODE_ENV === "production";
-
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   limit: 20,
   standardHeaders: "draft-8",
   legacyHeaders: false,
