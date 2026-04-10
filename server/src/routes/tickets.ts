@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/require-auth";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
-import { ticketListQuerySchema, updateTicketSchema } from "core/schemas/tickets.ts";
+import { ticketListQuerySchema, updateTicketSchema, createTicketSchema } from "core/schemas/tickets.ts";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
@@ -58,6 +58,36 @@ router.get("/stats/daily-volume", requireAuth, async (_req, res) => {
   }
 
   res.json({ data });
+});
+
+router.post("/", requireAuth, async (req, res) => {
+  const data = validate(createTicketSchema, req.body, res);
+  if (!data) return;
+
+  if (data.assignedToId) {
+    const user = await prisma.user.findUnique({
+      where: { id: data.assignedToId, deletedAt: null },
+    });
+    if (!user) {
+      res.status(400).json({ error: "Invalid agent" });
+      return;
+    }
+  }
+
+  const ticket = await prisma.ticket.create({
+    data: {
+      subject: data.subject,
+      body: data.body,
+      senderName: data.senderName,
+      senderEmail: data.senderEmail,
+      category: data.category ?? null,
+      assignedToId: data.assignedToId ?? null,
+      status: "open",
+    },
+    include: { assignedTo: { select: { id: true, name: true } } },
+  });
+
+  res.status(201).json(ticket);
 });
 
 router.get("/", requireAuth, async (req, res) => {

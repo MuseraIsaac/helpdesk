@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun run:*)",
+      "Read(//c/Users/IMusera/.bun/**)",
+      "Read(//c/Users/IMusera/**)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(bun x:*)",
+      "Bash(bun install:*)",
+      "Bash(openssl rand:*)"
+    ]
+  }
+}

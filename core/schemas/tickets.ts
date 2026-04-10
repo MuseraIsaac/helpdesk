@@ -28,6 +28,17 @@ export const updateTicketSchema = z.object({
   category: z.enum(ticketCategories).nullable().optional(),
 });
 
+export const createTicketSchema = z.object({
+  subject: z.string().trim().min(1, "Subject is required").max(255, "Subject is too long"),
+  body: z.string().trim().min(1, "Description is required").max(5000, "Description is too long"),
+  senderName: z.string().trim().min(1, "Sender name is required").max(255, "Sender name is too long"),
+  senderEmail: z.email("Invalid email address"),
+  category: z.enum(ticketCategories).nullable().optional(),
+  assignedToId: z.string().nullable().optional(),
+});
+
+export type CreateTicketInput = z.infer<typeof createTicketSchema>;
+
 export const ticketListQuerySchema = z.object({
   sortBy: z.enum(sortableColumns).default("createdAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
