@@ -6,6 +6,8 @@ import { type TicketImpact } from "./ticket-impact";
 import { type TicketUrgency } from "./ticket-urgency";
 import { type SlaStatus } from "./sla-status";
 import { type EscalationReason } from "./escalation-reason";
+import { type AuditEvent } from "./audit-event";
+import { type CustomerSummary } from "./customer";
 
 export interface EscalationEvent {
   id: number;
@@ -47,4 +49,8 @@ export interface Ticket {
   escalationReason: EscalationReason | null;
   /** Full event log — present only in GET /api/tickets/:id responses */
   escalationEvents?: EscalationEvent[];
+  /** Append-only audit trail — present only in GET /api/tickets/:id responses */
+  auditEvents?: AuditEvent[];
+  /** Customer entity with org + prior ticket history — present only in GET /api/tickets/:id responses */
+  customer?: CustomerSummary | null;
 }

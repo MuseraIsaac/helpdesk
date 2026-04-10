@@ -12,7 +12,8 @@
       "Bash(echo \"Client started with PID $!\")",
       "Read(//tmp/**)",
       "Bash(netstat -ano)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(bunx prisma:*)"
     ]
   }
 }

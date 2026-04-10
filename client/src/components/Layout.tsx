@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Ticket,
   Users,
+  BookOpen,
   LogOut,
   Sun,
   Moon,
@@ -54,10 +55,16 @@ export default function Layout() {
             Tickets
           </NavLink>
           {session?.user?.role === Role.admin && (
-            <NavLink to="/users" className={navLinkClass}>
-              <Users className="h-3.5 w-3.5" />
-              Users
-            </NavLink>
+            <>
+              <NavLink to="/users" className={navLinkClass}>
+                <Users className="h-3.5 w-3.5" />
+                Users
+              </NavLink>
+              <NavLink to="/macros" className={navLinkClass}>
+                <BookOpen className="h-3.5 w-3.5" />
+                Macros
+              </NavLink>
+            </>
           )}
         </div>
         <div className="flex items-center gap-1">

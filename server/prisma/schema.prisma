@@ -69,6 +69,7 @@ enum EscalationReason {
   urgent_priority
   sev1_severity
   manual
+  rule_triggered
 }
 
 model User {
@@ -86,6 +87,8 @@ model User {
   assignedTickets Ticket[]
   replies         Reply[]
   notes           Note[]
+  auditEvents     AuditEvent[]
+  macros          Macro[]
 
   @@map("user")
 }
@@ -123,6 +126,32 @@ model Account {
   @@map("account")
 }
 
+model Organization {
+  id        Int        @id @default(autoincrement())
+  name      String
+  domain    String?    @unique
+  notes     String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  customers Customer[]
+
+  @@map("organization")
+}
+
+model Customer {
+  id             Int           @id @default(autoincrement())
+  email          String        @unique
+  name           String
+  organizationId Int?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  tickets        Ticket[]
+
+  @@map("customer")
+}
+
 model Ticket {
   id           Int             @id @default(autoincrement())
   subject      String
@@ -136,6 +165,10 @@ model Ticket {
   urgency      TicketUrgency?
   senderName   String
   senderEmail  String
+  // Customer entity — resolved from senderEmail at ticket-creation time.
+  // Kept nullable so that legacy tickets (pre-migration) are not broken.
+  customerId   Int?
+  customer     Customer?       @relation(fields: [customerId], references: [id])
   assignedToId String?
   assignedTo   User?           @relation(fields: [assignedToId], references: [id])
   createdAt    DateTime        @default(now())
@@ -163,6 +196,7 @@ model Ticket {
   escalationEvents    EscalationEvent[]
 
   notes               Note[]
+  auditEvents         AuditEvent[]
 
   @@map("ticket")
 }
@@ -205,6 +239,55 @@ model Note {
   updatedAt        DateTime @updatedAt
 
   @@map("note")
+}
+
+/**
+ * AuditEvent — append-only record of every significant action on a ticket.
+ *
+ * Design principles:
+ *  - action is a dot-namespaced string constant ("ticket.created", "reply.created", etc.)
+ *    — easy to filter, index, and extend without schema changes.
+ *  - actorId null means the action was performed by the system / background job.
+ *  - meta is a free-form JSON object. Convention: include "from"/"to" for field
+ *    changes, "reason" for escalations, "id" for related record references.
+ *    Never store secrets, passwords, or auth tokens in meta.
+ *  - Cascades on ticket delete so audit history is removed with the ticket.
+ */
+/**
+ * Macro — a saved reply template with optional variable placeholders.
+ *
+ * Supported placeholders (resolved client-side at insertion time):
+ *   {{customer_name}}   first name of the ticket sender
+ *   {{customer_email}}  sender email address
+ *   {{ticket_id}}       numeric ticket ID
+ *   {{agent_name}}      name of the currently logged-in agent
+ */
+model Macro {
+  id          Int             @id @default(autoincrement())
+  title       String
+  body        String
+  category    TicketCategory?
+  isActive    Boolean         @default(true)
+  createdById String
+  createdBy   User            @relation(fields: [createdById], references: [id])
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@map("macro")
+}
+
+model AuditEvent {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  action    String
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+  @@map("audit_event")
 }
 
 model Verification {

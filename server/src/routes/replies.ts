@@ -7,6 +7,7 @@ import { openai } from "@ai-sdk/openai";
 import { createReplySchema, polishReplySchema } from "core/schemas/replies.ts";
 import prisma from "../db";
 import { sendEmailJob } from "../lib/send-email";
+import { logAudit } from "../lib/audit";
 
 const router = Router({ mergeParams: true });
 
@@ -72,6 +73,11 @@ router.post("/", requireAuth, async (req, res) => {
       },
     });
   }
+
+  await logAudit(ticketId, req.user.id, "reply.created", {
+    replyId: reply.id,
+    senderType: "agent",
+  });
 
   await sendEmailJob({
     to: ticket.senderEmail,

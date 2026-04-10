@@ -5,6 +5,7 @@ import { parseId } from "../lib/parse-id";
 import { createNoteSchema, updateNoteSchema } from "core/schemas/notes.ts";
 import { Role } from "core/constants/role.ts";
 import prisma from "../db";
+import { logAudit } from "../lib/audit";
 
 const router = Router({ mergeParams: true });
 
@@ -66,6 +67,8 @@ router.post("/", requireAuth, async (req, res) => {
       author: { select: { id: true, name: true } },
     },
   });
+
+  await logAudit(ticketId, req.user.id, "note.created", { noteId: note.id });
 
   // Future: fire mention notifications to data.mentionedUserIds via ACTIVE_CHANNELS
 

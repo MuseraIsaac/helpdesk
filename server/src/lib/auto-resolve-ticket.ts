@@ -6,6 +6,7 @@ import { openai } from "@ai-sdk/openai";
 import Sentry from "./sentry";
 import prisma from "../db";
 import { sendEmailJob } from "./send-email";
+import { logAudit } from "./audit";
 
 const QUEUE_NAME = "auto-resolve-ticket";
 
@@ -91,7 +92,7 @@ export async function registerAutoResolveWorker(boss: PgBoss): Promise<void> {
         const breachedResolution =
           currentTicket?.resolutionDueAt != null && now > currentTicket.resolutionDueAt;
 
-        await prisma.$transaction([
+        const [aiReply] = await prisma.$transaction([
           prisma.reply.create({
             data: {
               body: response,
@@ -111,6 +112,17 @@ export async function registerAutoResolveWorker(boss: PgBoss): Promise<void> {
             },
           }),
         ]);
+
+        void logAudit(ticketId, null, "reply.created", {
+          replyId: aiReply.id,
+          senderType: "agent",
+          automated: true,
+        });
+        void logAudit(ticketId, null, "ticket.status_changed", {
+          from: "processing",
+          to: "resolved",
+          automated: true,
+        });
 
         await sendEmailJob({
           to: senderEmail,

@@ -9,6 +9,8 @@ import { sendClassifyJob } from "../lib/classify-ticket";
 import { sendAutoResolveJob } from "../lib/auto-resolve-ticket";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 import { computeSlaDeadlines } from "../lib/sla";
+import { logAudit } from "../lib/audit";
+import { upsertCustomer } from "../lib/upsert-customer";
 
 const upload = multer();
 
@@ -73,6 +75,7 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
   // at which point the PATCH handler will recalculate deadlines.
   const now = new Date();
   const slaDeadlines = computeSlaDeadlines(null, now);
+  const customerId = await upsertCustomer(data.from, data.fromName);
 
   const ticket = await prisma.ticket.create({
     data: {
@@ -81,6 +84,7 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
       bodyHtml: data.bodyHtml ?? null,
       senderName: data.fromName,
       senderEmail: data.from,
+      customerId,
       assignedToId: AI_AGENT_ID,
       firstResponseDueAt: slaDeadlines.firstResponseDueAt,
       resolutionDueAt: slaDeadlines.resolutionDueAt,
@@ -88,6 +92,8 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
   });
 
   res.status(201).json({ ticket });
+
+  void logAudit(ticket.id, null, "ticket.created", { via: "email" });
 
   sendClassifyJob(ticket).catch((error) =>
     console.error(`Failed to enqueue classify job for ticket ${ticket.id}:`, error)

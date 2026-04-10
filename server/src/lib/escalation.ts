@@ -18,6 +18,7 @@
 import type { EscalationReason } from "../generated/prisma/client";
 import prisma from "../db";
 import Sentry from "./sentry";
+import { logAudit } from "./audit";
 
 // ─── Notification channel interface ────────────────────────────────────────
 // Phase 2: implement EmailChannel, SlackChannel, PagerDutyChannel, etc.
@@ -35,12 +36,14 @@ const ACTIVE_CHANNELS: EscalationChannel[] = [];
 /**
  * Escalate a ticket for a given reason.
  *
+ * @param actorId  The user who triggered escalation; null for system/automated escalations.
  * @returns true if a new escalation event was created; false if already
  *          escalated for this exact reason (idempotent guard).
  */
 export async function escalateTicket(
   ticketId: number,
-  reason: EscalationReason
+  reason: EscalationReason,
+  actorId: string | null = null
 ): Promise<boolean> {
   // Idempotency check — one event per (ticket, reason)
   const existing = await prisma.escalationEvent.findFirst({
@@ -68,6 +71,8 @@ export async function escalateTicket(
       },
     }),
   ]);
+
+  void logAudit(ticketId, actorId, "ticket.escalated", { reason });
 
   // Fire-and-forget notification channels (errors are logged, not thrown)
   for (const channel of ACTIVE_CHANNELS) {

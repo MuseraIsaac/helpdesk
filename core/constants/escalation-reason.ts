@@ -4,6 +4,7 @@ export const escalationReasons = [
   "urgent_priority",
   "sev1_severity",
   "manual",
+  "rule_triggered",
 ] as const;
 
 export type EscalationReason = (typeof escalationReasons)[number];
@@ -14,4 +15,5 @@ export const escalationReasonLabel: Record<EscalationReason, string> = {
   urgent_priority: "Urgent Priority",
   sev1_severity: "Sev 1 Severity",
   manual: "Manually Escalated",
+  rule_triggered: "Automation Rule",
 };

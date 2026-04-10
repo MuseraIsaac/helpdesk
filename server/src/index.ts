@@ -13,6 +13,8 @@ import agentsRouter from "./routes/agents";
 import webhooksRouter from "./routes/webhooks";
 import repliesRouter from "./routes/replies";
 import notesRouter from "./routes/notes";
+import macrosRouter from "./routes/macros";
+import customersRouter from "./routes/customers";
 import { startQueue, stopQueue } from "./lib/queue";
 
 if (!process.env.BETTER_AUTH_SECRET) {
@@ -81,6 +83,8 @@ app.use("/api/tickets", ticketsRouter);
 app.use("/api/agents", agentsRouter);
 app.use("/api/tickets/:ticketId/replies", repliesRouter);
 app.use("/api/tickets/:ticketId/notes", notesRouter);
+app.use("/api/macros", macrosRouter);
+app.use("/api/customers", customersRouter);
 app.use("/api/webhooks", webhooksRouter);
 
 Sentry.setupExpressErrorHandler(app);

@@ -5,6 +5,7 @@ import Layout from "./components/Layout";
 import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
 import UsersPage from "./pages/UsersPage";
+import MacrosPage from "./pages/MacrosPage";
 import TicketsPage from "./pages/TicketsPage";
 import TicketDetailPage from "./pages/TicketDetailPage";
 
@@ -19,6 +20,7 @@ function App() {
           <Route path="/tickets/:id" element={<TicketDetailPage />} />
           <Route element={<AdminRoute />}>
             <Route path="/users" element={<UsersPage />} />
+            <Route path="/macros" element={<MacrosPage />} />
           </Route>
         </Route>
       </Route>

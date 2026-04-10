@@ -6,32 +6,95 @@ An AI-powered ticket management system that automatically classifies, responds t
 
 ## Features
 
-- Receive support emails and create tickets via SendGrid inbound parse
-- AI-powered ticket classification (General Question, Technical Question, Refund Request)
-- AI-suggested replies and summaries
-- Ticket list with filtering and sorting
-- Ticket detail view with reply thread
-- User management (admin only)
-- Dashboard with stats
+### Ticket Management
+- Receive support emails via SendGrid inbound parse and create tickets automatically
+- Create tickets manually from the agent UI
+- Full CRUD: list, filter, sort, paginate, search, update
+- Ticket statuses: `new` → `processing` → `open` → `resolved` → `closed`
+- Triage fields: category, priority (low/medium/high/urgent), severity (sev1–sev4), impact, urgency
+- Assign tickets to agents
+
+### AI Features
+- Auto-classification of inbound tickets (category) via OpenAI
+- AI auto-resolution: generates a reply, sends it, marks ticket resolved if confident
+- AI reply polish — refines an agent's draft before sending
+- AI ticket summary card on the ticket detail page
+
+### SLA Tracking
+- Per-priority SLA deadlines (first response + resolution)
+- Background breach detection (pg-boss job every 5 minutes)
+- At-risk view (deadline within 2 hours) and overdue view
+- SLA status badge on every ticket; deadlines recalculated if priority changes
+
+### Escalation
+- Auto-escalation on urgent priority or sev1 severity
+- Manual escalation and de-escalation by agents
+- Full escalation event history per ticket
+- Escalation badge visible in ticket list subject column
+
+### Internal Collaboration
+- Internal notes on tickets — never sent to the customer
+- Notes are visible to agents and admins only, clearly distinguished from replies
+- Pin important notes to float them to the top
+- @mention-ready data structure for future notification routing
+- Unified conversation timeline combining customer messages, agent replies, and internal notes
+
+### Audit Trail
+- Append-only audit log for every significant ticket action
+- Tracked events: ticket created, status changed, priority/severity/category changed, agent assigned, SLA breached, escalated, de-escalated, reply sent, internal note added, automation rule applied
+- Records actor, action, timestamp, and before/after values
+- Collapsible activity timeline on the ticket detail page (collapsed by default)
+
+### Business Automation Rules
+- Code-defined rule engine triggered on ticket create, update, and a scheduled time-based check
+- Supported conditions: keyword match, category, priority, sender email domain, unassigned duration
+- Supported actions: set category, set priority, assign to agent, escalate
+- Built-in rules: keyword → category/priority, unassigned urgent tickets → escalate after 15 min
+- All rule executions are recorded in the audit trail
+- Loop-safe: each rule fires at most once per trigger invocation
+
+### Macros (Canned Responses)
+- Admin-managed saved reply templates with title, body, optional category, and active/inactive status
+- Agents insert macros into the reply composer via a searchable picker dialog
+- Variable placeholders resolved at insertion time: `{{customer_name}}`, `{{customer_email}}`, `{{ticket_id}}`, `{{agent_name}}`
+- Template remains editable before sending
+- Admin UI at `/macros`
+
+### Customer / Requester Model
+- Customer entity automatically created from ticket sender email on first contact
+- Organization entity for grouping customers by company (with optional domain for future auto-linking)
+- Customer history panel in the ticket detail sidebar: name, email, organization, and prior tickets
+- `GET /api/customers/:id` endpoint for full customer profile with ticket history
+- Backfill script to link existing tickets to customer records
+
+### User Management
+- Admin-only user management page (`/users`)
+- Create, edit (name/role), and soft-delete agents
+- Role-based access: `admin` (full access) and `agent` (tickets only)
+
+### Dashboard
+- Live stats: total tickets, open tickets, AI resolution rate, average resolution time
+- 30-day daily ticket volume chart
+- Quick-filter cards for overdue, at-risk, and unassigned-urgent tickets
 
 ## Tech Stack
 
-- **Frontend**: React, TypeScript, Vite, shadcn/ui, TanStack Query
+- **Frontend**: React, TypeScript, Vite, shadcn/ui, TanStack Query, React Hook Form, Zod
 - **Backend**: Express 5, TypeScript, Bun
 - **Database**: PostgreSQL, Prisma ORM
-- **AI**: OpenAI GPT via Vercel AI SDK
+- **AI**: OpenAI GPT-4o mini via Vercel AI SDK (`@ai-sdk/openai`)
 - **Auth**: Better Auth (email/password, database sessions)
-- **Job Queue**: pg-boss
+- **Job Queue**: pg-boss (PostgreSQL-backed)
 - **Error Tracking**: Sentry
-- **Email**: SendGrid (inbound + outbound)
+- **Email**: SendGrid (inbound parse + outbound replies)
 
 ## Project Structure
 
 ```
-client/   - React frontend (Vite)
-server/   - Express backend
-core/     - Shared code (Zod schemas, types, constants)
-e2e/      - Playwright E2E tests
+client/   — React frontend (Vite, port 5173)
+server/   — Express backend (Bun, port 3000)
+core/     — Shared code: Zod schemas, TypeScript types, constants
+e2e/      — Playwright end-to-end tests
 ```
 
 ## Prerequisites
@@ -55,9 +118,9 @@ e2e/      - Playwright E2E tests
    ```
 
    Edit `server/.env` and fill in the required values. At minimum:
-   - `DATABASE_URL` - PostgreSQL connection string
-   - `BETTER_AUTH_SECRET` - generate with `openssl rand -base64 32`
-   - `OPENAI_API_KEY` - for AI features
+   - `DATABASE_URL` — PostgreSQL connection string
+   - `BETTER_AUTH_SECRET` — generate with `openssl rand -base64 32`
+   - `OPENAI_API_KEY` — for AI features
 
 3. **Set up the database**
 
@@ -67,13 +130,19 @@ e2e/      - Playwright E2E tests
    bunx prisma db seed
    ```
 
-4. **Start the dev servers**
+4. **Backfill customer records** (only needed if upgrading an existing database)
 
    ```bash
-   # Terminal 1 - backend
+   bun run prisma/backfill-customers.ts
+   ```
+
+5. **Start the dev servers**
+
+   ```bash
+   # Terminal 1 — backend
    cd server && bun run dev
 
-   # Terminal 2 - frontend
+   # Terminal 2 — frontend
    cd client && bun run dev
    ```
 
@@ -82,10 +151,10 @@ e2e/      - Playwright E2E tests
 ## Testing
 
 ```bash
-# Component tests
+# Component tests (Vitest + React Testing Library)
 cd client && bun run test
 
-# E2E tests (requires both servers running)
+# E2E tests (Playwright — requires both servers running)
 bun run test:e2e
 ```
 

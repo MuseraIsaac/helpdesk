@@ -12,14 +12,17 @@ import ConversationTimeline from "@/components/ConversationTimeline";
 import ReplyForm from "@/components/ReplyForm";
 import NoteForm from "@/components/NoteForm";
 import TicketSummary from "@/components/TicketSummary";
+import AuditTimeline from "@/components/AuditTimeline";
+import CustomerHistory from "@/components/CustomerHistory";
 import { Button } from "@/components/ui/button";
-import { MessageSquare, Lock } from "lucide-react";
+import { MessageSquare, Lock, ChevronDown, ChevronRight } from "lucide-react";
 
 type ComposeMode = "reply" | "note";
 
 export default function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [composeMode, setComposeMode] = useState<ComposeMode>("reply");
+  const [activityOpen, setActivityOpen] = useState(false);
 
   const { data: ticket, isLoading, error } = useQuery({
     queryKey: ["ticket", id],
@@ -57,6 +60,32 @@ export default function TicketDetailPage() {
               <h2 className="font-semibold">Conversation</h2>
               <ConversationTimeline ticket={ticket} />
             </div>
+
+            {/* Audit trail — collapsible, collapsed by default */}
+            {ticket.auditEvents && ticket.auditEvents.length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setActivityOpen((o) => !o)}
+                  className="flex items-center gap-1.5 text-sm font-semibold hover:text-foreground/70 transition-colors"
+                >
+                  {activityOpen ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
+                  Activity
+                  <span className="text-xs font-normal text-muted-foreground">
+                    ({ticket.auditEvents.length})
+                  </span>
+                </button>
+                {activityOpen && (
+                  <div className="mt-3">
+                    <AuditTimeline events={ticket.auditEvents} />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Compose area with Reply / Internal Note toggle */}
             <div className="space-y-3 pb-16">
@@ -96,7 +125,12 @@ export default function TicketDetailPage() {
             </div>
           </div>
 
-          <UpdateTicket ticket={ticket} />
+          <div className="space-y-4">
+            <UpdateTicket ticket={ticket} />
+            {ticket.customer && (
+              <CustomerHistory customer={ticket.customer} currentTicketId={ticket.id} />
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -8,6 +8,9 @@ import type { Prisma } from "../generated/prisma/client";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 import { computeSlaDeadlines, withSlaInfo } from "../lib/sla";
 import { checkAndEscalate, deescalateTicket, escalateTicket } from "../lib/escalation";
+import { logAudit } from "../lib/audit";
+import { runRules } from "../lib/automation";
+import { upsertCustomer } from "../lib/upsert-customer";
 
 interface TicketStatsRow {
   totalTickets: bigint;
@@ -104,6 +107,7 @@ router.post("/", requireAuth, async (req, res) => {
 
   const now = new Date();
   const slaDeadlines = computeSlaDeadlines(data.priority ?? null, now);
+  const customerId = await upsertCustomer(data.senderEmail, data.senderName);
 
   const ticket = await prisma.ticket.create({
     data: {
@@ -111,6 +115,7 @@ router.post("/", requireAuth, async (req, res) => {
       body: data.body,
       senderName: data.senderName,
       senderEmail: data.senderEmail,
+      customerId,
       category: data.category ?? null,
       priority: data.priority ?? null,
       severity: data.severity ?? null,
@@ -127,10 +132,32 @@ router.post("/", requireAuth, async (req, res) => {
     },
   });
 
-  // Auto-escalate immediately if urgent or sev1
-  await checkAndEscalate(ticket);
+  await logAudit(ticket.id, req.user.id, "ticket.created", { via: "agent" });
 
-  // Re-fetch to get updated escalation state if it changed
+  // Run automation rules — may modify category, priority, or assignee
+  await runRules(
+    {
+      id: ticket.id,
+      subject: ticket.subject,
+      body: ticket.body,
+      status: ticket.status,
+      category: ticket.category,
+      priority: ticket.priority,
+      severity: ticket.severity,
+      senderEmail: ticket.senderEmail,
+      assignedToId: ticket.assignedToId,
+      createdAt: ticket.createdAt,
+    },
+    { trigger: "ticket.created" }
+  );
+
+  // Re-fetch to pick up any rule-applied field changes before running escalation checks
+  const afterRules = await prisma.ticket.findUnique({ where: { id: ticket.id } });
+
+  // Auto-escalate if urgent or sev1 (now sees rule-applied priority)
+  await checkAndEscalate(afterRules!);
+
+  // Final re-fetch with full includes
   const fresh = await prisma.ticket.findUnique({
     where: { id: ticket.id },
     include: {
@@ -236,6 +263,27 @@ router.get("/:id", requireAuth, async (req, res) => {
     include: {
       assignedTo: { select: { id: true, name: true } },
       escalationEvents: { orderBy: { createdAt: "asc" } },
+      auditEvents: {
+        orderBy: { createdAt: "asc" },
+        include: { actor: { select: { id: true, name: true } } },
+      },
+      customer: {
+        include: {
+          organization: { select: { id: true, name: true, domain: true } },
+          tickets: {
+            where: { id: { not: id } },
+            orderBy: { createdAt: "desc" },
+            take: 5,
+            select: {
+              id: true,
+              subject: true,
+              status: true,
+              priority: true,
+              createdAt: true,
+            },
+          },
+        },
+      },
     },
   });
 
@@ -269,7 +317,10 @@ router.patch("/:id", requireAuth, async (req, res) => {
     }
   }
 
-  const ticket = await prisma.ticket.findUnique({ where: { id } });
+  const ticket = await prisma.ticket.findUnique({
+    where: { id },
+    include: { assignedTo: { select: { id: true, name: true } } },
+  });
   if (!ticket) {
     res.status(404).json({ error: "Ticket not found" });
     return;
@@ -321,13 +372,81 @@ router.patch("/:id", requireAuth, async (req, res) => {
 
   // Post-update: run auto-escalation checks based on new state
   if (data.escalate === true) {
-    await escalateTicket(id, "manual");
+    await escalateTicket(id, "manual", req.user.id);
   } else if (data.escalate !== false) {
     // Check auto-conditions (priority/severity changes may trigger escalation)
     await checkAndEscalate(updated);
   }
+  if (data.escalate === false) {
+    await logAudit(id, req.user.id, "ticket.deescalated");
+  }
 
-  // Re-fetch to get fresh escalation state
+  // Collect and fire all field-change audit events
+  const auditLogs: Promise<void>[] = [];
+  if ("status" in data && data.status !== ticket.status) {
+    auditLogs.push(
+      logAudit(id, req.user.id, "ticket.status_changed", {
+        from: ticket.status,
+        to: data.status,
+      })
+    );
+  }
+  if ("priority" in data && data.priority !== ticket.priority) {
+    auditLogs.push(
+      logAudit(id, req.user.id, "ticket.priority_changed", {
+        from: ticket.priority ?? null,
+        to: data.priority ?? null,
+      })
+    );
+  }
+  if ("severity" in data && data.severity !== ticket.severity) {
+    auditLogs.push(
+      logAudit(id, req.user.id, "ticket.severity_changed", {
+        from: ticket.severity ?? null,
+        to: data.severity ?? null,
+      })
+    );
+  }
+  if ("category" in data && data.category !== ticket.category) {
+    auditLogs.push(
+      logAudit(id, req.user.id, "ticket.category_changed", {
+        from: ticket.category ?? null,
+        to: data.category ?? null,
+      })
+    );
+  }
+  if ("assignedToId" in data && data.assignedToId !== ticket.assignedToId) {
+    auditLogs.push(
+      logAudit(id, req.user.id, "ticket.assigned", {
+        from: ticket.assignedTo
+          ? { id: ticket.assignedTo.id, name: ticket.assignedTo.name }
+          : null,
+        to: updated.assignedTo
+          ? { id: updated.assignedTo.id, name: updated.assignedTo.name }
+          : null,
+      })
+    );
+  }
+  await Promise.all(auditLogs);
+
+  // Run automation rules against the post-update ticket state
+  await runRules(
+    {
+      id: updated.id,
+      subject: updated.subject,
+      body: updated.body,
+      status: updated.status,
+      category: updated.category,
+      priority: updated.priority,
+      severity: updated.severity,
+      senderEmail: updated.senderEmail,
+      assignedToId: updated.assignedToId,
+      createdAt: updated.createdAt,
+    },
+    { trigger: "ticket.updated" }
+  );
+
+  // Re-fetch to get fresh escalation + rule-applied state
   const fresh = await prisma.ticket.findUnique({
     where: { id },
     include: {

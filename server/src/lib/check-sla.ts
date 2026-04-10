@@ -10,6 +10,7 @@ import type { PgBoss } from "pg-boss";
 import prisma from "../db";
 import Sentry from "./sentry";
 import { escalateBreachedTickets } from "./escalation";
+import { logAudit } from "./audit";
 
 const QUEUE_NAME = "check-sla";
 const CRON_SCHEDULE = "*/5 * * * *";
@@ -20,8 +21,10 @@ export async function registerSlaCheckerWorker(boss: PgBoss): Promise<void> {
   await boss.work(QUEUE_NAME, async () => {
     const now = new Date();
     try {
-      // Step 1: stamp slaBreached on newly overdue tickets
-      const { count } = await prisma.ticket.updateMany({
+      // Step 1: find tickets about to be marked breached, then stamp + audit each one.
+      // Using find-then-update (instead of a bare updateMany) so we can emit one
+      // audit event per ticket per breach type without a second query after the bulk update.
+      const breachingTickets = await prisma.ticket.findMany({
         where: {
           slaBreached: false,
           status: { notIn: ["resolved", "closed"] },
@@ -30,11 +33,32 @@ export async function registerSlaCheckerWorker(boss: PgBoss): Promise<void> {
             { resolutionDueAt: { lt: now }, resolvedAt: null },
           ],
         },
-        data: { slaBreached: true },
+        select: {
+          id: true,
+          firstResponseDueAt: true,
+          firstRespondedAt: true,
+          resolutionDueAt: true,
+          resolvedAt: true,
+        },
       });
 
-      if (count > 0) {
-        console.log(`[check-sla] Marked ${count} ticket(s) as SLA breached`);
+      if (breachingTickets.length > 0) {
+        await prisma.ticket.updateMany({
+          where: { id: { in: breachingTickets.map((t) => t.id) } },
+          data: { slaBreached: true },
+        });
+
+        // Fire audit events fire-and-forget; never block the job on logging
+        for (const t of breachingTickets) {
+          if (!t.firstRespondedAt && t.firstResponseDueAt && now > t.firstResponseDueAt) {
+            void logAudit(t.id, null, "ticket.sla_breached", { type: "first_response" });
+          }
+          if (!t.resolvedAt && t.resolutionDueAt && now > t.resolutionDueAt) {
+            void logAudit(t.id, null, "ticket.sla_breached", { type: "resolution" });
+          }
+        }
+
+        console.log(`[check-sla] Marked ${breachingTickets.length} ticket(s) as SLA breached`);
       }
 
       // Step 2: escalate all tickets that meet escalation criteria

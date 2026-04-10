@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -8,6 +9,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
+import MacroPicker from "@/components/MacroPicker";
+import { useSession } from "@/lib/auth-client";
+import { BookOpen } from "lucide-react";
 
 interface ReplyFormProps {
   ticket: Ticket;
@@ -16,6 +20,8 @@ interface ReplyFormProps {
 export default function ReplyForm({ ticket }: ReplyFormProps) {
   const ticketId = ticket.id;
   const queryClient = useQueryClient();
+  const [macroPickerOpen, setMacroPickerOpen] = useState(false);
+  const { data: session } = useSession();
 
   const {
     register,
@@ -57,37 +63,73 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
     },
   });
 
+  function handleMacroInsert(resolvedBody: string) {
+    setValue("body", resolvedBody, { shouldValidate: true });
+  }
+
   return (
-    <form onSubmit={handleSubmit((data) => replyMutation.mutate(data))} className="space-y-3">
-      {replyMutation.error && (
-        <ErrorAlert error={replyMutation.error} fallback="Failed to send reply" />
-      )}
-      {polishMutation.error && (
-        <ErrorAlert error={polishMutation.error} fallback="Failed to polish reply" />
-      )}
+    <>
+      <form onSubmit={handleSubmit((data) => replyMutation.mutate(data))} className="space-y-3">
+        {replyMutation.error && (
+          <ErrorAlert error={replyMutation.error} fallback="Failed to send reply" />
+        )}
+        {polishMutation.error && (
+          <ErrorAlert error={polishMutation.error} fallback="Failed to polish reply" />
+        )}
 
-      <div className="space-y-1">
-        <Textarea
-          placeholder="Type your reply..."
-          {...register("body")}
-          rows={4}
-        />
-        {errors.body && <ErrorMessage message={errors.body.message} />}
-      </div>
+        <div className="space-y-1">
+          <Textarea
+            placeholder="Type your reply..."
+            {...register("body")}
+            rows={4}
+          />
+          {errors.body && <ErrorMessage message={errors.body.message} />}
+        </div>
 
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={!bodyValue?.trim() || polishMutation.isPending || replyMutation.isPending}
-          onClick={() => polishMutation.mutate()}
-        >
-          {polishMutation.isPending ? "Polishing..." : "Polish"}
-        </Button>
-        <Button type="submit" disabled={!bodyValue?.trim() || replyMutation.isPending || polishMutation.isPending}>
-          {replyMutation.isPending ? "Sending..." : "Send Reply"}
-        </Button>
-      </div>
-    </form>
+        <div className="flex gap-2 flex-wrap">
+          {/* Macro picker — inserts a saved template */}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setMacroPickerOpen(true)}
+            disabled={replyMutation.isPending || polishMutation.isPending}
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            Macros
+          </Button>
+
+          {/* AI polish — refines existing draft */}
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!bodyValue?.trim() || polishMutation.isPending || replyMutation.isPending}
+            onClick={() => polishMutation.mutate()}
+          >
+            {polishMutation.isPending ? "Polishing..." : "Polish"}
+          </Button>
+
+          <Button
+            type="submit"
+            disabled={!bodyValue?.trim() || replyMutation.isPending || polishMutation.isPending}
+          >
+            {replyMutation.isPending ? "Sending..." : "Send Reply"}
+          </Button>
+        </div>
+      </form>
+
+      <MacroPicker
+        open={macroPickerOpen}
+        onClose={() => setMacroPickerOpen(false)}
+        onSelect={handleMacroInsert}
+        context={{
+          customerName: ticket.senderName,
+          customerEmail: ticket.senderEmail,
+          ticketId: ticket.id,
+          agentName: session?.user?.name ?? "Agent",
+        }}
+      />
+    </>
   );
 }
