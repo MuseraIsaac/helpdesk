@@ -58,6 +58,21 @@ router.post("/", requireAuth, async (req, res) => {
     include: { user: { select: { id: true, name: true } } },
   });
 
+  // Stamp firstRespondedAt on the first agent reply (human or AI).
+  // Also check if first-response SLA was already breached before this reply.
+  if (!ticket.firstRespondedAt) {
+    const now = reply.createdAt;
+    const breachedFirstResponse =
+      ticket.firstResponseDueAt != null && now > ticket.firstResponseDueAt;
+    await prisma.ticket.update({
+      where: { id: ticketId },
+      data: {
+        firstRespondedAt: now,
+        ...(breachedFirstResponse && { slaBreached: true }),
+      },
+    });
+  }
+
   await sendEmailJob({
     to: ticket.senderEmail,
     subject: `Re: ${ticket.subject}`,

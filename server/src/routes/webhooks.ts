@@ -8,6 +8,7 @@ import prisma from "../db";
 import { sendClassifyJob } from "../lib/classify-ticket";
 import { sendAutoResolveJob } from "../lib/auto-resolve-ticket";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
+import { computeSlaDeadlines } from "../lib/sla";
 
 const upload = multer();
 
@@ -67,6 +68,12 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
     return;
   }
 
+  // Inbound emails have no priority yet — use the default SLA policy.
+  // The classify job will set category; priority can be set by an agent later,
+  // at which point the PATCH handler will recalculate deadlines.
+  const now = new Date();
+  const slaDeadlines = computeSlaDeadlines(null, now);
+
   const ticket = await prisma.ticket.create({
     data: {
       subject: normalizedSubject,
@@ -75,6 +82,8 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
       senderName: data.fromName,
       senderEmail: data.from,
       assignedToId: AI_AGENT_ID,
+      firstResponseDueAt: slaDeadlines.firstResponseDueAt,
+      resolutionDueAt: slaDeadlines.resolutionDueAt,
     },
   });
 

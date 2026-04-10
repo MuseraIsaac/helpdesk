@@ -37,6 +37,40 @@ enum TicketCategory {
   refund_request
 }
 
+enum TicketPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+enum TicketSeverity {
+  sev4
+  sev3
+  sev2
+  sev1
+}
+
+enum TicketImpact {
+  low
+  medium
+  high
+}
+
+enum TicketUrgency {
+  low
+  medium
+  high
+}
+
+enum EscalationReason {
+  first_response_sla_breach
+  resolution_sla_breach
+  urgent_priority
+  sev1_severity
+  manual
+}
+
 model User {
   id            String    @id
   name          String
@@ -51,6 +85,7 @@ model User {
   accounts        Account[]
   assignedTickets Ticket[]
   replies         Reply[]
+  notes           Note[]
 
   @@map("user")
 }
@@ -95,6 +130,10 @@ model Ticket {
   bodyHtml     String?
   status       TicketStatus    @default(new)
   category     TicketCategory?
+  priority     TicketPriority?
+  severity     TicketSeverity?
+  impact       TicketImpact?
+  urgency      TicketUrgency?
   senderName   String
   senderEmail  String
   assignedToId String?
@@ -103,7 +142,39 @@ model Ticket {
   updatedAt    DateTime        @updatedAt
   replies      Reply[]
 
+  // SLA: deadlines are calculated from priority at ticket creation.
+  // Recalculated when priority changes. Null = no SLA target set yet.
+  firstResponseDueAt  DateTime?
+  resolutionDueAt     DateTime?
+
+  // SLA: actuals — stamped when the milestone is reached.
+  firstRespondedAt    DateTime?
+  resolvedAt          DateTime?
+
+  // Persistent breach flag. Once true, stays true for historical reporting
+  // even if the ticket is later resolved.
+  slaBreached         Boolean   @default(false)
+
+  // Escalation — isEscalated is a live flag; escalationEvents is the full audit trail.
+  isEscalated         Boolean            @default(false)
+  escalatedAt         DateTime?
+  // First reason that triggered escalation (subsequent reasons go in escalationEvents only)
+  escalationReason    EscalationReason?
+  escalationEvents    EscalationEvent[]
+
+  notes               Note[]
+
   @@map("ticket")
+}
+
+model EscalationEvent {
+  id        Int              @id @default(autoincrement())
+  ticketId  Int
+  ticket    Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  reason    EscalationReason
+  createdAt DateTime         @default(now())
+
+  @@map("escalation_event")
 }
 
 model Reply {
@@ -118,6 +189,22 @@ model Reply {
   createdAt  DateTime   @default(now())
 
   @@map("reply")
+}
+
+model Note {
+  id               Int      @id @default(autoincrement())
+  body             String
+  isPinned         Boolean  @default(false)
+  ticketId         Int
+  ticket           Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId         String
+  author           User     @relation(fields: [authorId], references: [id])
+  // Future: store @mentioned agent IDs for notification routing
+  mentionedUserIds String[] @default([])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("note")
 }
 
 model Verification {

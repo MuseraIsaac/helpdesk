@@ -6,6 +6,8 @@ import { ticketListQuerySchema, updateTicketSchema, createTicketSchema } from "c
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
+import { computeSlaDeadlines, withSlaInfo } from "../lib/sla";
+import { checkAndEscalate, deescalateTicket, escalateTicket } from "../lib/escalation";
 
 interface TicketStatsRow {
   totalTickets: bigint;
@@ -15,7 +17,33 @@ interface TicketStatsRow {
   avgResolutionTime: number;
 }
 
+// Fields projected for the list endpoint — no body/bodyHtml for performance
+const LIST_SELECT = {
+  id: true,
+  subject: true,
+  status: true,
+  category: true,
+  priority: true,
+  severity: true,
+  impact: true,
+  urgency: true,
+  senderName: true,
+  senderEmail: true,
+  assignedToId: true,
+  createdAt: true,
+  firstResponseDueAt: true,
+  resolutionDueAt: true,
+  firstRespondedAt: true,
+  resolvedAt: true,
+  slaBreached: true,
+  isEscalated: true,
+  escalatedAt: true,
+  escalationReason: true,
+} as const;
+
 const router = Router();
+
+// ─── Stats ─────────────────────────────────────────────────────────────────
 
 router.get("/stats", requireAuth, async (_req, res) => {
   const [row] = await prisma.$queryRaw<
@@ -41,14 +69,12 @@ router.get("/stats/daily-volume", requireAuth, async (_req, res) => {
     select: { createdAt: true },
   });
 
-  // Build a map of date -> count
   const countsByDate = new Map<string, number>();
   for (const t of tickets) {
     const dateKey = t.createdAt.toISOString().slice(0, 10);
     countsByDate.set(dateKey, (countsByDate.get(dateKey) ?? 0) + 1);
   }
 
-  // Fill in all 30 days (including zeros)
   const data: { date: string; tickets: number }[] = [];
   for (let i = 0; i < 30; i++) {
     const d = new Date(thirtyDaysAgo);
@@ -59,6 +85,8 @@ router.get("/stats/daily-volume", requireAuth, async (_req, res) => {
 
   res.json({ data });
 });
+
+// ─── Create ────────────────────────────────────────────────────────────────
 
 router.post("/", requireAuth, async (req, res) => {
   const data = validate(createTicketSchema, req.body, res);
@@ -74,6 +102,9 @@ router.post("/", requireAuth, async (req, res) => {
     }
   }
 
+  const now = new Date();
+  const slaDeadlines = computeSlaDeadlines(data.priority ?? null, now);
+
   const ticket = await prisma.ticket.create({
     data: {
       subject: data.subject,
@@ -81,50 +112,100 @@ router.post("/", requireAuth, async (req, res) => {
       senderName: data.senderName,
       senderEmail: data.senderEmail,
       category: data.category ?? null,
+      priority: data.priority ?? null,
+      severity: data.severity ?? null,
+      impact: data.impact ?? null,
+      urgency: data.urgency ?? null,
       assignedToId: data.assignedToId ?? null,
       status: "open",
+      firstResponseDueAt: slaDeadlines.firstResponseDueAt,
+      resolutionDueAt: slaDeadlines.resolutionDueAt,
     },
-    include: { assignedTo: { select: { id: true, name: true } } },
+    include: {
+      assignedTo: { select: { id: true, name: true } },
+      escalationEvents: { orderBy: { createdAt: "asc" } },
+    },
   });
 
-  res.status(201).json(ticket);
+  // Auto-escalate immediately if urgent or sev1
+  await checkAndEscalate(ticket);
+
+  // Re-fetch to get updated escalation state if it changed
+  const fresh = await prisma.ticket.findUnique({
+    where: { id: ticket.id },
+    include: {
+      assignedTo: { select: { id: true, name: true } },
+      escalationEvents: { orderBy: { createdAt: "asc" } },
+    },
+  });
+
+  res.status(201).json(withSlaInfo(fresh!));
 });
+
+// ─── List ──────────────────────────────────────────────────────────────────
 
 router.get("/", requireAuth, async (req, res) => {
   const query = validate(ticketListQuerySchema, req.query, res);
   if (!query) return;
 
-  const where: Prisma.TicketWhereInput = {};
+  const now = new Date();
+  const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
-  if (query.status) {
-    where.status = query.status;
+  let where: Prisma.TicketWhereInput = {};
+
+  if (query.view === "overdue") {
+    // Active tickets with at least one blown SLA deadline
+    where = {
+      status: { notIn: ["resolved", "closed", "new", "processing"] },
+      slaBreached: true,
+    };
+  } else if (query.view === "at_risk") {
+    // Active tickets whose nearest unmet deadline is within 2 hours (but not yet breached)
+    where = {
+      status: { notIn: ["resolved", "closed", "new", "processing"] },
+      slaBreached: false,
+      OR: [
+        {
+          firstRespondedAt: null,
+          firstResponseDueAt: { gt: now, lte: twoHoursFromNow },
+        },
+        {
+          resolvedAt: null,
+          resolutionDueAt: { gt: now, lte: twoHoursFromNow },
+        },
+      ],
+    };
+  } else if (query.view === "unassigned_urgent") {
+    // Open urgent tickets with no assignee
+    where = {
+      status: { notIn: ["resolved", "closed"] },
+      priority: "urgent",
+      assignedToId: null,
+    };
   } else {
-    where.status = { in: ["open", "resolved", "closed"] };
-  }
+    // Standard filter path
+    if (query.status) {
+      where.status = query.status;
+    } else {
+      where.status = { in: ["open", "resolved", "closed"] };
+    }
+    if (query.category) where.category = query.category;
+    if (query.priority) where.priority = query.priority;
+    if (query.severity) where.severity = query.severity;
+    if (query.escalated !== undefined) where.isEscalated = query.escalated;
 
-  if (query.category) {
-    where.category = query.category;
-  }
-
-  if (query.search) {
-    where.OR = [
-      { subject: { contains: query.search, mode: "insensitive" } },
-      { senderName: { contains: query.search, mode: "insensitive" } },
-      { senderEmail: { contains: query.search, mode: "insensitive" } },
-    ];
+    if (query.search) {
+      where.OR = [
+        { subject: { contains: query.search, mode: "insensitive" } },
+        { senderName: { contains: query.search, mode: "insensitive" } },
+        { senderEmail: { contains: query.search, mode: "insensitive" } },
+      ];
+    }
   }
 
   const [tickets, total] = await Promise.all([
     prisma.ticket.findMany({
-      select: {
-        id: true,
-        subject: true,
-        status: true,
-        category: true,
-        senderName: true,
-        senderEmail: true,
-        createdAt: true,
-      },
+      select: LIST_SELECT,
       where,
       orderBy: { [query.sortBy]: query.sortOrder },
       skip: (query.page - 1) * query.pageSize,
@@ -133,8 +214,15 @@ router.get("/", requireAuth, async (req, res) => {
     prisma.ticket.count({ where }),
   ]);
 
-  res.json({ tickets, total, page: query.page, pageSize: query.pageSize });
+  res.json({
+    tickets: tickets.map(withSlaInfo),
+    total,
+    page: query.page,
+    pageSize: query.pageSize,
+  });
 });
+
+// ─── Detail ────────────────────────────────────────────────────────────────
 
 router.get("/:id", requireAuth, async (req, res) => {
   const id = parseId(req.params.id);
@@ -147,6 +235,7 @@ router.get("/:id", requireAuth, async (req, res) => {
     where: { id },
     include: {
       assignedTo: { select: { id: true, name: true } },
+      escalationEvents: { orderBy: { createdAt: "asc" } },
     },
   });
 
@@ -155,8 +244,10 @@ router.get("/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  res.json(ticket);
+  res.json(withSlaInfo(ticket));
 });
+
+// ─── Update ────────────────────────────────────────────────────────────────
 
 router.patch("/:id", requireAuth, async (req, res) => {
   const id = parseId(req.params.id);
@@ -184,17 +275,68 @@ router.patch("/:id", requireAuth, async (req, res) => {
     return;
   }
 
+  const updateData: Prisma.TicketUpdateInput = {
+    ...("assignedToId" in data && { assignedToId: data.assignedToId }),
+    ...("status" in data && { status: data.status }),
+    ...("category" in data && { category: data.category }),
+    ...("priority" in data && { priority: data.priority }),
+    ...("severity" in data && { severity: data.severity }),
+    ...("impact" in data && { impact: data.impact }),
+    ...("urgency" in data && { urgency: data.urgency }),
+  };
+
+  // Recalculate SLA deadlines when priority changes
+  if ("priority" in data) {
+    const now = new Date();
+    const newDeadlines = computeSlaDeadlines(data.priority ?? null, ticket.createdAt);
+    updateData.firstResponseDueAt = newDeadlines.firstResponseDueAt;
+    updateData.resolutionDueAt = newDeadlines.resolutionDueAt;
+    if (newDeadlines.firstResponseDueAt > now && newDeadlines.resolutionDueAt > now) {
+      updateData.slaBreached = false;
+    }
+  }
+
+  // Stamp resolvedAt when moving to a terminal status
+  if ("status" in data && (data.status === "resolved" || data.status === "closed")) {
+    const now = new Date();
+    updateData.resolvedAt = now;
+    if (ticket.resolutionDueAt && now > ticket.resolutionDueAt) {
+      updateData.slaBreached = true;
+    }
+  }
+
+  // Handle manual de-escalation inline (escalation is handled after the update)
+  if (data.escalate === false) {
+    updateData.isEscalated = false;
+  }
+
   const updated = await prisma.ticket.update({
     where: { id },
-    data: {
-      ...("assignedToId" in data && { assignedToId: data.assignedToId }),
-      ...("status" in data && { status: data.status }),
-      ...("category" in data && { category: data.category }),
+    data: updateData,
+    include: {
+      assignedTo: { select: { id: true, name: true } },
+      escalationEvents: { orderBy: { createdAt: "asc" } },
     },
-    include: { assignedTo: { select: { id: true, name: true } } },
   });
 
-  res.json(updated);
+  // Post-update: run auto-escalation checks based on new state
+  if (data.escalate === true) {
+    await escalateTicket(id, "manual");
+  } else if (data.escalate !== false) {
+    // Check auto-conditions (priority/severity changes may trigger escalation)
+    await checkAndEscalate(updated);
+  }
+
+  // Re-fetch to get fresh escalation state
+  const fresh = await prisma.ticket.findUnique({
+    where: { id },
+    include: {
+      assignedTo: { select: { id: true, name: true } },
+      escalationEvents: { orderBy: { createdAt: "asc" } },
+    },
+  });
+
+  res.json(withSlaInfo(fresh!));
 });
 
 export default router;

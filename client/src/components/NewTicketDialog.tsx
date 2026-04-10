@@ -5,6 +5,10 @@ import axios from "axios";
 import { useState } from "react";
 import { createTicketSchema, type CreateTicketInput } from "core/schemas/tickets.ts";
 import { ticketCategories, categoryLabel } from "core/constants/ticket-category.ts";
+import { ticketPriorities, priorityLabel } from "core/constants/ticket-priority.ts";
+import { ticketSeverities, severityLabel } from "core/constants/ticket-severity.ts";
+import { ticketImpacts, impactLabel } from "core/constants/ticket-impact.ts";
+import { ticketUrgencies, urgencyLabel } from "core/constants/ticket-urgency.ts";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +35,45 @@ import { Plus } from "lucide-react";
 interface Agent {
   id: string;
   name: string;
+}
+
+function FieldSelect<T extends string>({
+  name,
+  control,
+  options,
+  labelMap,
+  placeholder,
+}: {
+  name: keyof CreateTicketInput;
+  control: ReturnType<typeof useForm<CreateTicketInput>>["control"];
+  options: readonly T[];
+  labelMap: Record<T, string>;
+  placeholder: string;
+}) {
+  return (
+    <Controller
+      name={name}
+      control={control}
+      render={({ field }) => (
+        <Select
+          value={(field.value as string | null) ?? "none"}
+          onValueChange={(val) => field.onChange(val === "none" ? null : val)}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder={placeholder} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">None</SelectItem>
+            {options.map((o) => (
+              <SelectItem key={o} value={o}>
+                {labelMap[o]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    />
+  );
 }
 
 export default function NewTicketDialog() {
@@ -82,7 +125,7 @@ export default function NewTicketDialog() {
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create New Ticket</DialogTitle>
         </DialogHeader>
@@ -90,7 +133,7 @@ export default function NewTicketDialog() {
         <form
           id="new-ticket-form"
           onSubmit={handleSubmit((data) => createMutation.mutate(data))}
-          className="space-y-4 py-2"
+          className="space-y-5 py-2"
         >
           {createMutation.error && (
             <ErrorAlert error={createMutation.error} fallback="Failed to create ticket" />
@@ -109,7 +152,7 @@ export default function NewTicketDialog() {
             {errors.subject && <ErrorMessage message={errors.subject.message} />}
           </div>
 
-          {/* Sender Name + Email */}
+          {/* Sender */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="senderName">
@@ -136,37 +179,67 @@ export default function NewTicketDialog() {
             </div>
           </div>
 
-          {/* Category + Assigned To */}
+          {/* Triage */}
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
+              Triage
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Priority</Label>
+                <FieldSelect
+                  name="priority"
+                  control={control}
+                  options={ticketPriorities}
+                  labelMap={priorityLabel}
+                  placeholder="Select priority"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Severity</Label>
+                <FieldSelect
+                  name="severity"
+                  control={control}
+                  options={ticketSeverities}
+                  labelMap={severityLabel}
+                  placeholder="Select severity"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Impact</Label>
+                <FieldSelect
+                  name="impact"
+                  control={control}
+                  options={ticketImpacts}
+                  labelMap={impactLabel}
+                  placeholder="Select impact"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Urgency</Label>
+                <FieldSelect
+                  name="urgency"
+                  control={control}
+                  options={ticketUrgencies}
+                  labelMap={urgencyLabel}
+                  placeholder="Select urgency"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Details */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Category</Label>
-              <Controller
+              <FieldSelect
                 name="category"
                 control={control}
-                render={({ field }) => (
-                  <Select
-                    value={field.value ?? "none"}
-                    onValueChange={(val) =>
-                      field.onChange(val === "none" ? null : val)
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {ticketCategories.map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {categoryLabel[c]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                options={ticketCategories}
+                labelMap={categoryLabel}
+                placeholder="Select category"
               />
-              {errors.category && <ErrorMessage message={errors.category.message} />}
             </div>
-
             <div className="space-y-1.5">
               <Label>Assign To</Label>
               <Controller

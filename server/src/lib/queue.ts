@@ -3,6 +3,7 @@ import Sentry from "./sentry";
 import { registerClassifyWorker } from "./classify-ticket";
 import { registerAutoResolveWorker } from "./auto-resolve-ticket";
 import { registerSendEmailWorker } from "./send-email";
+import { registerSlaCheckerWorker } from "./check-sla";
 
 const boss = new PgBoss({
   connectionString: process.env.DATABASE_URL!,
@@ -21,6 +22,7 @@ export async function startQueue(): Promise<void> {
   await registerClassifyWorker(boss);
   await registerAutoResolveWorker(boss);
   await registerSendEmailWorker(boss);
+  await registerSlaCheckerWorker(boss);
 
   console.log("Job queue started");
 }

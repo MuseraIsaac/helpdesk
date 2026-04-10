@@ -78,6 +78,19 @@ export async function registerAutoResolveWorker(boss: PgBoss): Promise<void> {
       });
     } else {
       try {
+        const now = new Date();
+        // Fetch current SLA state to check for breaches before stamping
+        const currentTicket = await prisma.ticket.findUnique({
+          where: { id: ticketId },
+          select: { firstRespondedAt: true, firstResponseDueAt: true, resolutionDueAt: true },
+        });
+        const breachedFirstResponse =
+          !currentTicket?.firstRespondedAt &&
+          currentTicket?.firstResponseDueAt != null &&
+          now > currentTicket.firstResponseDueAt;
+        const breachedResolution =
+          currentTicket?.resolutionDueAt != null && now > currentTicket.resolutionDueAt;
+
         await prisma.$transaction([
           prisma.reply.create({
             data: {
@@ -89,7 +102,13 @@ export async function registerAutoResolveWorker(boss: PgBoss): Promise<void> {
           }),
           prisma.ticket.update({
             where: { id: ticketId },
-            data: { status: "resolved" },
+            data: {
+              status: "resolved",
+              // Stamp both milestones — AI resolves in one shot
+              ...(!currentTicket?.firstRespondedAt && { firstRespondedAt: now }),
+              resolvedAt: now,
+              ...((breachedFirstResponse || breachedResolution) && { slaBreached: true }),
+            },
           }),
         ]);
 

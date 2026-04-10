@@ -12,8 +12,12 @@ import {
 } from "@tanstack/react-table";
 import { type Ticket } from "core/constants/ticket.ts";
 import { categoryLabel } from "core/constants/ticket-category.ts";
+import { escalationReasonLabel } from "core/constants/escalation-reason.ts";
 import ErrorAlert from "@/components/ErrorAlert";
 import StatusBadge from "@/components/StatusBadge";
+import { PriorityBadge, SeverityBadge } from "@/components/TriageBadge";
+import { SlaCountdown } from "@/components/SlaBadge";
+import { EscalationIcon } from "@/components/EscalationBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,12 +52,23 @@ const columns: ColumnDef<Ticket>[] = [
     accessorKey: "subject",
     header: "Subject",
     cell: ({ row }) => (
-      <Link
-        to={`/tickets/${row.original.id}`}
-        className="link font-medium"
-      >
-        {row.original.subject}
-      </Link>
+      <div className="flex items-center gap-1.5">
+        <Link
+          to={`/tickets/${row.original.id}`}
+          className="link font-medium"
+        >
+          {row.original.subject}
+        </Link>
+        {row.original.isEscalated && (
+          <EscalationIcon
+            title={
+              row.original.escalationReason
+                ? escalationReasonLabel[row.original.escalationReason]
+                : "Escalated"
+            }
+          />
+        )}
+      </div>
     ),
   },
   {
@@ -74,6 +89,16 @@ const columns: ColumnDef<Ticket>[] = [
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
   },
   {
+    accessorKey: "priority",
+    header: "Priority",
+    cell: ({ row }) => <PriorityBadge priority={row.original.priority} />,
+  },
+  {
+    accessorKey: "severity",
+    header: "Severity",
+    cell: ({ row }) => <SeverityBadge severity={row.original.severity} />,
+  },
+  {
     accessorKey: "category",
     header: "Category",
     cell: ({ row }) =>
@@ -90,6 +115,21 @@ const columns: ColumnDef<Ticket>[] = [
     header: "Created",
     cell: ({ row }) =>
       new Date(row.original.createdAt).toLocaleDateString(),
+  },
+  {
+    id: "sla",
+    header: "SLA",
+    cell: ({ row }) => {
+      const { slaStatus, minutesUntilBreach, firstResponseDueAt, resolutionDueAt } =
+        row.original;
+      if (!firstResponseDueAt && !resolutionDueAt) {
+        return <span className="text-muted-foreground text-xs">—</span>;
+      }
+      if (!slaStatus) return null;
+      return (
+        <SlaCountdown status={slaStatus} minutesUntilBreach={minutesUntilBreach} />
+      );
+    },
   },
 ];
 
@@ -199,10 +239,19 @@ export default function TicketsTable({ filters }: { filters: TicketFilters }) {
                     <Skeleton className="h-5 w-16 rounded-full" />
                   </TableCell>
                   <TableCell>
+                    <Skeleton className="h-5 w-16 rounded-full" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-5 w-16 rounded-full" />
+                  </TableCell>
+                  <TableCell>
                     <Skeleton className="h-5 w-24 rounded-full" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-24" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-5 w-20 rounded-full" />
                   </TableCell>
                 </TableRow>
               ))
