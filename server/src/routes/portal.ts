@@ -4,12 +4,18 @@ import { requireCustomer } from "../middleware/require-customer";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
 import { upsertCustomer } from "../lib/upsert-customer";
+import { sendClassifyJob } from "../lib/classify-ticket";
+import { sendAutoResolveJob } from "../lib/auto-resolve-ticket";
+import { computeSlaDeadlines } from "../lib/sla";
+import { logAudit } from "../lib/audit";
+import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 import prisma from "../db";
 import {
   portalRegisterSchema,
   portalCreateTicketSchema,
   portalReplySchema,
 } from "core/schemas/portal.ts";
+import { submitCsatSchema } from "core/schemas/csat.ts";
 
 const router = Router();
 
@@ -87,6 +93,8 @@ router.post("/tickets", requireCustomer, async (req, res) => {
   const data = validate(portalCreateTicketSchema, req.body, res);
   if (!data) return;
 
+  const now = new Date();
+  const slaDeadlines = computeSlaDeadlines(null, now);
   const customerId = await upsertCustomer(req.user.email, req.user.name);
 
   const ticket = await prisma.ticket.create({
@@ -96,11 +104,16 @@ router.post("/tickets", requireCustomer, async (req, res) => {
       senderName: req.user.name,
       senderEmail: req.user.email,
       customerId,
-      status: "new",
+      assignedToId: AI_AGENT_ID,
+      firstResponseDueAt: slaDeadlines.firstResponseDueAt,
+      resolutionDueAt: slaDeadlines.resolutionDueAt,
     },
     select: {
       id: true,
       subject: true,
+      body: true,
+      senderName: true,
+      senderEmail: true,
       status: true,
       category: true,
       createdAt: true,
@@ -108,7 +121,26 @@ router.post("/tickets", requireCustomer, async (req, res) => {
     },
   });
 
-  res.status(201).json({ ticket });
+  res.status(201).json({
+    ticket: {
+      id: ticket.id,
+      subject: ticket.subject,
+      status: ticket.status,
+      category: ticket.category,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+    },
+  });
+
+  void logAudit(ticket.id, req.user.id, "ticket.created", { via: "portal" });
+
+  sendClassifyJob(ticket).catch((error) =>
+    console.error(`Failed to enqueue classify job for ticket ${ticket.id}:`, error)
+  );
+
+  sendAutoResolveJob(ticket).catch((error) =>
+    console.error(`Failed to enqueue auto-resolve job for ticket ${ticket.id}:`, error)
+  );
 });
 
 // ─── Ticket Detail ─────────────────────────────────────────────────────────
@@ -143,6 +175,9 @@ router.get("/tickets/:id", requireCustomer, async (req, res) => {
           senderType: true,
           createdAt: true,
         },
+      },
+      csatRating: {
+        select: { rating: true, comment: true, submittedAt: true },
       },
     },
   });
@@ -218,6 +253,46 @@ router.post("/tickets/:id/replies", requireCustomer, async (req, res) => {
   }
 
   res.status(201).json({ reply });
+});
+
+// ─── Submit CSAT Rating ─────────────────────────────────────────────────────
+
+router.post("/tickets/:id/csat", requireCustomer, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) {
+    res.status(400).json({ error: "Invalid ticket ID" });
+    return;
+  }
+
+  const data = validate(submitCsatSchema, req.body, res);
+  if (!data) return;
+
+  const ticket = await prisma.ticket.findUnique({
+    where: { id },
+    select: { senderEmail: true, status: true, csatRating: { select: { id: true } } },
+  });
+
+  if (!ticket || ticket.senderEmail !== req.user.email) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+
+  if (ticket.status !== "resolved" && ticket.status !== "closed") {
+    res.status(422).json({ error: "CSAT rating can only be submitted for resolved or closed tickets" });
+    return;
+  }
+
+  if (ticket.csatRating) {
+    res.status(409).json({ error: "A rating has already been submitted for this ticket" });
+    return;
+  }
+
+  const rating = await prisma.csatRating.create({
+    data: { ticketId: id, rating: data.rating, comment: data.comment ?? null },
+    select: { id: true, rating: true, comment: true, submittedAt: true },
+  });
+
+  res.status(201).json({ rating });
 });
 
 export default router;

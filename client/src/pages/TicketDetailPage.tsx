@@ -15,7 +15,16 @@ import TicketSummary from "@/components/TicketSummary";
 import AuditTimeline from "@/components/AuditTimeline";
 import CustomerHistory from "@/components/CustomerHistory";
 import { Button } from "@/components/ui/button";
-import { MessageSquare, Lock, ChevronDown, ChevronRight } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MessageSquare, Lock, ChevronDown, ChevronRight, Star } from "lucide-react";
+
+const CSAT_LABELS: Record<number, string> = {
+  1: "Very unhappy",
+  2: "Unhappy",
+  3: "Neutral",
+  4: "Happy",
+  5: "Very happy",
+};
 
 type ComposeMode = "reply" | "note";
 
@@ -127,6 +136,41 @@ export default function TicketDetailPage() {
 
           <div className="space-y-4">
             <UpdateTicket ticket={ticket} />
+            {ticket.csatRating && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-[13px] font-medium text-muted-foreground flex items-center gap-1.5">
+                    <Star className="h-3.5 w-3.5" />
+                    CSAT Rating
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <Star
+                        key={n}
+                        className={`h-4 w-4 ${
+                          n <= ticket.csatRating!.rating
+                            ? "fill-yellow-400 text-yellow-400"
+                            : "fill-none text-muted-foreground/30"
+                        }`}
+                      />
+                    ))}
+                    <span className="text-xs text-muted-foreground ml-1">
+                      {CSAT_LABELS[ticket.csatRating.rating] ?? ticket.csatRating.rating}
+                    </span>
+                  </div>
+                  {ticket.csatRating.comment && (
+                    <p className="text-xs text-muted-foreground italic leading-relaxed">
+                      "{ticket.csatRating.comment}"
+                    </p>
+                  )}
+                  <p className="text-[11px] text-muted-foreground">
+                    {new Date(ticket.csatRating.submittedAt).toLocaleDateString()}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
             {ticket.customer && (
               <CustomerHistory customer={ticket.customer} currentTicketId={ticket.id} />
             )}

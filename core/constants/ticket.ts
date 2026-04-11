@@ -53,4 +53,10 @@ export interface Ticket {
   auditEvents?: AuditEvent[];
   /** Customer entity with org + prior ticket history — present only in GET /api/tickets/:id responses */
   customer?: CustomerSummary | null;
+  /** CSAT rating — present only in GET /api/tickets/:id responses */
+  csatRating?: {
+    rating: number;
+    comment: string | null;
+    submittedAt: string;
+  } | null;
 }

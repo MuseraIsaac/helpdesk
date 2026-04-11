@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
 import BackLink from "@/components/BackLink";
+import ArticleSuggestions from "@/components/ArticleSuggestions";
 
 export default function PortalNewTicketPage() {
   const navigate = useNavigate();
@@ -29,10 +30,15 @@ export default function PortalNewTicketPage() {
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<PortalCreateTicketInput>({
     resolver: zodResolver(portalCreateTicketSchema),
   });
+
+  const subject = watch("subject") ?? "";
+  const body = watch("body") ?? "";
+  const suggestionQuery = `${subject} ${body}`.trim();
 
   const mutation = useMutation({
     mutationFn: async (data: PortalCreateTicketInput) => {
@@ -65,6 +71,7 @@ export default function PortalNewTicketPage() {
             className="space-y-4"
             noValidate
           >
+            <ArticleSuggestions query={suggestionQuery} />
             {mutation.error && (
               <ErrorAlert
                 error={mutation.error}

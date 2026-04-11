@@ -284,6 +284,9 @@ router.get("/:id", requireAuth, async (req, res) => {
           },
         },
       },
+      csatRating: {
+        select: { rating: true, comment: true, submittedAt: true },
+      },
     },
   });
 
@@ -292,7 +295,16 @@ router.get("/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  res.json(withSlaInfo(ticket));
+  // Rename customer.tickets → customer.recentTickets to match the CustomerSummary type
+  const { customer, ...rest } = ticket;
+  const shaped = {
+    ...rest,
+    customer: customer
+      ? { ...customer, recentTickets: customer.tickets, tickets: undefined }
+      : null,
+  };
+
+  res.json(withSlaInfo(shaped));
 });
 
 // ─── Update ────────────────────────────────────────────────────────────────

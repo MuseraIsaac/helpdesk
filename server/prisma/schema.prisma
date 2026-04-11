@@ -204,6 +204,7 @@ model Ticket {
 
   notes               Note[]
   auditEvents         AuditEvent[]
+  csatRating          CsatRating?
 
   @@map("ticket")
 }
@@ -301,6 +302,24 @@ model AuditEvent {
  * KbCategory — groups knowledge base articles into logical sections.
  * Position controls display order in the help center.
  */
+/**
+ * CsatRating — one record per resolved/closed ticket, submitted by the customer.
+ *
+ * rating: 1 (very unhappy) – 5 (very happy)
+ * comment: optional free-text feedback
+ * Uniqueness on ticketId ensures one submission per ticket.
+ */
+model CsatRating {
+  id          Int      @id @default(autoincrement())
+  ticketId    Int      @unique
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  rating      Int
+  comment     String?
+  submittedAt DateTime @default(now())
+
+  @@map("csat_rating")
+}
+
 model KbCategory {
   id          Int         @id @default(autoincrement())
   name        String

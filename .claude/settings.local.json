@@ -32,7 +32,12 @@
       "Bash(cat src/lib/db.ts)",
       "Bash(cat src/lib/prisma.ts)",
       "Bash(DATABASE_URL=\"postgresql://postgres:postgres@204.168.179.132:5432/helpdesk?schema=public&sslmode=require\" bun run dev)",
-      "Bash(bun add:*)"
+      "Bash(bun add:*)",
+      "Bash(timeout 5 psql \"postgresql://postgres:postgres@localhost:5432/helpdesk\" -c \"SELECT 1\")",
+      "Bash(timeout 5 psql \"postgresql://localhost:5432/helpdesk\" -c \"SELECT 1\")",
+      "Bash(timeout 8 bun -e ':*)",
+      "Bash(grep -n \"senderName\\\\|senderEmail\\\\|assignedTo\\\\|customer\\\\|\\\\\\\\.map\\\\|\\\\?\\\\.\" \"/c/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/client/src/components/TicketDetail.tsx\")",
+      "Bash(bunx --bun shadcn@latest add progress tooltip --yes)"
     ]
   }
 }

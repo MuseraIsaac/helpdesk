@@ -15,6 +15,44 @@ import prisma from "../db";
 
 const router = Router();
 
+// ── Keyword helpers ───────────────────────────────────────────────────────────
+
+const STOPWORDS = new Set([
+  "a", "an", "the", "and", "or", "not", "in", "on", "at", "to", "for",
+  "of", "is", "it", "be", "are", "was", "have", "has", "do", "does", "did",
+  "with", "my", "i", "we", "you", "your", "our", "can", "how", "get", "got",
+  "this", "that", "what", "when", "why", "where", "will", "would", "could",
+  "should", "please", "help", "need", "want", "there", "from",
+]);
+
+function extractKeywords(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .toLowerCase()
+        .replace(/[^\w\s]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 2 && !STOPWORDS.has(w))
+    ),
+  ].slice(0, 8);
+}
+
+/** Return a short excerpt from body that contains the first matched keyword. */
+function buildExcerpt(body: string, keywords: string[]): string {
+  const stripped = body.replace(/[#*`_\[\]]/g, "").replace(/\s+/g, " ").trim();
+  const lower = stripped.toLowerCase();
+  for (const kw of keywords) {
+    const idx = lower.indexOf(kw);
+    if (idx !== -1) {
+      const start = Math.max(0, idx - 40);
+      const end = Math.min(stripped.length, idx + 120);
+      const excerpt = (start > 0 ? "…" : "") + stripped.slice(start, end) + (end < stripped.length ? "…" : "");
+      return excerpt;
+    }
+  }
+  return stripped.slice(0, 150) + (stripped.length > 150 ? "…" : "");
+}
+
 // ── Public routes (no auth required) ────────────────────────────────────────
 
 // GET /api/kb/public/categories
@@ -87,6 +125,63 @@ router.get("/public/articles/:slug", async (req, res) => {
   }).catch(() => {});
 
   res.json({ article });
+});
+
+// GET /api/kb/public/suggest?q=<text> — keyword-matched article suggestions
+// Returns up to 3 published articles ranked by keyword overlap with the query.
+// Structured for a future drop-in upgrade to vector/AI retrieval.
+router.get("/public/suggest", async (req, res) => {
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (!q || q.length < 3) {
+    res.json({ articles: [] });
+    return;
+  }
+
+  const keywords = extractKeywords(q);
+  if (!keywords.length) {
+    res.json({ articles: [] });
+    return;
+  }
+
+  // Fetch published articles whose title OR body contains at least one keyword.
+  // Prisma's OR flattening means a single DB round-trip.
+  const candidates = await prisma.kbArticle.findMany({
+    where: {
+      status: "published",
+      OR: keywords.flatMap((kw) => [
+        { title: { contains: kw, mode: "insensitive" } },
+        { body: { contains: kw, mode: "insensitive" } },
+      ]),
+    },
+    select: {
+      id: true,
+      title: true,
+      slug: true,
+      body: true,
+      category: { select: { id: true, name: true, slug: true } },
+    },
+    take: 20,
+  });
+
+  // Score by keyword hit-count (title matches count double)
+  const scored = candidates
+    .map((a) => {
+      const titleLower = a.title.toLowerCase();
+      const bodyLower = a.body.toLowerCase();
+      const score = keywords.reduce((n, kw) => {
+        return n + (titleLower.includes(kw) ? 2 : 0) + (bodyLower.includes(kw) ? 1 : 0);
+      }, 0);
+      return { ...a, score };
+    })
+    .filter((a) => a.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map(({ score: _score, body, ...rest }) => ({
+      ...rest,
+      excerpt: buildExcerpt(body, keywords),
+    }));
+
+  res.json({ articles: scored });
 });
 
 // ── Authenticated routes (agents + admins) ───────────────────────────────────

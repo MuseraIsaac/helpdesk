@@ -11,6 +11,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
 import BackLink from "@/components/BackLink";
+import ArticleSuggestions from "@/components/ArticleSuggestions";
+import CsatRatingWidget from "@/components/CsatRatingWidget";
 
 interface Reply {
   id: number;
@@ -18,6 +20,12 @@ interface Reply {
   bodyHtml: string | null;
   senderType: "agent" | "customer";
   createdAt: string;
+}
+
+interface CsatRating {
+  rating: number;
+  comment: string | null;
+  submittedAt: string;
 }
 
 interface PortalTicketDetail {
@@ -30,6 +38,7 @@ interface PortalTicketDetail {
   createdAt: string;
   updatedAt: string;
   replies: Reply[];
+  csatRating: CsatRating | null;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -137,6 +146,14 @@ export default function PortalTicketDetailPage() {
             </p>
           </div>
 
+          {/* Article suggestions — shown for unresolved tickets */}
+          {!isClosed && data.status !== "resolved" && (
+            <ArticleSuggestions
+              query={`${data.subject} ${data.body}`.trim()}
+              debounceMs={0}
+            />
+          )}
+
           {/* Original message */}
           <div className="rounded-lg border p-4 bg-muted/30 space-y-1">
             <p className="text-xs font-medium text-muted-foreground mb-2">
@@ -185,6 +202,31 @@ export default function PortalTicketDetailPage() {
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* CSAT prompt — shown for resolved/closed tickets that haven't been rated yet */}
+          {(data.status === "resolved" || data.status === "closed") && !data.csatRating && (
+            <CsatRatingWidget ticketId={data.id} />
+          )}
+
+          {/* Already-rated confirmation */}
+          {data.csatRating && (
+            <div className="rounded-lg border bg-muted/30 px-4 py-3 flex items-center justify-between">
+              <div className="space-y-0.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Your rating</p>
+                <div className="flex items-center gap-1.5">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <span key={n} className={`text-base ${n <= data.csatRating!.rating ? "text-yellow-400" : "text-muted-foreground/30"}`}>★</span>
+                  ))}
+                  <span className="text-sm text-muted-foreground ml-1">
+                    {data.csatRating.rating}/5
+                  </span>
+                </div>
+                {data.csatRating.comment && (
+                  <p className="text-xs text-muted-foreground italic">"{data.csatRating.comment}"</p>
+                )}
+              </div>
             </div>
           )}
 

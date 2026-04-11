@@ -17,6 +17,8 @@ import macrosRouter from "./routes/macros";
 import customersRouter from "./routes/customers";
 import portalRouter from "./routes/portal";
 import kbRouter from "./routes/kb";
+import csatRouter from "./routes/csat";
+import reportsRouter from "./routes/reports";
 import { startQueue, stopQueue } from "./lib/queue";
 
 if (!process.env.BETTER_AUTH_SECRET) {
@@ -89,6 +91,8 @@ app.use("/api/macros", macrosRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/portal", portalRouter);
 app.use("/api/kb", kbRouter);
+app.use("/api/csat", csatRouter);
+app.use("/api/reports", reportsRouter);
 app.use("/api/webhooks", webhooksRouter);
 
 Sentry.setupExpressErrorHandler(app);
