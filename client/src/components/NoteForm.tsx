@@ -2,6 +2,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
+import { z } from "zod/v4";
 import { createNoteSchema, type CreateNoteInput } from "core/schemas/notes.ts";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,7 @@ export default function NoteForm({ ticketId }: NoteFormProps) {
     reset,
     watch,
     formState: { errors },
-  } = useForm<CreateNoteInput>({
+  } = useForm<z.input<typeof createNoteSchema>, unknown, CreateNoteInput>({
     resolver: zodResolver(createNoteSchema),
   });
 

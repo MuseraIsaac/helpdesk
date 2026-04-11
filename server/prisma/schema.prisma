@@ -16,6 +16,7 @@ datasource db {
 enum Role {
   admin
   agent
+  customer
 }
 
 enum TicketStatus {
@@ -63,6 +64,11 @@ enum TicketUrgency {
   high
 }
 
+enum KbArticleStatus {
+  draft
+  published
+}
+
 enum EscalationReason {
   first_response_sla_breach
   resolution_sla_breach
@@ -89,6 +95,7 @@ model User {
   notes           Note[]
   auditEvents     AuditEvent[]
   macros          Macro[]
+  kbArticles      KbArticle[]
 
   @@map("user")
 }
@@ -288,6 +295,52 @@ model AuditEvent {
 
   @@index([ticketId, createdAt])
   @@map("audit_event")
+}
+
+/**
+ * KbCategory — groups knowledge base articles into logical sections.
+ * Position controls display order in the help center.
+ */
+model KbCategory {
+  id          Int         @id @default(autoincrement())
+  name        String
+  slug        String      @unique
+  description String?
+  position    Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  articles    KbArticle[]
+
+  @@map("kb_category")
+}
+
+/**
+ * KbArticle — a help center article authored in Markdown.
+ *
+ * status:
+ *   draft      — only visible to agents/admins, never served publicly
+ *   published  — visible in the public help center
+ *
+ * slug is auto-derived from title at creation and used as the public URL key.
+ * viewCount is incremented on each public read (for popularity ordering).
+ */
+model KbArticle {
+  id         Int             @id @default(autoincrement())
+  title      String
+  slug       String          @unique
+  body       String
+  status     KbArticleStatus @default(draft)
+  categoryId Int?
+  category   KbCategory?     @relation(fields: [categoryId], references: [id])
+  authorId   String
+  author     User            @relation(fields: [authorId], references: [id])
+  viewCount  Int             @default(0)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([status])
+  @@index([categoryId])
+  @@map("kb_article")
 }
 
 model Verification {

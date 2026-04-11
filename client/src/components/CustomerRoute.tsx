@@ -2,7 +2,12 @@ import { Navigate, Outlet } from "react-router";
 import { Role } from "core/constants/role.ts";
 import { useSession } from "../lib/auth-client";
 
-export default function ProtectedRoute() {
+/**
+ * Route guard for customer portal pages.
+ * Unauthenticated users → /portal/login
+ * Agents / admins → / (their home)
+ */
+export default function CustomerRoute() {
   const { data: session, isPending } = useSession();
 
   if (isPending) {
@@ -14,12 +19,11 @@ export default function ProtectedRoute() {
   }
 
   if (!session) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/portal/login" replace />;
   }
 
-  // Customer accounts belong to the portal, not the agent UI
-  if (session.user.role === Role.customer) {
-    return <Navigate to="/portal/tickets" replace />;
+  if (session.user.role !== Role.customer) {
+    return <Navigate to="/" replace />;
   }
 
   return <Outlet />;

@@ -2,7 +2,12 @@ import type { RequestHandler } from "express";
 import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "../lib/auth";
 
-export const requireAuth: RequestHandler = async (req, res, next) => {
+/**
+ * Middleware for customer portal routes.
+ * Requires a valid session with role === "customer".
+ * Agent and admin accounts are explicitly rejected (403).
+ */
+export const requireCustomer: RequestHandler = async (req, res, next) => {
   const session = await auth.api.getSession({
     headers: fromNodeHeaders(req.headers),
   });
@@ -17,8 +22,7 @@ export const requireAuth: RequestHandler = async (req, res, next) => {
     return;
   }
 
-  // Customer accounts belong to the portal — block them from agent routes.
-  if (session.user.role === "customer") {
+  if (session.user.role !== "customer") {
     res.status(403).json({ error: "Forbidden" });
     return;
   }

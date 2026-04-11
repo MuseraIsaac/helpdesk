@@ -1,25 +1,16 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
-import { Role } from "core/constants/role.ts";
 import { signOut, useSession } from "../lib/auth-client";
 import { useTheme } from "../lib/theme";
-import {
-  LayoutDashboard,
-  Ticket,
-  Users,
-  BookOpen,
-  LogOut,
-  Sun,
-  Moon,
-} from "lucide-react";
+import { Ticket, PlusCircle, LogOut, Sun, Moon, BookOpen } from "lucide-react";
 
-export default function Layout() {
+export default function PortalLayout() {
   const { data: session } = useSession();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
 
   const handleSignOut = async () => {
     await signOut();
-    navigate("/login", { replace: true });
+    navigate("/portal/login", { replace: true });
   };
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -33,43 +24,29 @@ export default function Layout() {
     <div className="min-h-screen flex flex-col bg-background">
       <nav className="sticky top-0 z-50 bg-background border-b px-6 h-14 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <Link
-            to="/"
-            className="flex items-center gap-2 mr-5 group"
-          >
+          <div className="flex items-center gap-2 mr-5">
             <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">
-                H
-              </span>
+              <span className="text-primary-foreground font-bold text-sm">H</span>
             </div>
-            <span className="text-[15px] font-semibold tracking-tight group-hover:text-foreground transition-colors">
-              Helpdesk
+            <span className="text-[15px] font-semibold tracking-tight">
+              Support Portal
             </span>
-          </Link>
-          <NavLink to="/" end className={navLinkClass}>
-            <LayoutDashboard className="h-3.5 w-3.5" />
-            Dashboard
-          </NavLink>
-          <NavLink to="/tickets" className={navLinkClass}>
+          </div>
+          <NavLink to="/portal/tickets" className={navLinkClass}>
             <Ticket className="h-3.5 w-3.5" />
-            Tickets
+            My Tickets
           </NavLink>
-          {session?.user?.role === Role.admin && (
-            <>
-              <NavLink to="/users" className={navLinkClass}>
-                <Users className="h-3.5 w-3.5" />
-                Users
-              </NavLink>
-              <NavLink to="/macros" className={navLinkClass}>
-                <BookOpen className="h-3.5 w-3.5" />
-                Macros
-              </NavLink>
-              <NavLink to="/kb" className={navLinkClass}>
-                <BookOpen className="h-3.5 w-3.5" />
-                Knowledge Base
-              </NavLink>
-            </>
-          )}
+          <NavLink to="/portal/new-ticket" className={navLinkClass}>
+            <PlusCircle className="h-3.5 w-3.5" />
+            New Ticket
+          </NavLink>
+          <Link
+            to="/help"
+            className="inline-flex items-center gap-2 text-[13px] font-medium px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            Help Center
+          </Link>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -96,7 +73,7 @@ export default function Layout() {
           </button>
         </div>
       </nav>
-      <main className="flex-1 px-8 py-8 max-w-[1200px] w-full mx-auto animate-in-page">
+      <main className="flex-1 px-8 py-8 max-w-[860px] w-full mx-auto animate-in-page">
         <Outlet />
       </main>
     </div>

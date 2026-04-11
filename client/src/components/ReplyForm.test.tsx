@@ -2,6 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import axios from "axios";
+import type { Ticket } from "core/constants/ticket.ts";
 import { renderWithQuery } from "@/test/render";
 import ReplyForm from "./ReplyForm";
 
@@ -10,13 +11,41 @@ const mockedAxios = vi.mocked(axios, { deep: true });
 
 const TICKET_ID = 42;
 
+const mockTicket: Ticket = {
+  id: TICKET_ID,
+  subject: "Test ticket",
+  body: "Test body",
+  bodyHtml: null,
+  status: "open",
+  category: null,
+  priority: null,
+  severity: null,
+  impact: null,
+  urgency: null,
+  senderName: "Alice Smith",
+  senderEmail: "alice@example.com",
+  assignedTo: null,
+  createdAt: "2025-03-01T10:00:00.000Z",
+  updatedAt: "2025-03-01T10:00:00.000Z",
+  firstResponseDueAt: null,
+  resolutionDueAt: null,
+  firstRespondedAt: null,
+  resolvedAt: null,
+  slaBreached: false,
+  slaStatus: null,
+  minutesUntilBreach: null,
+  isEscalated: false,
+  escalatedAt: null,
+  escalationReason: null,
+};
+
 beforeEach(() => {
   vi.resetAllMocks();
 });
 
 function renderForm() {
   const user = userEvent.setup();
-  renderWithQuery(<ReplyForm ticket={{ id: TICKET_ID }} />);
+  renderWithQuery(<ReplyForm ticket={mockTicket} />);
   return { user };
 }
 

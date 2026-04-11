@@ -15,6 +15,8 @@ import repliesRouter from "./routes/replies";
 import notesRouter from "./routes/notes";
 import macrosRouter from "./routes/macros";
 import customersRouter from "./routes/customers";
+import portalRouter from "./routes/portal";
+import kbRouter from "./routes/kb";
 import { startQueue, stopQueue } from "./lib/queue";
 
 if (!process.env.BETTER_AUTH_SECRET) {
@@ -85,6 +87,8 @@ app.use("/api/tickets/:ticketId/replies", repliesRouter);
 app.use("/api/tickets/:ticketId/notes", notesRouter);
 app.use("/api/macros", macrosRouter);
 app.use("/api/customers", customersRouter);
+app.use("/api/portal", portalRouter);
+app.use("/api/kb", kbRouter);
 app.use("/api/webhooks", webhooksRouter);
 
 Sentry.setupExpressErrorHandler(app);

@@ -26,6 +26,7 @@
         "core": "workspace:*",
         "dompurify": "^3.3.1",
         "lucide-react": "^0.575.0",
+        "marked": "^18.0.0",
         "radix-ui": "^1.4.3",
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
@@ -1469,6 +1470,8 @@
     "mailparser": ["mailparser@2.8.1", "", { "dependencies": { "encoding-japanese": "1.0.30", "he": "1.2.0", "html-to-text": "5.1.1", "iconv-lite": "0.6.2", "libmime": "5.0.0", "linkify-it": "3.0.2", "mailsplit": "5.0.0", "nodemailer": "6.4.11", "tlds": "1.208.0" } }, "sha512-H/CYAO9dsw6SFNbEGGpZsejVSWDcFlyHjb1OkHUWg0wggUekva1tNc28trB155nSqM8rhtbwTKt//orX0AmJxQ=="],
 
     "mailsplit": ["mailsplit@5.0.0", "", { "dependencies": { "libbase64": "1.2.1", "libmime": "4.2.1", "libqp": "1.1.0" } }, "sha512-HeXA0eyCKBtZqbr7uoeb3Nn2L7VV8Vm27x6/YBb0ZiNzRzLoNS2PqRgGYADwh0cBzLYtqddq40bSSirqLO2LGw=="],
+
+    "marked": ["marked@18.0.0", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-2e7Qiv/HJSXj8rDEpgTvGKsP8yYtI9xXHKDnrftrmnrJPaFNM7VRb2YCzWaX4BP1iCJ/XPduzDJZMFoqTCcIMA=="],
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 

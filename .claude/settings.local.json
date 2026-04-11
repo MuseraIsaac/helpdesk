@@ -13,7 +13,26 @@
       "Read(//tmp/**)",
       "Bash(netstat -ano)",
       "Bash(curl:*)",
-      "Bash(bunx prisma:*)"
+      "Bash(bunx prisma:*)",
+      "Bash(taskkill /PID 14660 /F)",
+      "Bash(taskkill /PID 27956 /F)",
+      "Bash(cmd /c \"taskkill /PID 14660 /F\")",
+      "Bash(cmd /c \"taskkill /PID 27956 /F\")",
+      "Bash(powershell:*)",
+      "Bash(echo \"Server starting \\(PID $!\\)\")",
+      "Bash(echo \"Client starting \\(PID $!\\)\")",
+      "Bash(cat prisma.config.ts)",
+      "Bash(cat prisma/prisma.config.ts)",
+      "Bash(PGPASSWORD=postgres psql:*)",
+      "Bash(echo \"Server PID: $!\")",
+      "Bash(DATABASE_URL=\"postgresql://postgres:postgres@204.168.179.132:5432/helpdesk?schema=public\" bun x prisma migrate dev --name add_knowledge_base)",
+      "Bash(bun prisma/apply-kb-migration.ts)",
+      "Bash(awk '{print $5}')",
+      "Bash(psql \"postgresql://postgres:postgres@204.168.179.132:5432/helpdesk\" -c \"SELECT 1\")",
+      "Bash(cat src/lib/db.ts)",
+      "Bash(cat src/lib/prisma.ts)",
+      "Bash(DATABASE_URL=\"postgresql://postgres:postgres@204.168.179.132:5432/helpdesk?schema=public&sslmode=require\" bun run dev)",
+      "Bash(bun add:*)"
     ]
   }
 }
