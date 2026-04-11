@@ -12,8 +12,10 @@ import MacrosPage from "./pages/MacrosPage";
 import KbPage from "./pages/KbPage";
 import KbArticleFormPage from "./pages/KbArticleFormPage";
 import TeamsPage from "./pages/TeamsPage";
+import SupervisorRoute from "./components/SupervisorRoute";
 import TicketsPage from "./pages/TicketsPage";
 import TicketDetailPage from "./pages/TicketDetailPage";
+import PlaceholderPage from "./pages/PlaceholderPage";
 import PortalLoginPage from "./pages/portal/PortalLoginPage";
 import PortalRegisterPage from "./pages/portal/PortalRegisterPage";
 import PortalTicketsPage from "./pages/portal/PortalTicketsPage";
@@ -32,10 +34,21 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/tickets" element={<TicketsPage />} />
           <Route path="/tickets/:id" element={<TicketDetailPage />} />
+          {/* ITSM placeholders (all authenticated users) */}
+          <Route path="/requests" element={<PlaceholderPage title="Service Requests" description="Dedicated service request management is coming soon." />} />
+          <Route path="/problems" element={<PlaceholderPage title="Problems" description="Problem management and root cause analysis is coming soon." />} />
+          <Route path="/changes" element={<PlaceholderPage title="Change Requests" description="Change advisory board and change management is coming soon." />} />
+          <Route path="/settings" element={<PlaceholderPage title="Settings" description="System settings and configuration is coming soon." />} />
+
           <Route element={<AdminRoute />}>
             <Route path="/users" element={<UsersPage />} />
             <Route path="/teams" element={<TeamsPage />} />
             <Route path="/macros" element={<MacrosPage />} />
+            <Route path="/templates" element={<PlaceholderPage title="Templates" description="Response templates will be available here." />} />
+            <Route path="/automations" element={<PlaceholderPage title="Automations" description="Scenario automations and rule management is coming soon." />} />
+            <Route path="/reports" element={<PlaceholderPage title="Reports" description="Advanced reporting and analytics is coming soon." />} />
+          </Route>
+          <Route element={<SupervisorRoute />}>
             <Route path="/kb" element={<KbPage />} />
             <Route path="/kb/articles/new" element={<KbArticleFormPage />} />
             <Route path="/kb/articles/:id/edit" element={<KbArticleFormPage />} />

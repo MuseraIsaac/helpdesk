@@ -3,7 +3,7 @@ import { requireAuth } from "../middleware/require-auth";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
 import { createNoteSchema, updateNoteSchema } from "core/schemas/notes.ts";
-import { Role } from "core/constants/role.ts";
+import { can } from "core/constants/permission.ts";
 import prisma from "../db";
 import { logAudit } from "../lib/audit";
 
@@ -97,7 +97,7 @@ router.patch("/:noteId", requireAuth, async (req, res) => {
   // Editing body is restricted to the author or an admin
   if (data.body !== undefined) {
     const isAuthor = note.authorId === req.user.id;
-    const isAdmin = req.user.role === Role.admin;
+    const isAdmin = can(req.user.role, "notes.manage_any");
     if (!isAuthor && !isAdmin) {
       res.status(403).json({ error: "Only the author or an admin can edit this note" });
       return;
@@ -134,7 +134,7 @@ router.delete("/:noteId", requireAuth, async (req, res) => {
   }
 
   const isAuthor = note.authorId === req.user.id;
-  const isAdmin = req.user.role === Role.admin;
+  const isAdmin = can(req.user.role, "notes.manage_any");
   if (!isAuthor && !isAdmin) {
     res.status(403).json({ error: "Only the author or an admin can delete this note" });
     return;

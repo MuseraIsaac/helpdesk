@@ -15,6 +15,7 @@ import { categoryLabel } from "core/constants/ticket-category.ts";
 import { escalationReasonLabel } from "core/constants/escalation-reason.ts";
 import ErrorAlert from "@/components/ErrorAlert";
 import StatusBadge from "@/components/StatusBadge";
+import TicketTypeBadge from "@/components/TicketTypeBadge";
 import { PriorityBadge, SeverityBadge } from "@/components/TriageBadge";
 import { SlaCountdown } from "@/components/SlaBadge";
 import { EscalationIcon } from "@/components/EscalationBadge";
@@ -70,6 +71,11 @@ const columns: ColumnDef<Ticket>[] = [
         )}
       </div>
     ),
+  },
+  {
+    accessorKey: "ticketType",
+    header: "Type",
+    cell: ({ row }) => <TicketTypeBadge type={row.original.ticketType} />,
   },
   {
     accessorKey: "senderName",
@@ -248,6 +254,9 @@ export default function TicketsTable({ filters }: { filters: TicketFilters }) {
                 <TableRow key={i}>
                   <TableCell>
                     <Skeleton className="h-4 w-48" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-5 w-20 rounded-full" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-40" />

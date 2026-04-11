@@ -40,7 +40,8 @@
       "Bash(bunx --bun shadcn@latest add progress tooltip --yes)",
       "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); print\\(data[0]['text']\\)\")",
       "Bash(2>&1)",
-      "Bash(bun -e ':*)"
+      "Bash(bun -e ':*)",
+      "Bash(DATABASE_URL='postgresql://postgres:postgres@204.168.179.132:5432/helpdesk?schema=public' bun x prisma migrate deploy)"
     ]
   }
 }

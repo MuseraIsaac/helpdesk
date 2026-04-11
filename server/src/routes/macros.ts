@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/require-auth";
-import { requireAdmin } from "../middleware/require-admin";
+import { requirePermission } from "../middleware/require-permission";
+import { can } from "core/constants/permission.ts";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
 import { createMacroSchema, updateMacroSchema } from "core/schemas/macros.ts";
@@ -21,10 +22,10 @@ const MACRO_SELECT = {
 } as const;
 
 // List macros.
-// Agents see only active macros (for the reply picker).
-// Admins see all macros (for the management UI).
+// Users with macros.manage (admin) see all macros (for the management UI).
+// All other agents see only active macros (for the reply picker).
 router.get("/", requireAuth, async (req, res) => {
-  const isAdmin = req.user.role === "admin";
+  const isAdmin = can(req.user.role, "macros.manage");
   const macros = await prisma.macro.findMany({
     where: isAdmin ? undefined : { isActive: true },
     select: MACRO_SELECT,
@@ -34,7 +35,7 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 // Create a macro — admin only.
-router.post("/", requireAuth, requireAdmin, async (req, res) => {
+router.post("/", requireAuth, requirePermission("macros.manage"), async (req, res) => {
   const data = validate(createMacroSchema, req.body, res);
   if (!data) return;
 
@@ -53,7 +54,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Update a macro — admin only.
-router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
+router.put("/:id", requireAuth, requirePermission("macros.manage"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     res.status(400).json({ error: "Invalid macro ID" });
@@ -84,7 +85,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Delete a macro — admin only. Hard delete: macros have no FK dependants.
-router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/:id", requireAuth, requirePermission("macros.manage"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     res.status(400).json({ error: "Invalid macro ID" });

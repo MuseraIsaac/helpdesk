@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/require-auth";
+import { requirePermission } from "../middleware/require-permission";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
-import { Role } from "core/constants/role.ts";
 import {
   createTeamSchema,
   updateTeamSchema,
@@ -93,11 +93,7 @@ router.get("/:id", async (req, res) => {
 
 // ── Create team (admin only) ─────────────────────────────────────────────────
 
-router.post("/", async (req, res) => {
-  if (req.user.role !== Role.admin) {
-    res.status(403).json({ error: "Admin access required" });
-    return;
-  }
+router.post("/", requirePermission("teams.manage"), async (req, res) => {
 
   const data = validate(createTeamSchema, req.body, res);
   if (!data) return;
@@ -122,11 +118,7 @@ router.post("/", async (req, res) => {
 
 // ── Update team (admin only) ─────────────────────────────────────────────────
 
-router.patch("/:id", async (req, res) => {
-  if (req.user.role !== Role.admin) {
-    res.status(403).json({ error: "Admin access required" });
-    return;
-  }
+router.patch("/:id", requirePermission("teams.manage"), async (req, res) => {
 
   const id = parseId(req.params.id);
   if (!id) {
@@ -166,11 +158,7 @@ router.patch("/:id", async (req, res) => {
 
 // ── Delete team (admin only) ─────────────────────────────────────────────────
 
-router.delete("/:id", async (req, res) => {
-  if (req.user.role !== Role.admin) {
-    res.status(403).json({ error: "Admin access required" });
-    return;
-  }
+router.delete("/:id", requirePermission("teams.manage"), async (req, res) => {
 
   const id = parseId(req.params.id);
   if (!id) {
@@ -193,11 +181,7 @@ router.delete("/:id", async (req, res) => {
 // ── Set team members (admin only) ────────────────────────────────────────────
 // Replaces the full member list with the provided user IDs (idempotent PUT-style)
 
-router.put("/:id/members", async (req, res) => {
-  if (req.user.role !== Role.admin) {
-    res.status(403).json({ error: "Admin access required" });
-    return;
-  }
+router.put("/:id/members", requirePermission("teams.manage"), async (req, res) => {
 
   const id = parseId(req.params.id);
   if (!id) {

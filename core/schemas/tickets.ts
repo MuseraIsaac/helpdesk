@@ -5,6 +5,7 @@ import { ticketPriorities } from "../constants/ticket-priority";
 import { ticketSeverities } from "../constants/ticket-severity";
 import { ticketImpacts } from "../constants/ticket-impact";
 import { ticketUrgencies } from "../constants/ticket-urgency";
+import { ticketTypes } from "../constants/ticket-type";
 
 export const inboundEmailSchema = z.object({
   from: z.email("Invalid email address"),
@@ -21,6 +22,8 @@ export const createTicketSchema = z.object({
   body: z.string().trim().min(1, "Description is required").max(5000, "Description is too long"),
   senderName: z.string().trim().min(1, "Sender name is required").max(255, "Sender name is too long"),
   senderEmail: z.email("Invalid email address"),
+  ticketType: z.enum(ticketTypes).nullable().optional(),
+  affectedSystem: z.string().trim().max(255, "Affected system is too long").nullable().optional(),
   category: z.enum(ticketCategories).nullable().optional(),
   priority: z.enum(ticketPriorities).nullable().optional(),
   severity: z.enum(ticketSeverities).nullable().optional(),
@@ -35,6 +38,7 @@ const sortableColumns = [
   "subject",
   "senderName",
   "status",
+  "ticketType",
   "category",
   "priority",
   "severity",
@@ -46,6 +50,8 @@ export type TicketSortField = (typeof sortableColumns)[number];
 export const updateTicketSchema = z.object({
   assignedToId: z.string().nullable().optional(),
   status: z.enum(agentTicketStatuses).optional(),
+  ticketType: z.enum(ticketTypes).nullable().optional(),
+  affectedSystem: z.string().trim().max(255, "Affected system is too long").nullable().optional(),
   category: z.enum(ticketCategories).nullable().optional(),
   priority: z.enum(ticketPriorities).nullable().optional(),
   severity: z.enum(ticketSeverities).nullable().optional(),
@@ -72,6 +78,7 @@ export const ticketListQuerySchema = z.object({
   sortBy: z.enum(sortableColumns).default("createdAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
   status: z.enum(agentTicketStatuses).optional(),
+  ticketType: z.enum(ticketTypes).optional(),
   category: z.enum(ticketCategories).optional(),
   priority: z.enum(ticketPriorities).optional(),
   severity: z.enum(ticketSeverities).optional(),

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type TicketStatus } from "core/constants/ticket-status.ts";
+import { type TicketType } from "core/constants/ticket-type.ts";
 import { type TicketCategory } from "core/constants/ticket-category.ts";
 import { type TicketPriority } from "core/constants/ticket-priority.ts";
 import { type TicketSeverity } from "core/constants/ticket-severity.ts";
@@ -12,6 +13,7 @@ import { AlertTriangle, Clock, ShieldAlert, UserX } from "lucide-react";
 
 export interface TicketFilters {
   status?: TicketStatus;
+  ticketType?: TicketType;
   category?: TicketCategory;
   priority?: TicketPriority;
   severity?: TicketSeverity;

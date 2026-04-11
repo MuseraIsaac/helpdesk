@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import { Search } from "lucide-react";
 import { agentTicketStatuses, statusLabel } from "core/constants/ticket-status.ts";
+import { ticketTypes, ticketTypeLabel } from "core/constants/ticket-type.ts";
 import { categoryLabel } from "core/constants/ticket-category.ts";
 import { ticketPriorities, priorityLabel } from "core/constants/ticket-priority.ts";
 import { ticketSeverities, severityShortLabel } from "core/constants/ticket-severity.ts";
@@ -48,6 +49,23 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
           className="pl-8"
         />
       </div>
+
+      <Select
+        value={filters.ticketType ?? ALL}
+        onValueChange={(value) =>
+          onChange({ ...filters, ticketType: value === ALL ? undefined : (value as TicketFilters["ticketType"]) })
+        }
+      >
+        <SelectTrigger className="w-[150px]">
+          <SelectValue placeholder="All types" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>All types</SelectItem>
+          {ticketTypes.map((t) => (
+            <SelectItem key={t} value={t}>{ticketTypeLabel[t]}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       <Select
         value={filters.status ?? ALL}

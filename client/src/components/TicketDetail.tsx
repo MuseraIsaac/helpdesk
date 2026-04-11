@@ -2,6 +2,7 @@ import DOMPurify from "dompurify";
 import { type Ticket } from "core/constants/ticket.ts";
 import { Card, CardContent } from "@/components/ui/card";
 import StatusBadge from "@/components/StatusBadge";
+import TicketTypeBadge from "@/components/TicketTypeBadge";
 import { PriorityBadge, SeverityBadge, ImpactBadge, UrgencyBadge } from "@/components/TriageBadge";
 import { SlaBadge, SlaDeadlineRow } from "@/components/SlaBadge";
 import { EscalationBadge } from "@/components/EscalationBadge";
@@ -12,7 +13,7 @@ interface TicketDetailProps {
 }
 
 export default function TicketDetail({ ticket }: TicketDetailProps) {
-  const hasTriage = ticket.priority || ticket.severity || ticket.impact || ticket.urgency;
+  const hasTriage = ticket.priority || ticket.severity || ticket.impact || ticket.urgency || ticket.affectedSystem;
   const hasSla = ticket.firstResponseDueAt || ticket.resolutionDueAt;
   const hasEscalation = ticket.isEscalated || (ticket.escalationEvents && ticket.escalationEvents.length > 0);
 
@@ -24,6 +25,9 @@ export default function TicketDetail({ ticket }: TicketDetailProps) {
             {ticket.subject}
           </h1>
           <div className="flex items-center gap-2 shrink-0">
+            {ticket.ticketType && (
+              <TicketTypeBadge type={ticket.ticketType} />
+            )}
             {ticket.isEscalated && (
               <EscalationBadge reason={ticket.escalationReason} />
             )}
@@ -70,6 +74,12 @@ export default function TicketDetail({ ticket }: TicketDetailProps) {
             <div className="flex flex-col gap-1">
               <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Urgency</span>
               <UrgencyBadge urgency={ticket.urgency} />
+            </div>
+          )}
+          {ticket.affectedSystem && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Affected System</span>
+              <span className="text-sm font-medium">{ticket.affectedSystem}</span>
             </div>
           )}
         </div>

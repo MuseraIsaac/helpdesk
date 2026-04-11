@@ -3,6 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   createUserSchema,
   updateUserSchema,
+  assignableRoles,
   type CreateUserInput,
   type UpdateUserInput,
 } from "core/schemas/users";
@@ -18,6 +19,7 @@ interface UserData {
   id: string;
   name: string;
   email: string;
+  role?: string;
 }
 
 interface UserFormProps {
@@ -35,6 +37,7 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
       name: user?.name ?? "",
       email: user?.email ?? "",
       password: "",
+      role: (user?.role as CreateUserInput["role"]) ?? "agent",
     },
   });
 
@@ -99,6 +102,23 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
         />
         {form.formState.errors.password && (
           <ErrorMessage message={form.formState.errors.password.message} />
+        )}
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="role">Role</Label>
+        <select
+          id="role"
+          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          {...form.register("role")}
+        >
+          {assignableRoles.map((r) => (
+            <option key={r} value={r}>
+              {r.charAt(0).toUpperCase() + r.slice(1)}
+            </option>
+          ))}
+        </select>
+        {form.formState.errors.role && (
+          <ErrorMessage message={form.formState.errors.role.message} />
         )}
       </div>
       {mutation.error && (

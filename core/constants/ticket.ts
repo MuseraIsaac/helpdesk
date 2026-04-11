@@ -1,4 +1,5 @@
 import { type TicketStatus } from "./ticket-status";
+import { type TicketType } from "./ticket-type";
 import { type TicketCategory } from "./ticket-category";
 import { type TicketPriority } from "./ticket-priority";
 import { type TicketSeverity } from "./ticket-severity";
@@ -21,6 +22,8 @@ export interface Ticket {
   body: string;
   bodyHtml: string | null;
   status: TicketStatus;
+  ticketType: TicketType | null;
+  affectedSystem: string | null;
   category: TicketCategory | null;
   priority: TicketPriority | null;
   severity: TicketSeverity | null;

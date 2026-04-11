@@ -1,7 +1,10 @@
+import { useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { type Ticket } from "core/constants/ticket.ts";
+import { ticketTypes, ticketTypeLabel } from "core/constants/ticket-type.ts";
 import { AlertTriangle, CheckCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { agentTicketStatuses, statusLabel } from "core/constants/ticket-status.ts";
 import { ticketCategories, categoryLabel } from "core/constants/ticket-category.ts";
@@ -32,6 +35,37 @@ interface Team {
 
 interface UpdateTicketProps {
   ticket: Ticket;
+}
+
+function AffectedSystemInput({
+  ticket,
+  onSave,
+}: {
+  ticket: Ticket;
+  onSave: (val: string | null) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <Input
+      ref={ref}
+      size={1}
+      defaultValue={ticket.affectedSystem ?? ""}
+      placeholder="e.g. Payment gateway"
+      className="h-7 text-xs"
+      onBlur={(e) => {
+        const val = e.target.value.trim();
+        const prev = ticket.affectedSystem ?? "";
+        if (val !== prev) onSave(val || null);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") ref.current?.blur();
+        if (e.key === "Escape") {
+          if (ref.current) ref.current.value = ticket.affectedSystem ?? "";
+          ref.current?.blur();
+        }
+      }}
+    />
+  );
 }
 
 function SidebarLabel({ children }: { children: React.ReactNode }) {
@@ -234,6 +268,36 @@ export default function UpdateTicket({ ticket }: UpdateTicketProps) {
           <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
             Details
           </p>
+
+          <div className="space-y-1.5">
+            <SidebarLabel>Type</SidebarLabel>
+            <Select
+              value={ticket.ticketType ?? "none"}
+              onValueChange={(value) =>
+                updateMutation.mutate({ ticketType: value === "none" ? null : value })
+              }
+              disabled={updateMutation.isPending}
+            >
+              <SelectTrigger size="sm" className="w-full">
+                <SelectValue placeholder="Generic" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Generic</SelectItem>
+                {ticketTypes.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {ticketTypeLabel[t]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {ticket.ticketType === "incident" && (
+            <div className="space-y-1.5">
+              <SidebarLabel>Affected System</SidebarLabel>
+              <AffectedSystemInput ticket={ticket} onSave={(val) => updateMutation.mutate({ affectedSystem: val })} />
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <SidebarLabel>Status</SidebarLabel>

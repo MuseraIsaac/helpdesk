@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/require-auth";
-import { requireAdmin } from "../middleware/require-admin";
+import { requirePermission } from "../middleware/require-permission";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
 import { uniqueSlug } from "../lib/slugify";
@@ -240,9 +240,9 @@ router.get("/articles/:id", async (req, res) => {
   res.json({ article });
 });
 
-// ── Admin-only routes ─────────────────────────────────────────────────────────
+// ── Admin + supervisor routes ─────────────────────────────────────────────────
 
-router.use(requireAdmin);
+router.use(requirePermission("kb.manage"));
 
 // ── Categories ────────────────────────────────────────────────────────────────
 

@@ -1,9 +1,10 @@
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { useState } from "react";
 import { createTicketSchema, type CreateTicketInput } from "core/schemas/tickets.ts";
+import { ticketTypes, ticketTypeLabel } from "core/constants/ticket-type.ts";
 import { ticketCategories, categoryLabel } from "core/constants/ticket-category.ts";
 import { ticketPriorities, priorityLabel } from "core/constants/ticket-priority.ts";
 import { ticketSeverities, severityLabel } from "core/constants/ticket-severity.ts";
@@ -99,6 +100,8 @@ export default function NewTicketDialog() {
     resolver: zodResolver(createTicketSchema),
   });
 
+  const selectedType = useWatch({ control, name: "ticketType" });
+
   const createMutation = useMutation({
     mutationFn: async (data: CreateTicketInput) => {
       const { data: ticket } = await axios.post("/api/tickets", data);
@@ -139,6 +142,33 @@ export default function NewTicketDialog() {
             <ErrorAlert error={createMutation.error} fallback="Failed to create ticket" />
           )}
 
+          {/* Ticket Type */}
+          <div className="space-y-1.5">
+            <Label>Ticket Type</Label>
+            <Controller
+              name="ticketType"
+              control={control}
+              render={({ field }) => (
+                <Select
+                  value={(field.value as string | null) ?? "none"}
+                  onValueChange={(val) => field.onChange(val === "none" ? null : val)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Generic (untyped)</SelectItem>
+                    {ticketTypes.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {ticketTypeLabel[t]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+
           {/* Subject */}
           <div className="space-y-1.5">
             <Label htmlFor="subject">
@@ -151,6 +181,21 @@ export default function NewTicketDialog() {
             />
             {errors.subject && <ErrorMessage message={errors.subject.message} />}
           </div>
+
+          {/* Affected System — shown only for Incidents */}
+          {selectedType === "incident" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="affectedSystem">Affected System</Label>
+              <Input
+                id="affectedSystem"
+                placeholder="e.g. Payment gateway, Login service"
+                {...register("affectedSystem")}
+              />
+              {errors.affectedSystem && (
+                <ErrorMessage message={errors.affectedSystem.message} />
+              )}
+            </div>
+          )}
 
           {/* Sender */}
           <div className="grid grid-cols-2 gap-3">

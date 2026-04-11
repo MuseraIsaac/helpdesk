@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/require-auth";
+import { requirePermission } from "../middleware/require-permission";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
 import { ticketListQuerySchema, updateTicketSchema, createTicketSchema } from "core/schemas/tickets.ts";
@@ -25,6 +26,8 @@ const LIST_SELECT = {
   id: true,
   subject: true,
   status: true,
+  ticketType: true,
+  affectedSystem: true,
   category: true,
   priority: true,
   severity: true,
@@ -94,7 +97,7 @@ router.get("/stats/daily-volume", requireAuth, async (_req, res) => {
 
 // ─── Create ────────────────────────────────────────────────────────────────
 
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, requirePermission("tickets.create"), async (req, res) => {
   const data = validate(createTicketSchema, req.body, res);
   if (!data) return;
 
@@ -119,6 +122,8 @@ router.post("/", requireAuth, async (req, res) => {
       senderName: data.senderName,
       senderEmail: data.senderEmail,
       customerId,
+      ticketType: data.ticketType ?? null,
+      affectedSystem: data.affectedSystem ?? null,
       category: data.category ?? null,
       priority: data.priority ?? null,
       severity: data.severity ?? null,
@@ -220,6 +225,7 @@ router.get("/", requireAuth, async (req, res) => {
     } else {
       where.status = { in: ["open", "resolved", "closed"] };
     }
+    if (query.ticketType) where.ticketType = query.ticketType;
     if (query.category) where.category = query.category;
     if (query.priority) where.priority = query.priority;
     if (query.severity) where.severity = query.severity;
@@ -317,7 +323,7 @@ router.get("/:id", requireAuth, async (req, res) => {
 
 // ─── Update ────────────────────────────────────────────────────────────────
 
-router.patch("/:id", requireAuth, async (req, res) => {
+router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     res.status(400).json({ error: "Invalid ticket ID" });
@@ -349,6 +355,8 @@ router.patch("/:id", requireAuth, async (req, res) => {
   const updateData: Prisma.TicketUpdateInput = {
     ...("assignedToId" in data && { assignedToId: data.assignedToId }),
     ...("status" in data && { status: data.status }),
+    ...("ticketType" in data && { ticketType: data.ticketType }),
+    ...("affectedSystem" in data && { affectedSystem: data.affectedSystem }),
     ...("category" in data && { category: data.category }),
     ...("priority" in data && { priority: data.priority }),
     ...("severity" in data && { severity: data.severity }),

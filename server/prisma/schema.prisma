@@ -15,7 +15,9 @@ datasource db {
 
 enum Role {
   admin
+  supervisor
   agent
+  readonly
   customer
 }
 
@@ -67,6 +69,13 @@ enum TicketUrgency {
 enum KbArticleStatus {
   draft
   published
+}
+
+enum TicketType {
+  incident
+  service_request
+  problem
+  change_request
 }
 
 enum EscalationReason {
@@ -167,6 +176,8 @@ model Ticket {
   body         String
   bodyHtml     String?
   status       TicketStatus    @default(new)
+  ticketType   TicketType?
+  affectedSystem String?
   category     TicketCategory?
   priority     TicketPriority?
   severity     TicketSeverity?

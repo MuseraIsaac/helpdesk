@@ -23,7 +23,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   const data = validate(createUserSchema, req.body, res);
   if (!data) return;
 
-  const { name, email, password } = data;
+  const { name, email, password, role } = data;
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
@@ -42,7 +42,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
         name,
         email,
         emailVerified: false,
-        role: Role.agent,
+        role: (role as Role) ?? Role.agent,
         createdAt: now,
         updatedAt: now,
       },
@@ -74,7 +74,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   const data = validate(updateUserSchema, req.body, res);
   if (!data) return;
 
-  const { name, email, password } = data;
+  const { name, email, password, role } = data;
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing && existing.id !== id) {
@@ -84,7 +84,12 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 
   await prisma.user.update({
     where: { id: id },
-    data: { name, email, updatedAt: new Date() },
+    data: {
+      name,
+      email,
+      updatedAt: new Date(),
+      ...(role !== undefined && { role: role as Role }),
+    },
   });
 
   if (password) {

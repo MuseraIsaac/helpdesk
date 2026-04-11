@@ -24,7 +24,7 @@ import {
   MAX_FILE_SIZE,
   MAX_FILES_PER_UPLOAD,
 } from "../lib/storage";
-import { Role } from "core/constants/role.ts";
+import { can } from "core/constants/permission.ts";
 import prisma from "../db";
 
 const router = Router({ mergeParams: true });
@@ -106,7 +106,7 @@ router.delete("/:id", requireAuth, async (req, res) => {
   const attachment = await prisma.attachment.findFirst({ where: { id, ticketId } });
   if (!attachment) { res.status(404).json({ error: "Attachment not found" }); return; }
 
-  const isAdmin = req.user.role === Role.admin;
+  const isAdmin = can(req.user.role, "attachments.delete_any");
   const isUploader = attachment.uploadedById === req.user.id;
   if (!isAdmin && !isUploader) {
     res.status(403).json({ error: "Forbidden" });
