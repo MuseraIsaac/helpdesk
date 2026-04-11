@@ -11,8 +11,14 @@ import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 import { computeSlaDeadlines } from "../lib/sla";
 import { logAudit } from "../lib/audit";
 import { upsertCustomer } from "../lib/upsert-customer";
+import {
+  saveFile,
+  ALLOWED_MIME_TYPES,
+  MAX_FILE_SIZE,
+} from "../lib/storage";
 
-const upload = multer();
+// Accept up to 20 MB total for inbound emails (attachments can be several files)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 function stripSubjectPrefixes(subject: string): string {
   return subject.replace(/^(Re:\s*|Fwd:\s*)+/i, "").trim();
@@ -24,6 +30,58 @@ function parseFromField(from: string): { email: string; name: string } {
     return { name: match[1]!.trim() || match[2]!, email: match[2]! };
   }
   return { name: from, email: from };
+}
+
+/**
+ * Extract the Message-ID value from the raw headers string that SendGrid
+ * passes as the `headers` form field.
+ * Returns the bare ID without angle brackets, e.g. "abc123@mail.example.com".
+ */
+function extractMessageId(rawHeaders: unknown): string | null {
+  if (typeof rawHeaders !== "string" || !rawHeaders) return null;
+  const m = rawHeaders.match(/^Message-ID:\s*<?([^>\r\n]+)>?/im);
+  return m?.[1]?.trim() ?? null;
+}
+
+/**
+ * SendGrid sends email attachments as multipart files with fieldnames
+ * attachment1, attachment2, … Save all of them that pass the allowlist.
+ * Errors per-file are logged and skipped — a bad attachment must not
+ * prevent the ticket or reply from being created.
+ */
+async function saveInboundAttachments(
+  files: Express.Multer.File[],
+  ticketId: number,
+  replyId?: number
+): Promise<void> {
+  const attachmentFiles = files.filter((f) => /^attachment\d+$/.test(f.fieldname));
+
+  for (const file of attachmentFiles) {
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      console.warn(`Inbound attachment skipped (disallowed type): ${file.mimetype}`);
+      continue;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      console.warn(`Inbound attachment skipped (too large): ${file.size} bytes`);
+      continue;
+    }
+    try {
+      const storageKey = await saveFile(file.buffer, file.originalname);
+      await prisma.attachment.create({
+        data: {
+          filename: file.originalname,
+          mimeType: file.mimetype,
+          size: file.size,
+          storageKey,
+          ticketId,
+          replyId: replyId ?? null,
+          uploadedById: null, // inbound — no agent user
+        },
+      });
+    } catch (err) {
+      console.error("Failed to save inbound attachment:", err);
+    }
+  }
 }
 
 const router = Router();
@@ -46,6 +104,8 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
   if (!data) return;
 
   const normalizedSubject = stripSubjectPrefixes(data.subject);
+  const emailMessageId = extractMessageId(req.body.headers);
+  const files = (req.files as Express.Multer.File[]) || [];
 
   // Check for existing open ticket from same sender with matching subject
   const existingTicket = await prisma.ticket.findFirst({
@@ -57,22 +117,21 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
   });
 
   if (existingTicket) {
-    await prisma.reply.create({
+    const reply = await prisma.reply.create({
       data: {
         body: data.body,
         bodyHtml: data.bodyHtml ?? null,
         senderType: "customer",
         ticketId: existingTicket.id,
         userId: null,
+        emailMessageId,
       },
     });
+    await saveInboundAttachments(files, existingTicket.id, reply.id);
     res.status(200).json({ ticket: existingTicket });
     return;
   }
 
-  // Inbound emails have no priority yet — use the default SLA policy.
-  // The classify job will set category; priority can be set by an agent later,
-  // at which point the PATCH handler will recalculate deadlines.
   const now = new Date();
   const slaDeadlines = computeSlaDeadlines(null, now);
   const customerId = await upsertCustomer(data.from, data.fromName);
@@ -88,12 +147,14 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
       assignedToId: AI_AGENT_ID,
       firstResponseDueAt: slaDeadlines.firstResponseDueAt,
       resolutionDueAt: slaDeadlines.resolutionDueAt,
+      emailMessageId,
     },
   });
 
   res.status(201).json({ ticket });
 
   void logAudit(ticket.id, null, "ticket.created", { via: "email" });
+  void saveInboundAttachments(files, ticket.id);
 
   sendClassifyJob(ticket).catch((error) =>
     console.error(`Failed to enqueue classify job for ticket ${ticket.id}:`, error)

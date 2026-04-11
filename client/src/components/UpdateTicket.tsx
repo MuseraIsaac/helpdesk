@@ -23,6 +23,13 @@ interface Agent {
   name: string;
 }
 
+interface Team {
+  id: number;
+  name: string;
+  color: string;
+  members: Agent[];
+}
+
 interface UpdateTicketProps {
   ticket: Ticket;
 }
@@ -46,6 +53,14 @@ export default function UpdateTicket({ ticket }: UpdateTicketProps) {
     },
   });
 
+  const { data: teamsData } = useQuery({
+    queryKey: ["teams"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ teams: Team[] }>("/api/teams");
+      return data.teams;
+    },
+  });
+
   const updateMutation = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
       const { data } = await axios.patch(`/api/tickets/${ticket.id}`, body);
@@ -55,6 +70,31 @@ export default function UpdateTicket({ ticket }: UpdateTicketProps) {
       queryClient.invalidateQueries({ queryKey: ["ticket", String(ticket.id)] });
     },
   });
+
+  // Agents available to assign: filtered to the selected team's members.
+  // Falls back to all agents when no team is selected.
+  const selectedTeam = teamsData?.find((t) => t.id === ticket.teamId) ?? null;
+  const availableAgents: Agent[] =
+    selectedTeam && selectedTeam.members.length > 0
+      ? selectedTeam.members
+      : agentsData?.agents ?? [];
+
+  function handleTeamChange(value: string) {
+    const newTeamId = value === "none" ? null : Number(value);
+    const newTeam = teamsData?.find((t) => t.id === newTeamId) ?? null;
+
+    // If the current assignee isn't a member of the new team, clear them
+    const assigneeInNewTeam =
+      !newTeam ||
+      newTeam.members.length === 0 ||
+      newTeam.members.some((m) => m.id === ticket.assignedTo?.id);
+
+    const update: Record<string, unknown> = { teamId: newTeamId };
+    if (ticket.assignedTo && !assigneeInNewTeam) {
+      update.assignedToId = null;
+    }
+    updateMutation.mutate(update);
+  }
 
   return (
     <Card className="w-56 h-fit">
@@ -236,8 +276,42 @@ export default function UpdateTicket({ ticket }: UpdateTicketProps) {
             </Select>
           </div>
 
+          {/* Team — select first; agent list is scoped to team members */}
           <div className="space-y-1.5">
-            <SidebarLabel>Assigned To</SidebarLabel>
+            <SidebarLabel>Team</SidebarLabel>
+            <Select
+              value={ticket.teamId != null ? String(ticket.teamId) : "none"}
+              onValueChange={handleTeamChange}
+              disabled={updateMutation.isPending}
+            >
+              <SelectTrigger size="sm" className="w-full">
+                <SelectValue placeholder="No team" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No team</SelectItem>
+                {(teamsData ?? []).map((t) => (
+                  <SelectItem key={t.id} value={String(t.id)}>
+                    <span className="flex items-center gap-1.5">
+                      <span
+                        className="h-2 w-2 rounded-full shrink-0"
+                        style={{ backgroundColor: t.color }}
+                      />
+                      {t.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Agent — scoped to team members once a team is selected */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <SidebarLabel>Assigned Agent</SidebarLabel>
+              {selectedTeam && (
+                <span className="text-[10px] text-muted-foreground">{selectedTeam.name}</span>
+              )}
+            </div>
             <Select
               value={ticket.assignedTo?.id ?? "unassigned"}
               onValueChange={(value) =>
@@ -245,19 +319,25 @@ export default function UpdateTicket({ ticket }: UpdateTicketProps) {
                   assignedToId: value === "unassigned" ? null : value,
                 })
               }
+              disabled={updateMutation.isPending}
             >
               <SelectTrigger size="sm" className="w-full">
-                <SelectValue />
+                <SelectValue placeholder="Unassigned" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="unassigned">Unassigned</SelectItem>
-                {agentsData?.agents.map((agent) => (
+                {availableAgents.map((agent) => (
                   <SelectItem key={agent.id} value={agent.id}>
                     {agent.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {selectedTeam && selectedTeam.members.length === 0 && (
+              <p className="text-[10px] text-muted-foreground">
+                This team has no members yet.
+              </p>
+            )}
           </div>
         </div>
 

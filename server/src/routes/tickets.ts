@@ -33,6 +33,9 @@ const LIST_SELECT = {
   senderName: true,
   senderEmail: true,
   assignedToId: true,
+  assignedTo: { select: { id: true, name: true } },
+  teamId: true,
+  team: { select: { id: true, name: true, color: true } },
   createdAt: true,
   firstResponseDueAt: true,
   resolutionDueAt: true,
@@ -162,6 +165,7 @@ router.post("/", requireAuth, async (req, res) => {
     where: { id: ticket.id },
     include: {
       assignedTo: { select: { id: true, name: true } },
+      team: { select: { id: true, name: true, color: true } },
       escalationEvents: { orderBy: { createdAt: "asc" } },
     },
   });
@@ -228,6 +232,9 @@ router.get("/", requireAuth, async (req, res) => {
         { senderEmail: { contains: query.search, mode: "insensitive" } },
       ];
     }
+    if (query.teamId !== undefined) {
+      where.teamId = query.teamId === "none" ? null : query.teamId;
+    }
   }
 
   const [tickets, total] = await Promise.all([
@@ -262,6 +269,7 @@ router.get("/:id", requireAuth, async (req, res) => {
     where: { id },
     include: {
       assignedTo: { select: { id: true, name: true } },
+      team: { select: { id: true, name: true, color: true } },
       escalationEvents: { orderBy: { createdAt: "asc" } },
       auditEvents: {
         orderBy: { createdAt: "asc" },
@@ -346,6 +354,11 @@ router.patch("/:id", requireAuth, async (req, res) => {
     ...("severity" in data && { severity: data.severity }),
     ...("impact" in data && { impact: data.impact }),
     ...("urgency" in data && { urgency: data.urgency }),
+    ...("teamId" in data && {
+      team: data.teamId == null
+        ? { disconnect: true }
+        : { connect: { id: data.teamId } },
+    }),
   };
 
   // Recalculate SLA deadlines when priority changes
@@ -378,6 +391,7 @@ router.patch("/:id", requireAuth, async (req, res) => {
     data: updateData,
     include: {
       assignedTo: { select: { id: true, name: true } },
+      team: { select: { id: true, name: true, color: true } },
       escalationEvents: { orderBy: { createdAt: "asc" } },
     },
   });
@@ -463,6 +477,7 @@ router.patch("/:id", requireAuth, async (req, res) => {
     where: { id },
     include: {
       assignedTo: { select: { id: true, name: true } },
+      team: { select: { id: true, name: true, color: true } },
       escalationEvents: { orderBy: { createdAt: "asc" } },
     },
   });

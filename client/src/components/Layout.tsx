@@ -7,6 +7,7 @@ import {
   Ticket,
   Users,
   BookOpen,
+  Inbox,
   LogOut,
   Sun,
   Moon,
@@ -59,6 +60,10 @@ export default function Layout() {
               <NavLink to="/users" className={navLinkClass}>
                 <Users className="h-3.5 w-3.5" />
                 Users
+              </NavLink>
+              <NavLink to="/teams" className={navLinkClass}>
+                <Inbox className="h-3.5 w-3.5" />
+                Teams
               </NavLink>
               <NavLink to="/macros" className={navLinkClass}>
                 <BookOpen className="h-3.5 w-3.5" />

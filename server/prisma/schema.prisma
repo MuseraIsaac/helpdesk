@@ -90,12 +90,14 @@ model User {
   deletedAt     DateTime?
   sessions        Session[]
   accounts        Account[]
-  assignedTickets Ticket[]
-  replies         Reply[]
-  notes           Note[]
-  auditEvents     AuditEvent[]
-  macros          Macro[]
-  kbArticles      KbArticle[]
+  assignedTickets     Ticket[]
+  replies             Reply[]
+  notes               Note[]
+  auditEvents         AuditEvent[]
+  macros              Macro[]
+  kbArticles          KbArticle[]
+  uploadedAttachments Attachment[]
+  teamMemberships     TeamMember[]
 
   @@map("user")
 }
@@ -178,9 +180,17 @@ model Ticket {
   customer     Customer?       @relation(fields: [customerId], references: [id])
   assignedToId String?
   assignedTo   User?           @relation(fields: [assignedToId], references: [id])
+  // Team — which support team/inbox this ticket belongs to. Null = default inbox.
+  // @map keeps the DB column name (queueId) while TypeScript uses teamId.
+  teamId       Int?            @map("queueId")
+  team         Team?           @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  // Email threading: Message-ID header from the original inbound email.
+  // Used to set In-Reply-To / References when sending agent replies.
+  emailMessageId String?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   replies      Reply[]
+  attachments  Attachment[]
 
   // SLA: deadlines are calculated from priority at ticket creation.
   // Recalculated when priority changes. Null = no SLA target set yet.
@@ -220,17 +230,54 @@ model EscalationEvent {
 }
 
 model Reply {
-  id         Int        @id @default(autoincrement())
-  body       String
-  bodyHtml   String?
-  senderType SenderType
-  ticketId   Int
-  ticket     Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  userId     String?
-  user       User?      @relation(fields: [userId], references: [id])
-  createdAt  DateTime   @default(now())
+  id             Int          @id @default(autoincrement())
+  body           String
+  bodyHtml       String?
+  senderType     SenderType
+  ticketId       Int
+  ticket         Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id])
+  // Email threading: Message-ID for this specific reply (inbound from header, outbound generated).
+  emailMessageId String?
+  createdAt      DateTime     @default(now())
+  attachments    Attachment[]
 
   @@map("reply")
+}
+
+/**
+ * Attachment — file attached to a ticket's original message or a specific reply.
+ *
+ * Storage assumptions:
+ *   - Files are stored on disk in UPLOAD_DIR (env var, default ./uploads).
+ *   - storageKey is a UUID-based filename — original names are never used as paths.
+ *   - To swap to object storage (S3 / R2 / GCS), replace server/src/lib/storage.ts only.
+ *   - Notes intentionally have no Attachment relation — internal notes must never
+ *     include external file transfers.
+ *
+ * Scoping:
+ *   - ticketId is always set; provides CASCADE delete when a ticket is removed.
+ *   - replyId is null for ticket-level attachments (original inbound email).
+ *   - replyId is set for reply-level attachments (inbound email replies or agent replies).
+ */
+model Attachment {
+  id           Int      @id @default(autoincrement())
+  filename     String
+  mimeType     String
+  size         Int
+  storageKey   String   @unique
+  ticketId     Int
+  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  replyId      Int?
+  reply        Reply?   @relation(fields: [replyId], references: [id], onDelete: SetNull)
+  uploadedById String?
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([replyId])
+  @@map("attachment")
 }
 
 model Note {
@@ -371,4 +418,35 @@ model Verification {
   updatedAt  DateTime?
 
   @@map("verification")
+}
+
+/**
+ * Team — a named support team or inbox that tickets can be routed to.
+ *
+ * Design principles:
+ *  - teamId on Ticket is nullable; null means "default inbox" — no migration risk.
+ *  - color is a hex string used to render team badge pills in the UI.
+ *  - Members are agents who belong to the team; determines the agent picker on tickets.
+ */
+model Team {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  description String?
+  color       String       @default("#6366f1")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  tickets     Ticket[]
+  members     TeamMember[]
+
+  @@map("queue")
+}
+
+model TeamMember {
+  teamId Int    @map("queueId")
+  userId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+  @@map("queue_member")
 }

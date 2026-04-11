@@ -8,8 +8,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import ErrorAlert from "@/components/ErrorAlert";
-import { Bot, User, Lock, Pin, PinOff, Trash2 } from "lucide-react";
+import { Bot, User, Lock, Pin, PinOff, Trash2, Paperclip, Download } from "lucide-react";
 import { useSession } from "@/lib/auth-client";
+
+interface AttachmentInfo {
+  id: number;
+  filename: string;
+  size: number;
+  mimeType: string;
+}
 
 interface Reply {
   id: number;
@@ -18,6 +25,7 @@ interface Reply {
   senderType: SenderType;
   user: { id: string; name: string } | null;
   createdAt: string;
+  attachments: AttachmentInfo[];
 }
 
 type TimelineItem =
@@ -26,6 +34,33 @@ type TimelineItem =
 
 interface ConversationTimelineProps {
   ticket: Ticket;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function AttachmentList({ ticketId, attachments }: { ticketId: number; attachments: AttachmentInfo[] }) {
+  if (!attachments.length) return null;
+  return (
+    <div className="mt-3 pt-3 border-t flex flex-wrap gap-2">
+      {attachments.map((a) => (
+        <a
+          key={a.id}
+          href={`/api/tickets/${ticketId}/attachments/${a.id}/download`}
+          download={a.filename}
+          className="inline-flex items-center gap-1.5 rounded-md border bg-muted/50 px-2.5 py-1.5 text-xs hover:bg-muted transition-colors"
+        >
+          <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
+          <span className="truncate max-w-[160px]" title={a.filename}>{a.filename}</span>
+          <span className="text-muted-foreground shrink-0">({formatBytes(a.size)})</span>
+          <Download className="h-3 w-3 text-muted-foreground shrink-0" />
+        </a>
+      ))}
+    </div>
+  );
 }
 
 export default function ConversationTimeline({ ticket }: ConversationTimelineProps) {
@@ -151,6 +186,7 @@ export default function ConversationTimeline({ ticket }: ConversationTimelinePro
                 ) : (
                   <p className="whitespace-pre-line leading-relaxed">{reply.body}</p>
                 )}
+                <AttachmentList ticketId={ticketId} attachments={reply.attachments} />
               </CardContent>
             </Card>
           );

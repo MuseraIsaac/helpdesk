@@ -11,6 +11,7 @@ import UsersPage from "./pages/UsersPage";
 import MacrosPage from "./pages/MacrosPage";
 import KbPage from "./pages/KbPage";
 import KbArticleFormPage from "./pages/KbArticleFormPage";
+import TeamsPage from "./pages/TeamsPage";
 import TicketsPage from "./pages/TicketsPage";
 import TicketDetailPage from "./pages/TicketDetailPage";
 import PortalLoginPage from "./pages/portal/PortalLoginPage";
@@ -33,6 +34,7 @@ function App() {
           <Route path="/tickets/:id" element={<TicketDetailPage />} />
           <Route element={<AdminRoute />}>
             <Route path="/users" element={<UsersPage />} />
+            <Route path="/teams" element={<TeamsPage />} />
             <Route path="/macros" element={<MacrosPage />} />
             <Route path="/kb" element={<KbPage />} />
             <Route path="/kb/articles/new" element={<KbArticleFormPage />} />

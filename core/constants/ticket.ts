@@ -29,6 +29,8 @@ export interface Ticket {
   senderName: string;
   senderEmail: string;
   assignedTo: { id: string; name: string } | null;
+  teamId: number | null;
+  team: { id: number; name: string; color: string } | null;
   createdAt: string;
   updatedAt: string;
 

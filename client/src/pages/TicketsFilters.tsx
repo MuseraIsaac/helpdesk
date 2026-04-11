@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -13,6 +15,12 @@ import { ticketPriorities, priorityLabel } from "core/constants/ticket-priority.
 import { ticketSeverities, severityShortLabel } from "core/constants/ticket-severity.ts";
 import type { TicketFilters } from "./TicketsPage";
 
+interface Team {
+  id: number;
+  name: string;
+  color: string;
+}
+
 const ALL = "__all__";
 
 interface TicketsFiltersProps {
@@ -21,6 +29,14 @@ interface TicketsFiltersProps {
 }
 
 export default function TicketsFilters({ filters, onChange }: TicketsFiltersProps) {
+  const { data: teamsData } = useQuery({
+    queryKey: ["teams"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ teams: Team[] }>("/api/teams");
+      return data.teams;
+    },
+  });
+
   return (
     <div className="flex flex-wrap items-center gap-3 mb-4">
       <div className="relative flex-1 min-w-[180px] max-w-sm">
@@ -100,6 +116,42 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
           <SelectItem value="refund_request">{categoryLabel.refund_request}</SelectItem>
         </SelectContent>
       </Select>
+
+      {teamsData && teamsData.length > 0 && (
+        <Select
+          value={filters.teamId !== undefined ? String(filters.teamId) : ALL}
+          onValueChange={(value) =>
+            onChange({
+              ...filters,
+              teamId:
+                value === ALL
+                  ? undefined
+                  : value === "none"
+                  ? "none"
+                  : Number(value),
+            })
+          }
+        >
+          <SelectTrigger className="w-[150px]">
+            <SelectValue placeholder="All teams" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>All teams</SelectItem>
+            <SelectItem value="none">No team</SelectItem>
+            {teamsData.map((t) => (
+              <SelectItem key={t.id} value={String(t.id)}>
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className="h-2 w-2 rounded-full shrink-0"
+                    style={{ backgroundColor: t.color }}
+                  />
+                  {t.name}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </div>
   );
 }

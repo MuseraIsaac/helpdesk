@@ -19,6 +19,8 @@ import portalRouter from "./routes/portal";
 import kbRouter from "./routes/kb";
 import csatRouter from "./routes/csat";
 import reportsRouter from "./routes/reports";
+import attachmentsRouter from "./routes/attachments";
+import teamsRouter from "./routes/teams";
 import { startQueue, stopQueue } from "./lib/queue";
 
 if (!process.env.BETTER_AUTH_SECRET) {
@@ -87,12 +89,14 @@ app.use("/api/tickets", ticketsRouter);
 app.use("/api/agents", agentsRouter);
 app.use("/api/tickets/:ticketId/replies", repliesRouter);
 app.use("/api/tickets/:ticketId/notes", notesRouter);
+app.use("/api/tickets/:ticketId/attachments", attachmentsRouter);
 app.use("/api/macros", macrosRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/portal", portalRouter);
 app.use("/api/kb", kbRouter);
 app.use("/api/csat", csatRouter);
 app.use("/api/reports", reportsRouter);
+app.use("/api/teams", teamsRouter);
 app.use("/api/webhooks", webhooksRouter);
 
 Sentry.setupExpressErrorHandler(app);

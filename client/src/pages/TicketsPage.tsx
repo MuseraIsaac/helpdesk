@@ -18,6 +18,7 @@ export interface TicketFilters {
   search?: string;
   escalated?: boolean;
   view?: TicketView;
+  teamId?: number | "none";
 }
 
 interface QuickView {

@@ -11,6 +11,8 @@ import { logAudit } from "../lib/audit";
 
 const router = Router({ mergeParams: true });
 
+// ── List replies ──────────────────────────────────────────────────────────────
+
 router.get("/", requireAuth, async (req, res) => {
   const ticketId = parseId(req.params.ticketId);
   if (!ticketId) {
@@ -27,11 +29,18 @@ router.get("/", requireAuth, async (req, res) => {
   const replies = await prisma.reply.findMany({
     where: { ticketId },
     orderBy: { createdAt: "asc" },
-    include: { user: { select: { id: true, name: true } } },
+    include: {
+      user: { select: { id: true, name: true } },
+      attachments: {
+        select: { id: true, filename: true, size: true, mimeType: true },
+      },
+    },
   });
 
   res.json({ replies });
 });
+
+// ── Create reply ──────────────────────────────────────────────────────────────
 
 router.post("/", requireAuth, async (req, res) => {
   const ticketId = parseId(req.params.ticketId);
@@ -43,10 +52,35 @@ router.post("/", requireAuth, async (req, res) => {
   const data = validate(createReplySchema, req.body, res);
   if (!data) return;
 
-  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+  // Fetch ticket + prior message IDs for threading before creating the reply
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    include: {
+      replies: {
+        select: { emailMessageId: true },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
   if (!ticket) {
     res.status(404).json({ error: "Ticket not found" });
     return;
+  }
+
+  // Validate that any provided attachmentIds belong to this ticket and are unlinked
+  if (data.attachmentIds?.length) {
+    const count = await prisma.attachment.count({
+      where: {
+        id: { in: data.attachmentIds },
+        ticketId,
+        replyId: null,         // must still be staged (not already linked)
+        uploadedById: req.user.id, // must have been uploaded by this agent
+      },
+    });
+    if (count !== data.attachmentIds.length) {
+      res.status(400).json({ error: "One or more attachment IDs are invalid" });
+      return;
+    }
   }
 
   const reply = await prisma.reply.create({
@@ -56,11 +90,21 @@ router.post("/", requireAuth, async (req, res) => {
       ticketId,
       userId: req.user.id,
     },
-    include: { user: { select: { id: true, name: true } } },
+    include: {
+      user: { select: { id: true, name: true } },
+      attachments: { select: { id: true, filename: true, size: true, mimeType: true } },
+    },
   });
 
-  // Stamp firstRespondedAt on the first agent reply (human or AI).
-  // Also check if first-response SLA was already breached before this reply.
+  // Link the staged attachments to this reply
+  if (data.attachmentIds?.length) {
+    await prisma.attachment.updateMany({
+      where: { id: { in: data.attachmentIds }, ticketId, replyId: null },
+      data: { replyId: reply.id },
+    });
+  }
+
+  // Stamp firstRespondedAt on the first agent reply
   if (!ticket.firstRespondedAt) {
     const now = reply.createdAt;
     const breachedFirstResponse =
@@ -79,14 +123,33 @@ router.post("/", requireAuth, async (req, res) => {
     senderType: "agent",
   });
 
+  // Build email threading headers from the ticket's message history.
+  // In-Reply-To references the last message; References lists all prior IDs.
+  // This lets email clients (Gmail, Outlook, etc.) group messages in a thread.
+  const allPriorIds = [
+    ticket.emailMessageId,
+    ...ticket.replies.map((r) => r.emailMessageId),
+  ].filter((id): id is string => Boolean(id));
+
+  const lastId = allPriorIds.at(-1);
+  const inReplyTo = lastId ? `<${lastId}>` : undefined;
+  const references = allPriorIds.length
+    ? allPriorIds.map((id) => `<${id}>`).join(" ")
+    : undefined;
+
   await sendEmailJob({
     to: ticket.senderEmail,
     subject: `Re: ${ticket.subject}`,
     body: data.body,
+    ...(inReplyTo && { inReplyTo }),
+    ...(references && { references }),
+    ...(data.attachmentIds?.length && { attachmentIds: data.attachmentIds }),
   });
 
   res.status(201).json(reply);
 });
+
+// ── Summarise conversation ────────────────────────────────────────────────────
 
 router.post("/summarize", requireAuth, async (req, res) => {
   const ticketId = parseId(req.params.ticketId);
@@ -129,6 +192,8 @@ router.post("/summarize", requireAuth, async (req, res) => {
 
   res.json({ summary: text });
 });
+
+// ── Polish draft ──────────────────────────────────────────────────────────────
 
 router.post("/polish", requireAuth, async (req, res) => {
   const ticketId = parseId(req.params.ticketId);

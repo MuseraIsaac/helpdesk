@@ -53,6 +53,8 @@ export const updateTicketSchema = z.object({
   urgency: z.enum(ticketUrgencies).nullable().optional(),
   /** true = manual escalate, false = de-escalate */
   escalate: z.boolean().optional(),
+  /** null = remove from team; positive int = assign to team */
+  teamId: z.number().int().positive().nullable().optional(),
 });
 
 // Predefined views that translate to compound where-clauses on the backend.
@@ -76,6 +78,8 @@ export const ticketListQuerySchema = z.object({
   search: z.string().optional(),
   /** true = only escalated tickets */
   escalated: boolParam,
+  /** Filter by team ID; "none" matches tickets with no team */
+  teamId: z.union([z.coerce.number().int().positive(), z.literal("none")]).optional(),
   /** Predefined compound views — overrides some individual filters */
   view: z.enum(ticketViews).optional(),
   page: z.coerce.number().int().min(1).default(1),

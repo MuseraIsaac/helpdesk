@@ -9,6 +9,7 @@ import { sendAutoResolveJob } from "../lib/auto-resolve-ticket";
 import { computeSlaDeadlines } from "../lib/sla";
 import { logAudit } from "../lib/audit";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
+import { loadFile } from "../lib/storage";
 import prisma from "../db";
 import {
   portalRegisterSchema,
@@ -174,7 +175,15 @@ router.get("/tickets/:id", requireCustomer, async (req, res) => {
           bodyHtml: true,
           senderType: true,
           createdAt: true,
+          attachments: {
+            select: { id: true, filename: true, size: true, mimeType: true },
+          },
         },
+      },
+      // Ticket-level attachments (from the original inbound email body)
+      attachments: {
+        where: { replyId: null },
+        select: { id: true, filename: true, size: true, mimeType: true },
       },
       csatRating: {
         select: { rating: true, comment: true, submittedAt: true },
@@ -293,6 +302,43 @@ router.post("/tickets/:id/csat", requireCustomer, async (req, res) => {
   });
 
   res.status(201).json({ rating });
+});
+
+// ─── Attachment Download ────────────────────────────────────────────────────
+//
+// GET /api/portal/attachments/:id/download
+//
+// Customers can download attachments for their own tickets only.
+// Responds 404 (not 403) for any ID that is not owned by the session user
+// to avoid confirming the existence of other customers' files.
+
+router.get("/attachments/:id/download", requireCustomer, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) {
+    res.status(400).json({ error: "Invalid attachment ID" });
+    return;
+  }
+
+  const attachment = await prisma.attachment.findUnique({
+    where: { id },
+    include: { ticket: { select: { senderEmail: true } } },
+  });
+
+  if (!attachment || attachment.ticket.senderEmail !== req.user.email) {
+    res.status(404).json({ error: "Attachment not found" });
+    return;
+  }
+
+  const buffer = await loadFile(attachment.storageKey);
+
+  res.setHeader("Content-Type", attachment.mimeType);
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${encodeURIComponent(attachment.filename)}"`
+  );
+  res.setHeader("Content-Length", buffer.length);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.send(buffer);
 });
 
 export default router;
