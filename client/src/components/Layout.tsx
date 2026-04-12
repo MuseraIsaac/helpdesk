@@ -3,16 +3,13 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { Role } from "core/constants/role.ts";
 import { can } from "core/constants/permission.ts";
 import { signOut, useSession } from "../lib/auth-client";
-import { useTheme } from "../lib/theme";
+import ProfileMenu from "./ProfileMenu";
 import {
   LayoutDashboard,
   Ticket,
   Users,
   BookOpen,
   Inbox,
-  LogOut,
-  Sun,
-  Moon,
   ChevronLeft,
   ChevronRight,
   Settings,
@@ -99,7 +96,6 @@ interface SidebarContentProps {
   onToggleCollapse?: () => void;
   onClose?: () => void;
   role: string;
-  onSignOut: () => void;
 }
 
 function SidebarContent({
@@ -107,7 +103,6 @@ function SidebarContent({
   onToggleCollapse,
   onClose,
   role,
-  onSignOut,
 }: SidebarContentProps) {
   const isAdmin = role === Role.admin;
   const canManageKb = can(role, "kb.manage");
@@ -233,7 +228,6 @@ function SidebarContent({
 export default function Layout() {
   const { data: session } = useSession();
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useTheme();
   const { collapsed, toggle } = useSidebarCollapsed();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -257,7 +251,6 @@ export default function Layout() {
           collapsed={collapsed}
           onToggleCollapse={toggle}
           role={role}
-          onSignOut={handleSignOut}
         />
       </aside>
 
@@ -278,7 +271,6 @@ export default function Layout() {
           collapsed={false}
           onClose={() => setMobileOpen(false)}
           role={role}
-          onSignOut={handleSignOut}
         />
       </aside>
 
@@ -298,34 +290,8 @@ export default function Layout() {
           {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Right actions */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={toggleTheme}
-              className="inline-flex items-center justify-center rounded-lg h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-              aria-label="Toggle theme"
-            >
-              {theme === "dark" ? (
-                <Sun className="h-4 w-4" />
-              ) : (
-                <Moon className="h-4 w-4" />
-              )}
-            </button>
-
-            <div className="h-5 w-px bg-border mx-1" />
-
-            <span className="text-[13px] text-muted-foreground">
-              {session?.user?.name}
-            </span>
-
-            <button
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium px-2.5 py-1.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
-              onClick={handleSignOut}
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              Sign out
-            </button>
-          </div>
+          {/* Profile menu */}
+          <ProfileMenu onSignOut={handleSignOut} />
         </header>
 
         {/* Page content */}

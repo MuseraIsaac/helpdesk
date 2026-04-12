@@ -50,6 +50,18 @@ interface TicketsResponse {
 
 const columns: ColumnDef<Ticket>[] = [
   {
+    id: "ticketNumber",
+    header: "#",
+    cell: ({ row }) => (
+      <Link
+        to={`/tickets/${row.original.id}`}
+        className="font-mono text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
+      >
+        {row.original.ticketNumber}
+      </Link>
+    ),
+  },
+  {
     accessorKey: "subject",
     header: "Subject",
     cell: ({ row }) => (
@@ -252,6 +264,9 @@ export default function TicketsTable({ filters }: { filters: TicketFilters }) {
           {isLoading
             ? Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
+                  <TableCell>
+                    <Skeleton className="h-4 w-16 font-mono" />
+                  </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-48" />
                   </TableCell>

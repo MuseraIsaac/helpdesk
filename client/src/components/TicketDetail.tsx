@@ -21,9 +21,14 @@ export default function TicketDetail({ ticket }: TicketDetailProps) {
     <>
       <div>
         <div className="flex items-start gap-3 mb-3">
-          <h1 className="text-2xl font-semibold tracking-tight flex-1">
-            {ticket.subject}
-          </h1>
+          <div className="flex-1 min-w-0">
+            <p className="font-mono text-xs font-semibold text-muted-foreground mb-1 tracking-wide">
+              {ticket.ticketNumber}
+            </p>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {ticket.subject}
+            </h1>
+          </div>
           <div className="flex items-center gap-2 shrink-0">
             {ticket.ticketType && (
               <TicketTypeBadge type={ticket.ticketType} />

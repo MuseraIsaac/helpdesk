@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Link } from "react-router";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router";
 import axios from "axios";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -39,7 +39,12 @@ import {
 } from "@/components/ui/tooltip";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import ErrorAlert from "@/components/ErrorAlert";
+import DashboardCustomizer from "@/components/DashboardCustomizer";
+import { useDashboardConfig } from "@/hooks/useDashboardConfig";
+import { type WidgetId } from "core/schemas/dashboard.ts";
+import { ticketsUrl } from "@/lib/drill-down";
 import {
   TicketIcon,
   CircleDot,
@@ -57,7 +62,15 @@ import {
   Timer,
   Hourglass,
   Info,
+  Settings2,
 } from "lucide-react";
+
+// ── Density context ───────────────────────────────────────────────────────────
+// Allows sub-components to read the current layout density without prop drilling.
+
+type Density = "comfortable" | "compact";
+const DensityContext = createContext<Density>("comfortable");
+const useDensity = () => useContext(DensityContext);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -177,7 +190,6 @@ const PRIORITY_COLORS: Record<string, string> = {
   low:    "#22c55e",
 };
 
-// Aging bucket → urgency color (sort 1 = fresh → 4 = stale)
 const AGING_COLORS: Record<number, string> = {
   1: "#22c55e",
   2: "#eab308",
@@ -196,18 +208,20 @@ interface MetricCardProps {
   hint?: string;
   loading?: boolean;
   variant?: Variant;
+  href?: string;
 }
 
-function MetricCard({ title, value, icon: Icon, hint, loading, variant = "default" }: MetricCardProps) {
+function MetricCard({ title, value, icon: Icon, hint, loading, variant = "default", href }: MetricCardProps) {
+  const density = useDensity();
   const valueColor =
     variant === "good" ? "text-green-600 dark:text-green-400" :
     variant === "warn" ? "text-amber-500" :
     variant === "bad"  ? "text-destructive" :
     "text-foreground";
 
-  return (
-    <Card>
-      <CardHeader className="pb-2">
+  const card = (
+    <Card className={href ? "hover:bg-accent/50 transition-colors" : ""}>
+      <CardHeader className={density === "compact" ? "pb-1" : "pb-2"}>
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-[13px] font-medium text-muted-foreground leading-tight">
             {title}
@@ -235,13 +249,24 @@ function MetricCard({ title, value, icon: Icon, hint, loading, variant = "defaul
         {loading ? (
           <Skeleton className="h-9 w-20" />
         ) : (
-          <p className={`text-3xl font-semibold tracking-tight ${valueColor}`}>
+          <p className={`font-semibold tracking-tight ${valueColor} ${
+            density === "compact" ? "text-2xl" : "text-3xl"
+          }`}>
             {value ?? "—"}
           </p>
         )}
       </CardContent>
     </Card>
   );
+
+  if (href) {
+    return (
+      <Link to={href} className="block cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl">
+        {card}
+      </Link>
+    );
+  }
+  return card;
 }
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
@@ -260,6 +285,7 @@ function HorizontalBarChart({
   colorKey,
   sortKey,
   colorMap,
+  onBarClick,
 }: {
   data: Record<string, unknown>[];
   dataKey: string;
@@ -268,6 +294,7 @@ function HorizontalBarChart({
   colorKey?: string;
   sortKey?: string;
   colorMap?: Record<string | number, string>;
+  onBarClick?: (entry: Record<string, unknown>) => void;
 }) {
   if (!data.length) {
     return <p className="text-sm text-muted-foreground py-6 text-center">No data</p>;
@@ -285,7 +312,12 @@ function HorizontalBarChart({
           tick={{ fontSize: 12 }}
         />
         <ChartTooltip content={<ChartTooltipContent />} />
-        <Bar dataKey={dataKey} radius={[0, 4, 4, 0]}>
+        <Bar
+          dataKey={dataKey}
+          radius={[0, 4, 4, 0]}
+          style={{ cursor: onBarClick ? "pointer" : undefined }}
+          onClick={onBarClick ? (entry) => onBarClick(entry as Record<string, unknown>) : undefined}
+        >
           {data.map((entry, i) => {
             let fill = "var(--primary)";
             if (colorMap && colorKey) {
@@ -320,7 +352,6 @@ function StarRow({ rating }: { rating: number }) {
   );
 }
 
-/** Mini rating distribution: shows proportional bars for each star level. */
 function RatingDistribution({ distribution, total }: { distribution: Record<number, number>; total: number }) {
   if (total === 0) return null;
   return (
@@ -342,8 +373,6 @@ function RatingDistribution({ distribution, total }: { distribution: Record<numb
     </div>
   );
 }
-
-// ── Period selector ───────────────────────────────────────────────────────────
 
 type Period = 7 | 30 | 90;
 
@@ -371,7 +400,44 @@ function PeriodSelector({ value, onChange }: { value: Period; onChange: (p: Peri
 // ── HomePage ──────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
+  const navigate = useNavigate();
+
+  // ── Dashboard config ─────────────────────────────────────────────────────────
+
+  const {
+    activeConfig,
+    activeDashboard,
+    dashboardList,
+    saveDashboard,
+    setDefaultDashboard,
+    deleteDashboard,
+  } = useDashboardConfig();
+
+  const [customizerOpen, setCustomizerOpen] = useState(false);
+
+  // Period: initialize once from saved config when it first loads.
+  // After that, local changes are reflected immediately without auto-saving.
   const [period, setPeriod] = useState<Period>(30);
+  const periodInitRef = useRef(false);
+  useEffect(() => {
+    if (!periodInitRef.current && activeConfig) {
+      periodInitRef.current = true;
+      setPeriod(activeConfig.period as Period);
+    }
+  }, [activeConfig]);
+
+  const density = activeConfig.density;
+
+  // Ordered visible widgets for rendering
+  const orderedWidgets = useMemo(
+    () =>
+      [...activeConfig.widgets]
+        .sort((a, b) => a.order - b.order)
+        .filter(w => w.visible),
+    [activeConfig],
+  );
+
+  // ── Queries ──────────────────────────────────────────────────────────────────
 
   const from = useMemo(() => {
     const d = new Date();
@@ -379,8 +445,6 @@ export default function HomePage() {
     d.setHours(0, 0, 0, 0);
     return d.toISOString().slice(0, 10);
   }, [period]);
-
-  // ── Queries ──────────────────────────────────────────────────────────────────
 
   const { data: overview, isLoading: overviewLoading, error: overviewError } =
     useQuery<OverviewStats>({
@@ -434,385 +498,323 @@ export default function HomePage() {
     csat.negativeRate <= 10 ? "good" :
     csat.negativeRate <= 25 ? "warn" : "bad";
 
+  // ── Chart click handlers ──────────────────────────────────────────────────────
+
+  function handleCategoryBarClick(entry: Record<string, unknown>) {
+    const category = entry.category as string | null;
+    if (category) navigate(ticketsUrl({ category }));
+  }
+
+  function handlePriorityBarClick(entry: Record<string, unknown>) {
+    const priority = entry.priority as string | null;
+    if (priority) navigate(ticketsUrl({ priority }));
+  }
+
+  // ── Customizer handlers ───────────────────────────────────────────────────────
+
+  function handleSaveConfig(config: typeof activeConfig, name: string) {
+    // Fold the current live period into the saved config
+    saveDashboard.mutate(
+      { dashboardId: activeDashboard?.id ?? null, name, config: { ...config, period } },
+      { onSuccess: () => setCustomizerOpen(false) },
+    );
+  }
+
+  // ── Widget renderer ───────────────────────────────────────────────────────────
+  // Each widget is a named section rendered as a closure over the query data.
+
+  function renderWidget(id: WidgetId): React.ReactNode {
+    switch (id) {
+      // ── Volume ──────────────────────────────────────────────────────────────
+      case "volume":
+        return (
+          <section key="volume" className="space-y-3">
+            <SectionHeading>Volume</SectionHeading>
+            <div className={`grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <MetricCard title="Total Tickets"   value={overview?.totalTickets}    icon={TicketIcon}    loading={overviewLoading} hint="All non-system tickets in the selected period." href={ticketsUrl()} />
+              <MetricCard title="Open Tickets"    value={overview?.openTickets}     icon={CircleDot}     loading={overviewLoading} hint="Tickets currently awaiting agent response." href={ticketsUrl({ status: "open" })} />
+              <MetricCard title="Resolved"         value={overview?.resolvedTickets} icon={TrendingUp}    loading={overviewLoading} hint="Tickets marked resolved or closed." href={ticketsUrl({ status: "resolved" })} />
+              <MetricCard title="Escalated"        value={overview?.escalatedTickets} icon={AlertTriangle} loading={overviewLoading} variant={overview?.escalatedTickets ? "warn" : "default"} hint="Tickets that were escalated at any point." href={ticketsUrl({ escalated: true })} />
+              <MetricCard title="Reopened"         value={overview?.reopenedTickets} icon={RotateCcw}     loading={overviewLoading} variant={overview?.reopenedTickets ? "warn" : "default"} hint="Resolved tickets that received a new reply and returned to open." href={ticketsUrl({ status: "open" })} />
+            </div>
+          </section>
+        );
+
+      // ── Performance ─────────────────────────────────────────────────────────
+      case "performance":
+        return (
+          <section key="performance" className="space-y-3">
+            <SectionHeading>Performance</SectionHeading>
+            <div className={`grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <MetricCard title="Avg First Response"  value={formatDuration(overview?.avgFirstResponseSeconds)} icon={Timer}       loading={overviewLoading} hint="Average time from ticket creation to the first agent reply." href={ticketsUrl({ status: "open" })} />
+              <MetricCard title="Avg Resolution Time" value={formatDuration(overview?.avgResolutionSeconds)}    icon={Hourglass}   loading={overviewLoading} hint="Average time from creation to resolution." href={ticketsUrl({ status: "open" })} />
+              <MetricCard title="AI Resolution Rate"  value={overview ? `${overview.aiResolutionRate}%` : undefined} icon={Sparkles} loading={overviewLoading} hint="Percentage of resolved tickets handled entirely by the AI agent." href={ticketsUrl({ status: "resolved" })} />
+              <MetricCard title="SLA Compliance"      value={pct(overview?.slaComplianceRate)} icon={ShieldCheck} loading={overviewLoading} variant={slaVariant} hint="Percentage of SLA-tracked tickets resolved within deadline." href={ticketsUrl({ view: "overdue" })} />
+              <MetricCard title="SLA Breached"        value={overview?.breachedTickets} icon={ShieldAlert} loading={overviewLoading} variant={overview?.breachedTickets ? "bad" : "default"} hint="Tickets that exceeded their SLA resolution deadline." href={ticketsUrl({ view: "overdue" })} />
+            </div>
+          </section>
+        );
+
+      // ── Tickets Per Day ──────────────────────────────────────────────────────
+      case "tickets_per_day":
+        return (
+          <Card key="tickets_per_day">
+            <CardHeader>
+              <CardTitle>Tickets Per Day</CardTitle>
+              <CardDescription>Last {period} days</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {volumeError ? (
+                <ErrorAlert error={volumeError} fallback="Failed to load chart data" />
+              ) : volumeLoading ? (
+                <Skeleton className="h-[240px] w-full" />
+              ) : (
+                <ChartContainer config={volumeChartConfig} className="h-[240px] w-full">
+                  <BarChart accessibilityLayer data={volume?.data}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      tickLine={false}
+                      axisLine={false}
+                      tickMargin={8}
+                      tickFormatter={(v: string) => formatDate(v, period)}
+                      interval="preserveStartEnd"
+                      minTickGap={40}
+                    />
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent
+                          labelFormatter={(v: string) =>
+                            new Date(v + "T00:00:00").toLocaleDateString("en-US", {
+                              weekday: "long", month: "short", day: "numeric", year: "numeric",
+                            })
+                          }
+                        />
+                      }
+                    />
+                    <Bar dataKey="tickets" fill="var(--color-tickets)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ChartContainer>
+              )}
+            </CardContent>
+          </Card>
+        );
+
+      // ── Breakdowns ───────────────────────────────────────────────────────────
+      case "breakdowns":
+        return (
+          <div key="breakdowns" className={`grid grid-cols-1 lg:grid-cols-3 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">By Category</CardTitle>
+                <CardDescription>Ticket distribution · {period}d · click a bar to filter</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {breakdownsLoading ? <Skeleton className="h-[220px] w-full" /> : (
+                  <HorizontalBarChart data={breakdowns?.byCategory ?? []} dataKey="total" labelKey="label" config={barChartConfig} onBarClick={handleCategoryBarClick} />
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">By Priority</CardTitle>
+                <CardDescription>Ticket distribution · {period}d · click a bar to filter</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {breakdownsLoading ? <Skeleton className="h-[220px] w-full" /> : (
+                  <HorizontalBarChart data={breakdowns?.byPriority ?? []} dataKey="total" labelKey="label" config={barChartConfig} colorKey="priority" onBarClick={handlePriorityBarClick} />
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Ticket Aging</CardTitle>
+                <CardDescription>Currently open tickets by age · click to view</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {agingLoading ? <Skeleton className="h-[220px] w-full" /> : (
+                  <HorizontalBarChart data={agingData?.aging ?? []} dataKey="count" labelKey="bucket" config={agingChartConfig} sortKey="sort" colorMap={AGING_COLORS} onBarClick={() => navigate(ticketsUrl({ status: "open" }))} />
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        );
+
+      // ── By Assignee ──────────────────────────────────────────────────────────
+      case "by_assignee":
+        return (
+          <Card key="by_assignee">
+            <CardHeader>
+              <CardTitle>By Assignee</CardTitle>
+              <CardDescription>Ticket load per agent · {period}d</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {breakdownsLoading ? (
+                <div className="space-y-2">
+                  {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}
+                </div>
+              ) : !breakdowns?.byAssignee.length ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">No assigned tickets in this period</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Agent</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-right">Open</TableHead>
+                      <TableHead className="text-right">Resolved</TableHead>
+                      <TableHead className="w-[140px]">Open %</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {breakdowns.byAssignee.map((a) => {
+                      const openPct = a.total > 0 ? Math.round((a.open / a.total) * 100) : 0;
+                      return (
+                        <TableRow key={a.agentId}>
+                          <TableCell className="font-medium">{a.agentName}</TableCell>
+                          <TableCell className="text-right">{a.total}</TableCell>
+                          <TableCell className="text-right">{a.open}</TableCell>
+                          <TableCell className="text-right">{a.resolved}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Progress value={openPct} className="h-1.5 flex-1" />
+                              <span className="text-xs text-muted-foreground w-8 text-right">
+                                {a.total > 0 ? `${openPct}%` : "—"}
+                              </span>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        );
+
+      // ── CSAT ─────────────────────────────────────────────────────────────────
+      case "csat":
+        return (
+          <section key="csat" className="space-y-4">
+            <SectionHeading>Customer Satisfaction</SectionHeading>
+            <div className={`grid grid-cols-2 lg:grid-cols-4 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <MetricCard title="Avg Rating"    value={csat?.avgRating != null ? `${csat.avgRating} / 5` : "—"} icon={Star}      loading={csatLoading} variant={csatAvgVariant}      hint="Average CSAT score across all submitted ratings." />
+              <MetricCard title="Positive Rate" value={pct(csat?.positiveRate)}                                icon={ThumbsUp}   loading={csatLoading} variant={csatPositiveVariant} hint="Percentage of ratings that were 4★ or 5★." />
+              <MetricCard title="Negative Rate" value={pct(csat?.negativeRate)}                                icon={ThumbsDown} loading={csatLoading} variant={csatNegativeVariant} hint="Percentage of ratings that were 1★ or 2★." />
+              <MetricCard title="Response Rate" value={csat != null ? `${csat.responseRate}%` : "—"}          icon={BarChart2}  loading={csatLoading} hint="Percentage of resolved/closed tickets that received a rating." />
+            </div>
+            <div className={`grid grid-cols-1 lg:grid-cols-2 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">Rating Distribution</CardTitle>
+                  <CardDescription>{csat?.totalRatings ? `${csat.totalRatings} rating${csat.totalRatings === 1 ? "" : "s"} total` : "No ratings yet"}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {csatLoading ? (
+                    <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-5 w-full" />)}</div>
+                  ) : !csat?.totalRatings ? (
+                    <p className="text-sm text-muted-foreground py-4 text-center">No CSAT ratings yet.</p>
+                  ) : (
+                    <RatingDistribution distribution={csat.distribution} total={csat.totalRatings} />
+                  )}
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">Recent Ratings</CardTitle>
+                  <CardDescription>Last 10 submissions</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {csatLoading ? (
+                    <div className="space-y-3">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+                  ) : !csat?.recentRatings.length ? (
+                    <p className="text-sm text-muted-foreground py-4 text-center">No CSAT ratings have been submitted yet.</p>
+                  ) : (
+                    <div className="divide-y">
+                      {csat.recentRatings.map((r) => (
+                        <div key={r.id} className="py-3 flex items-start gap-3">
+                          <StarRow rating={r.rating} />
+                          <div className="flex-1 min-w-0">
+                            <Link to={`/tickets/${r.ticketId}`} className="text-sm font-medium hover:underline truncate block">
+                              #{r.ticketId} — {r.ticketSubject}
+                            </Link>
+                            {r.comment && (
+                              <p className="text-xs text-muted-foreground mt-0.5 italic line-clamp-1">"{r.comment}"</p>
+                            )}
+                          </div>
+                          <span className="text-xs text-muted-foreground shrink-0">
+                            {new Date(r.submittedAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </section>
+        );
+
+      default:
+        return null;
+    }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-8">
+    <DensityContext.Provider value={density}>
+      <div className={density === "compact" ? "space-y-4" : "space-y-8"}>
 
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Showing data for the last {period} days
-          </p>
-        </div>
-        <PeriodSelector value={period} onChange={setPeriod} />
-      </div>
-
-      {overviewError && (
-        <ErrorAlert error={overviewError} fallback="Failed to load overview stats" />
-      )}
-
-      {/* ── Volume ───────────────────────────────────────────────────────────── */}
-      <section className="space-y-3">
-        <SectionHeading>Volume</SectionHeading>
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
-          <MetricCard
-            title="Total Tickets"
-            value={overview?.totalTickets}
-            icon={TicketIcon}
-            loading={overviewLoading}
-            hint="All non-system tickets (open, resolved, closed) in the selected period."
-          />
-          <MetricCard
-            title="Open Tickets"
-            value={overview?.openTickets}
-            icon={CircleDot}
-            loading={overviewLoading}
-            hint="Tickets currently awaiting agent response."
-          />
-          <MetricCard
-            title="Resolved"
-            value={overview?.resolvedTickets}
-            icon={TrendingUp}
-            loading={overviewLoading}
-            hint="Tickets marked resolved or closed."
-          />
-          <MetricCard
-            title="Escalated"
-            value={overview?.escalatedTickets}
-            icon={AlertTriangle}
-            loading={overviewLoading}
-            variant={overview?.escalatedTickets ? "warn" : "default"}
-            hint="Tickets that were escalated at any point."
-          />
-          <MetricCard
-            title="Reopened"
-            value={overview?.reopenedTickets}
-            icon={RotateCcw}
-            loading={overviewLoading}
-            variant={overview?.reopenedTickets ? "warn" : "default"}
-            hint="Resolved tickets that received a new customer reply and returned to open."
-          />
-        </div>
-      </section>
-
-      {/* ── Performance ──────────────────────────────────────────────────────── */}
-      <section className="space-y-3">
-        <SectionHeading>Performance</SectionHeading>
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
-          <MetricCard
-            title="Avg First Response"
-            value={formatDuration(overview?.avgFirstResponseSeconds)}
-            icon={Timer}
-            loading={overviewLoading}
-            hint="Average time from ticket creation to the first agent reply."
-          />
-          <MetricCard
-            title="Avg Resolution Time"
-            value={formatDuration(overview?.avgResolutionSeconds)}
-            icon={Hourglass}
-            loading={overviewLoading}
-            hint="Average time from creation to resolution, for resolved/closed tickets."
-          />
-          <MetricCard
-            title="AI Resolution Rate"
-            value={overview ? `${overview.aiResolutionRate}%` : undefined}
-            icon={Sparkles}
-            loading={overviewLoading}
-            hint="Percentage of resolved tickets handled entirely by the AI agent."
-          />
-          <MetricCard
-            title="SLA Compliance"
-            value={pct(overview?.slaComplianceRate)}
-            icon={ShieldCheck}
-            loading={overviewLoading}
-            variant={slaVariant}
-            hint="Percentage of SLA-tracked tickets resolved within deadline."
-          />
-          <MetricCard
-            title="SLA Breached"
-            value={overview?.breachedTickets}
-            icon={ShieldAlert}
-            loading={overviewLoading}
-            variant={overview?.breachedTickets ? "bad" : "default"}
-            hint="Tickets that exceeded their SLA resolution deadline."
-          />
-        </div>
-      </section>
-
-      {/* ── Volume chart ─────────────────────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Tickets Per Day</CardTitle>
-          <CardDescription>Last {period} days</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {volumeError ? (
-            <ErrorAlert error={volumeError} fallback="Failed to load chart data" />
-          ) : volumeLoading ? (
-            <Skeleton className="h-[240px] w-full" />
-          ) : (
-            <ChartContainer config={volumeChartConfig} className="h-[240px] w-full">
-              <BarChart accessibilityLayer data={volume?.data}>
-                <CartesianGrid vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  tickFormatter={(v: string) => formatDate(v, period)}
-                  interval="preserveStartEnd"
-                  minTickGap={40}
-                />
-                <ChartTooltip
-                  content={
-                    <ChartTooltipContent
-                      labelFormatter={(v: string) =>
-                        new Date(v + "T00:00:00").toLocaleDateString("en-US", {
-                          weekday: "long",
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })
-                      }
-                    />
-                  }
-                />
-                <Bar dataKey="tickets" fill="var(--color-tickets)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── Breakdowns ───────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">By Category</CardTitle>
-            <CardDescription>Ticket distribution · {period}d</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {breakdownsLoading ? (
-              <Skeleton className="h-[220px] w-full" />
-            ) : (
-              <HorizontalBarChart
-                data={breakdowns?.byCategory ?? []}
-                dataKey="total"
-                labelKey="label"
-                config={barChartConfig}
-              />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">By Priority</CardTitle>
-            <CardDescription>Ticket distribution · {period}d</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {breakdownsLoading ? (
-              <Skeleton className="h-[220px] w-full" />
-            ) : (
-              <HorizontalBarChart
-                data={breakdowns?.byPriority ?? []}
-                dataKey="total"
-                labelKey="label"
-                config={barChartConfig}
-                colorKey="priority"
-              />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Ticket Aging</CardTitle>
-            <CardDescription>Currently open tickets by age</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {agingLoading ? (
-              <Skeleton className="h-[220px] w-full" />
-            ) : (
-              <HorizontalBarChart
-                data={agingData?.aging ?? []}
-                dataKey="count"
-                labelKey="bucket"
-                config={agingChartConfig}
-                sortKey="sort"
-                colorMap={AGING_COLORS}
-              />
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ── By Assignee ──────────────────────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle>By Assignee</CardTitle>
-          <CardDescription>Ticket load per agent · {period}d</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {breakdownsLoading ? (
-            <div className="space-y-2">
-              {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}
-            </div>
-          ) : !breakdowns?.byAssignee.length ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              No assigned tickets in this period
+        {/* Header */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {activeDashboard ? activeDashboard.name : "Dashboard"}
+            </h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Showing data for the last {period} days
             </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Agent</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="text-right">Open</TableHead>
-                  <TableHead className="text-right">Resolved</TableHead>
-                  <TableHead className="w-[140px]">Open %</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {breakdowns.byAssignee.map((a) => {
-                  const openPct = a.total > 0 ? Math.round((a.open / a.total) * 100) : 0;
-                  return (
-                    <TableRow key={a.agentId}>
-                      <TableCell className="font-medium">{a.agentName}</TableCell>
-                      <TableCell className="text-right">{a.total}</TableCell>
-                      <TableCell className="text-right">{a.open}</TableCell>
-                      <TableCell className="text-right">{a.resolved}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Progress value={openPct} className="h-1.5 flex-1" />
-                          <span className="text-xs text-muted-foreground w-8 text-right">
-                            {a.total > 0 ? `${openPct}%` : "—"}
-                          </span>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── Customer Satisfaction ────────────────────────────────────────────── */}
-      <section className="space-y-4">
-        <SectionHeading>Customer Satisfaction</SectionHeading>
-
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <MetricCard
-            title="Avg Rating"
-            value={csat?.avgRating != null ? `${csat.avgRating} / 5` : "—"}
-            icon={Star}
-            loading={csatLoading}
-            variant={csatAvgVariant}
-            hint="Average CSAT score across all submitted ratings."
-          />
-          <MetricCard
-            title="Positive Rate"
-            value={pct(csat?.positiveRate)}
-            icon={ThumbsUp}
-            loading={csatLoading}
-            variant={csatPositiveVariant}
-            hint="Percentage of ratings that were 4★ or 5★."
-          />
-          <MetricCard
-            title="Negative Rate"
-            value={pct(csat?.negativeRate)}
-            icon={ThumbsDown}
-            loading={csatLoading}
-            variant={csatNegativeVariant}
-            hint="Percentage of ratings that were 1★ or 2★."
-          />
-          <MetricCard
-            title="Response Rate"
-            value={csat != null ? `${csat.responseRate}%` : "—"}
-            icon={BarChart2}
-            loading={csatLoading}
-            hint="Percentage of resolved/closed tickets that received a CSAT rating."
-          />
+          </div>
+          <div className="flex items-center gap-2">
+            <PeriodSelector value={period} onChange={setPeriod} />
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setCustomizerOpen(true)}
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Customize
+            </Button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Distribution */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Rating Distribution</CardTitle>
-              <CardDescription>
-                {csat?.totalRatings
-                  ? `${csat.totalRatings} rating${csat.totalRatings === 1 ? "" : "s"} total`
-                  : "No ratings yet"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {csatLoading ? (
-                <div className="space-y-2">
-                  {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-5 w-full" />)}
-                </div>
-              ) : !csat?.totalRatings ? (
-                <p className="text-sm text-muted-foreground py-4 text-center">
-                  No CSAT ratings yet.
-                </p>
-              ) : (
-                <RatingDistribution
-                  distribution={csat.distribution}
-                  total={csat.totalRatings}
-                />
-              )}
-            </CardContent>
-          </Card>
+        {overviewError && (
+          <ErrorAlert error={overviewError} fallback="Failed to load overview stats" />
+        )}
 
-          {/* Recent ratings */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Recent Ratings</CardTitle>
-              <CardDescription>Last 10 submissions</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {csatLoading ? (
-                <div className="space-y-3">
-                  {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
-                </div>
-              ) : !csat?.recentRatings.length ? (
-                <p className="text-sm text-muted-foreground py-4 text-center">
-                  No CSAT ratings have been submitted yet.
-                </p>
-              ) : (
-                <div className="divide-y">
-                  {csat.recentRatings.map((r) => (
-                    <div key={r.id} className="py-3 flex items-start gap-3">
-                      <StarRow rating={r.rating} />
-                      <div className="flex-1 min-w-0">
-                        <Link
-                          to={`/tickets/${r.ticketId}`}
-                          className="text-sm font-medium hover:underline truncate block"
-                        >
-                          #{r.ticketId} — {r.ticketSubject}
-                        </Link>
-                        {r.comment && (
-                          <p className="text-xs text-muted-foreground mt-0.5 italic line-clamp-1">
-                            "{r.comment}"
-                          </p>
-                        )}
-                      </div>
-                      <span className="text-xs text-muted-foreground shrink-0">
-                        {new Date(r.submittedAt).toLocaleDateString()}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </section>
-    </div>
+        {/* Ordered, visible widgets */}
+        {orderedWidgets.map(w => renderWidget(w.id))}
+
+        {/* Customizer dialog — remounted when opened so draft resets cleanly */}
+        {customizerOpen && (
+          <DashboardCustomizer
+            key={activeDashboard?.id ?? "system"}
+            open={customizerOpen}
+            onOpenChange={setCustomizerOpen}
+            activeConfig={{ ...activeConfig, period }}
+            activeDashboard={activeDashboard}
+            dashboardList={dashboardList}
+            onSave={handleSaveConfig}
+            onSetDefault={id => setDefaultDashboard.mutate(id)}
+            onDelete={id => deleteDashboard.mutate(id)}
+            isSaving={saveDashboard.isPending}
+            saveError={saveDashboard.error}
+          />
+        )}
+      </div>
+    </DensityContext.Provider>
   );
 }

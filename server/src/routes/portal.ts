@@ -8,6 +8,7 @@ import { sendClassifyJob } from "../lib/classify-ticket";
 import { sendAutoResolveJob } from "../lib/auto-resolve-ticket";
 import { computeSlaDeadlines } from "../lib/sla";
 import { logAudit } from "../lib/audit";
+import { generateTicketNumber } from "../lib/ticket-number";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 import { loadFile } from "../lib/storage";
 import prisma from "../db";
@@ -77,6 +78,7 @@ router.get("/tickets", requireCustomer, async (req, res) => {
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
+      ticketNumber: true,
       subject: true,
       status: true,
       category: true,
@@ -97,9 +99,11 @@ router.post("/tickets", requireCustomer, async (req, res) => {
   const now = new Date();
   const slaDeadlines = computeSlaDeadlines(null, now);
   const customerId = await upsertCustomer(req.user.email, req.user.name);
+  const ticketNumber = await generateTicketNumber(null, now);
 
   const ticket = await prisma.ticket.create({
     data: {
+      ticketNumber,
       subject: data.subject,
       body: data.body,
       senderName: req.user.name,
@@ -111,6 +115,7 @@ router.post("/tickets", requireCustomer, async (req, res) => {
     },
     select: {
       id: true,
+      ticketNumber: true,
       subject: true,
       body: true,
       senderName: true,
@@ -125,6 +130,7 @@ router.post("/tickets", requireCustomer, async (req, res) => {
   res.status(201).json({
     ticket: {
       id: ticket.id,
+      ticketNumber: ticket.ticketNumber,
       subject: ticket.subject,
       status: ticket.status,
       category: ticket.category,

@@ -18,6 +18,8 @@ export interface EscalationEvent {
 
 export interface Ticket {
   id: number;
+  /** Human-readable display ID, e.g. INC0042. Immutable after creation. */
+  ticketNumber: string;
   subject: string;
   body: string;
   bodyHtml: string | null;

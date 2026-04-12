@@ -12,6 +12,7 @@ import { checkAndEscalate, deescalateTicket, escalateTicket } from "../lib/escal
 import { logAudit } from "../lib/audit";
 import { runRules } from "../lib/automation";
 import { upsertCustomer } from "../lib/upsert-customer";
+import { generateTicketNumber } from "../lib/ticket-number";
 
 interface TicketStatsRow {
   totalTickets: bigint;
@@ -24,6 +25,7 @@ interface TicketStatsRow {
 // Fields projected for the list endpoint — no body/bodyHtml for performance
 const LIST_SELECT = {
   id: true,
+  ticketNumber: true,
   subject: true,
   status: true,
   ticketType: true,
@@ -114,9 +116,11 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
   const now = new Date();
   const slaDeadlines = computeSlaDeadlines(data.priority ?? null, now);
   const customerId = await upsertCustomer(data.senderEmail, data.senderName);
+  const ticketNumber = await generateTicketNumber(data.ticketType ?? null, now);
 
   const ticket = await prisma.ticket.create({
     data: {
+      ticketNumber,
       subject: data.subject,
       body: data.body,
       senderName: data.senderName,
@@ -233,6 +237,7 @@ router.get("/", requireAuth, async (req, res) => {
 
     if (query.search) {
       where.OR = [
+        { ticketNumber: { contains: query.search, mode: "insensitive" } },
         { subject: { contains: query.search, mode: "insensitive" } },
         { senderName: { contains: query.search, mode: "insensitive" } },
         { senderEmail: { contains: query.search, mode: "insensitive" } },

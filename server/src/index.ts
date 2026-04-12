@@ -21,6 +21,10 @@ import csatRouter from "./routes/csat";
 import reportsRouter from "./routes/reports";
 import attachmentsRouter from "./routes/attachments";
 import teamsRouter from "./routes/teams";
+import meRouter from "./routes/me";
+import settingsRouter from "./routes/settings";
+import themeRouter from "./routes/theme";
+import dashboardsRouter from "./routes/dashboards";
 import { startQueue, stopQueue } from "./lib/queue";
 
 if (!process.env.BETTER_AUTH_SECRET) {
@@ -79,11 +83,10 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-app.get("/api/me", requireAuth, (req, res) => {
-  const { id, name, email, role } = req.user;
-  res.json({ user: { id, name, email, role } });
-});
-
+app.use("/api/me", meRouter);
+app.use("/api/dashboards", dashboardsRouter);
+app.use("/api/settings", settingsRouter);
+app.use("/api/theme", themeRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/tickets", ticketsRouter);
 app.use("/api/agents", agentsRouter);

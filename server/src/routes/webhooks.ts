@@ -11,6 +11,7 @@ import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 import { computeSlaDeadlines } from "../lib/sla";
 import { logAudit } from "../lib/audit";
 import { upsertCustomer } from "../lib/upsert-customer";
+import { generateTicketNumber } from "../lib/ticket-number";
 import {
   saveFile,
   ALLOWED_MIME_TYPES,
@@ -135,9 +136,12 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
   const now = new Date();
   const slaDeadlines = computeSlaDeadlines(null, now);
   const customerId = await upsertCustomer(data.from, data.fromName);
+  // Inbound emails have no ticket type at creation time — classified later by AI
+  const ticketNumber = await generateTicketNumber(null, now);
 
   const ticket = await prisma.ticket.create({
     data: {
+      ticketNumber,
       subject: normalizedSubject,
       body: data.body,
       bodyHtml: data.bodyHtml ?? null,

@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 interface PortalTicket {
   id: number;
+  ticketNumber: string;
   subject: string;
   status: string;
   category: string | null;
@@ -99,6 +100,9 @@ export default function PortalTicketsPage() {
               className="flex items-center justify-between px-5 py-4 hover:bg-accent/50 transition-colors"
             >
               <div className="min-w-0 mr-4">
+                <p className="font-mono text-[11px] font-semibold text-muted-foreground mb-0.5">
+                  {ticket.ticketNumber}
+                </p>
                 <p className="font-medium text-sm truncate">{ticket.subject}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Submitted {formatDate(ticket.createdAt)}

@@ -107,8 +107,32 @@ model User {
   kbArticles          KbArticle[]
   uploadedAttachments Attachment[]
   teamMemberships     TeamMember[]
+  preference          UserPreference?
+  dashboards          DashboardConfig[]
 
   @@map("user")
+}
+
+model UserPreference {
+  userId            String   @id
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Profile extras
+  jobTitle          String?
+  phone             String?
+  // Locale
+  language          String   @default("en")
+  timezone          String   @default("UTC")
+  dateFormat        String   @default("MMM d, yyyy")
+  timeFormat        String   @default("12h")
+  // UI
+  theme             String   @default("system")
+  sidebarCollapsed  Boolean  @default(false)
+  defaultDashboard  String   @default("overview")
+  ticketListDensity String   @default("comfortable")
+  // Future: notificationPrefs Json?  signatureHtml String?
+  updatedAt         DateTime @updatedAt
+
+  @@map("user_preference")
 }
 
 model Session {
@@ -170,8 +194,20 @@ model Customer {
   @@map("customer")
 }
 
+model TicketCounter {
+  series    String  @map("series")
+  periodKey String  @default("") @map("period_key")
+  lastValue Int     @default(0)  @map("last_value")
+
+  @@id([series, periodKey])
+  @@map("ticket_counter")
+}
+
 model Ticket {
   id           Int             @id @default(autoincrement())
+  /// Immutable human-readable display ID. Format: {PREFIX}{dateSegment?}{zeroPaddedSeq}.
+  /// Generated at creation time from ticket_counter. Never changes after assignment.
+  ticketNumber String          @unique @map("ticket_number")
   subject      String
   body         String
   bodyHtml     String?
@@ -460,4 +496,60 @@ model TeamMember {
 
   @@id([teamId, userId])
   @@map("queue_member")
+}
+
+/**
+ * SystemSetting — one row per settings section.
+ *
+ * Storage design:
+ *   - section is the primary key ("general", "branding", etc.)
+ *   - data is a JSON blob for the entire section's settings
+ *   - Zod schemas in core/schemas/settings.ts define shape + defaults
+ *   - Missing fields are filled in with defaults at read time (schema.parse)
+ *   - updatedById is informational; no FK constraint to keep User model clean
+ *
+ * To add a new settings section:
+ *   1. Add section key to `settingsSections` in core/schemas/settings.ts
+ *   2. Define its Zod schema in the same file
+ *   3. Add it to `sectionSchemas` map
+ *   4. Add UI section form in client/src/pages/settings/sections/
+ *   No DB migration needed — new section rows are created on first PUT.
+ */
+model SystemSetting {
+  section     String   @id
+  data        Json     @default("{}")
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+
+  @@map("system_setting")
+}
+
+/**
+ * DashboardConfig — stores named dashboard configurations for users.
+ *
+ * Design:
+ *   - userId null + isShared = true  → admin-created dashboard visible to everyone
+ *   - userId set + isShared = false  → personal user dashboard
+ *   - config is a JSON blob validated against DashboardConfigData in core/schemas/dashboard.ts
+ *   - UserPreference.defaultDashboard stores the active dashboard id (as string) per user;
+ *     "overview" / empty means use the built-in system default.
+ *
+ * To add new widget types:
+ *   1. Add the widget id to WIDGET_IDS in core/schemas/dashboard.ts
+ *   2. Add a WIDGET_META entry (label + description)
+ *   3. Render the new widget in renderWidget() in HomePage.tsx
+ *   No DB migration needed — the JSON blob is schema-less on the DB side.
+ */
+model DashboardConfig {
+  id        Int      @id @default(autoincrement())
+  userId    String?  @map("user_id")
+  name      String
+  isShared  Boolean  @default(false) @map("is_shared")
+  config    Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("dashboard_config")
 }
