@@ -9,6 +9,7 @@ import { sendAutoResolveJob } from "../lib/auto-resolve-ticket";
 import { computeSlaDeadlines } from "../lib/sla";
 import { logAudit } from "../lib/audit";
 import { generateTicketNumber } from "../lib/ticket-number";
+import { htmlToText } from "../lib/html-to-text";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 import { loadFile } from "../lib/storage";
 import prisma from "../db";
@@ -110,6 +111,7 @@ router.post("/tickets", requireCustomer, async (req, res) => {
       senderEmail: req.user.email,
       customerId,
       assignedToId: AI_AGENT_ID,
+      source: "portal",
       firstResponseDueAt: slaDeadlines.firstResponseDueAt,
       resolutionDueAt: slaDeadlines.resolutionDueAt,
     },

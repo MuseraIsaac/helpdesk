@@ -3,6 +3,7 @@ import { requireAuth } from "../middleware/require-auth";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
 import { createNoteSchema, updateNoteSchema } from "core/schemas/notes.ts";
+import { htmlToText } from "../lib/html-to-text";
 import { can } from "core/constants/permission.ts";
 import prisma from "../db";
 import { logAudit } from "../lib/audit";
@@ -56,9 +57,12 @@ router.post("/", requireAuth, async (req, res) => {
     return;
   }
 
+  const plainBody = data.bodyHtml ? htmlToText(data.bodyHtml) : data.body;
+
   const note = await prisma.note.create({
     data: {
-      body: data.body,
+      body: plainBody,
+      bodyHtml: data.bodyHtml ?? null,
       ticketId,
       authorId: req.user.id,
       mentionedUserIds: data.mentionedUserIds ?? [],

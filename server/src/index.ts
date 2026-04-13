@@ -25,6 +25,7 @@ import meRouter from "./routes/me";
 import settingsRouter from "./routes/settings";
 import themeRouter from "./routes/theme";
 import dashboardsRouter from "./routes/dashboards";
+import ticketViewsRouter from "./routes/ticket-views";
 import { startQueue, stopQueue } from "./lib/queue";
 
 if (!process.env.BETTER_AUTH_SECRET) {
@@ -85,6 +86,7 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/me", meRouter);
 app.use("/api/dashboards", dashboardsRouter);
+app.use("/api/ticket-views", ticketViewsRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/theme", themeRouter);
 app.use("/api/users", usersRouter);

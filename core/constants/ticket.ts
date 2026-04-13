@@ -36,6 +36,10 @@ export interface Ticket {
   assignedTo: { id: string; name: string } | null;
   teamId: number | null;
   team: { id: number; name: string; color: string } | null;
+  /** Channel that created this ticket: "email" | "portal" | "agent" | null for legacy rows */
+  source: string | null;
+  /** Customer's organization name — present in list responses when available */
+  organization: string | null;
   createdAt: string;
   updatedAt: string;
 

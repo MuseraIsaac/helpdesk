@@ -13,6 +13,7 @@ import { logAudit } from "../lib/audit";
 import { runRules } from "../lib/automation";
 import { upsertCustomer } from "../lib/upsert-customer";
 import { generateTicketNumber } from "../lib/ticket-number";
+import { htmlToText } from "../lib/html-to-text";
 
 interface TicketStatsRow {
   totalTickets: bigint;
@@ -37,11 +38,14 @@ const LIST_SELECT = {
   urgency: true,
   senderName: true,
   senderEmail: true,
+  source: true,
   assignedToId: true,
   assignedTo: { select: { id: true, name: true } },
   teamId: true,
   team: { select: { id: true, name: true, color: true } },
+  customer: { select: { organization: { select: { name: true } } } },
   createdAt: true,
+  updatedAt: true,
   firstResponseDueAt: true,
   resolutionDueAt: true,
   firstRespondedAt: true,
@@ -118,11 +122,14 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
   const customerId = await upsertCustomer(data.senderEmail, data.senderName);
   const ticketNumber = await generateTicketNumber(data.ticketType ?? null, now);
 
+  const plainBody = data.bodyHtml ? htmlToText(data.bodyHtml) : data.body;
+
   const ticket = await prisma.ticket.create({
     data: {
       ticketNumber,
       subject: data.subject,
-      body: data.body,
+      body: plainBody,
+      bodyHtml: data.bodyHtml ?? null,
       senderName: data.senderName,
       senderEmail: data.senderEmail,
       customerId,
@@ -135,6 +142,7 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
       urgency: data.urgency ?? null,
       assignedToId: data.assignedToId ?? null,
       status: "open",
+      source: "agent",
       firstResponseDueAt: slaDeadlines.firstResponseDueAt,
       resolutionDueAt: slaDeadlines.resolutionDueAt,
     },
@@ -234,6 +242,7 @@ router.get("/", requireAuth, async (req, res) => {
     if (query.priority) where.priority = query.priority;
     if (query.severity) where.severity = query.severity;
     if (query.escalated !== undefined) where.isEscalated = query.escalated;
+    if (query.assignedToMe) where.assignedToId = req.user.id;
 
     if (query.search) {
       where.OR = [
@@ -260,7 +269,11 @@ router.get("/", requireAuth, async (req, res) => {
   ]);
 
   res.json({
-    tickets: tickets.map(withSlaInfo),
+    tickets: tickets.map(t => ({
+      ...withSlaInfo(t),
+      organization: t.customer?.organization?.name ?? null,
+      customer: undefined,
+    })),
     total,
     page: query.page,
     pageSize: query.pageSize,

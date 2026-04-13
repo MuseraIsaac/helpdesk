@@ -20,6 +20,8 @@ export type InboundEmailInput = z.infer<typeof inboundEmailSchema>;
 export const createTicketSchema = z.object({
   subject: z.string().trim().min(1, "Subject is required").max(255, "Subject is too long"),
   body: z.string().trim().min(1, "Description is required").max(5000, "Description is too long"),
+  /** HTML version of the body from the rich text editor. */
+  bodyHtml: z.string().optional(),
   senderName: z.string().trim().min(1, "Sender name is required").max(255, "Sender name is too long"),
   senderEmail: z.email("Invalid email address"),
   ticketType: z.enum(ticketTypes).nullable().optional(),
@@ -43,6 +45,7 @@ const sortableColumns = [
   "priority",
   "severity",
   "createdAt",
+  "updatedAt",
 ] as const;
 
 export type TicketSortField = (typeof sortableColumns)[number];
@@ -85,6 +88,8 @@ export const ticketListQuerySchema = z.object({
   search: z.string().optional(),
   /** true = only escalated tickets */
   escalated: boolParam,
+  /** true = only tickets assigned to the authenticated user */
+  assignedToMe: boolParam,
   /** Filter by team ID; "none" matches tickets with no team */
   teamId: z.union([z.coerce.number().int().positive(), z.literal("none")]).optional(),
   /** Predefined compound views — overrides some individual filters */

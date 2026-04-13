@@ -5,6 +5,7 @@ import { parseId } from "../lib/parse-id";
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { createReplySchema, polishReplySchema } from "core/schemas/replies.ts";
+import { htmlToText } from "../lib/html-to-text";
 import prisma from "../db";
 import { sendEmailJob } from "../lib/send-email";
 import { logAudit } from "../lib/audit";
@@ -83,9 +84,14 @@ router.post("/", requireAuth, async (req, res) => {
     }
   }
 
+  // If HTML body provided, derive plain-text for storage + email fallback
+  const plainBody = data.bodyHtml ? htmlToText(data.bodyHtml) : data.body;
+  const htmlBody = data.bodyHtml ?? null;
+
   const reply = await prisma.reply.create({
     data: {
-      body: data.body,
+      body: plainBody,
+      bodyHtml: htmlBody,
       senderType: "agent",
       ticketId,
       userId: req.user.id,
@@ -140,7 +146,8 @@ router.post("/", requireAuth, async (req, res) => {
   await sendEmailJob({
     to: ticket.senderEmail,
     subject: `Re: ${ticket.subject}`,
-    body: data.body,
+    body: plainBody,
+    ...(htmlBody && { bodyHtml: htmlBody }),
     ...(inReplyTo && { inReplyTo }),
     ...(references && { references }),
     ...(data.attachmentIds?.length && { attachmentIds: data.attachmentIds }),

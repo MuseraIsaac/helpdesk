@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
@@ -13,6 +13,11 @@ import {
 import { type Ticket } from "core/constants/ticket.ts";
 import { categoryLabel } from "core/constants/ticket-category.ts";
 import { escalationReasonLabel } from "core/constants/escalation-reason.ts";
+import {
+  COLUMN_META,
+  type ColumnId,
+  type SavedViewConfig,
+} from "core/schemas/ticket-view.ts";
 import ErrorAlert from "@/components/ErrorAlert";
 import StatusBadge from "@/components/StatusBadge";
 import TicketTypeBadge from "@/components/TicketTypeBadge";
@@ -48,10 +53,13 @@ interface TicketsResponse {
   pageSize: number;
 }
 
-const columns: ColumnDef<Ticket>[] = [
-  {
+// ── All column definitions ────────────────────────────────────────────────────
+
+const ALL_COLUMN_DEFS: Record<ColumnId, ColumnDef<Ticket>> = {
+  ticketNumber: {
     id: "ticketNumber",
     header: "#",
+    enableSorting: false,
     cell: ({ row }) => (
       <Link
         to={`/tickets/${row.original.id}`}
@@ -61,15 +69,13 @@ const columns: ColumnDef<Ticket>[] = [
       </Link>
     ),
   },
-  {
+  subject: {
     accessorKey: "subject",
     header: "Subject",
+    enableSorting: true,
     cell: ({ row }) => (
       <div className="flex items-center gap-1.5">
-        <Link
-          to={`/tickets/${row.original.id}`}
-          className="link font-medium"
-        >
+        <Link to={`/tickets/${row.original.id}`} className="link font-medium">
           {row.original.subject}
         </Link>
         {row.original.isEscalated && (
@@ -84,53 +90,57 @@ const columns: ColumnDef<Ticket>[] = [
       </div>
     ),
   },
-  {
-    accessorKey: "ticketType",
-    header: "Type",
-    cell: ({ row }) => <TicketTypeBadge type={row.original.ticketType} />,
-  },
-  {
+  requester: {
+    id: "requester",
     accessorKey: "senderName",
-    header: "Sender",
+    header: "Requester",
+    enableSorting: true,
     cell: ({ row }) => (
       <div>
         <div>{row.original.senderName}</div>
-        <div className="text-sm text-muted-foreground">
-          {row.original.senderEmail}
-        </div>
+        <div className="text-sm text-muted-foreground">{row.original.senderEmail}</div>
       </div>
     ),
   },
-  {
+  ticketType: {
+    accessorKey: "ticketType",
+    header: "Type",
+    enableSorting: false,
+    cell: ({ row }) => <TicketTypeBadge type={row.original.ticketType} />,
+  },
+  status: {
     accessorKey: "status",
     header: "Status",
+    enableSorting: true,
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
   },
-  {
+  priority: {
     accessorKey: "priority",
     header: "Priority",
+    enableSorting: true,
     cell: ({ row }) => <PriorityBadge priority={row.original.priority} />,
   },
-  {
+  severity: {
     accessorKey: "severity",
     header: "Severity",
+    enableSorting: true,
     cell: ({ row }) => <SeverityBadge severity={row.original.severity} />,
   },
-  {
+  category: {
     accessorKey: "category",
     header: "Category",
+    enableSorting: true,
     cell: ({ row }) =>
       row.original.category ? (
-        <Badge variant="secondary">
-          {categoryLabel[row.original.category]}
-        </Badge>
+        <Badge variant="secondary">{categoryLabel[row.original.category]}</Badge>
       ) : (
-        "—"
+        <span className="text-muted-foreground text-xs">—</span>
       ),
   },
-  {
+  team: {
     id: "team",
     header: "Team",
+    enableSorting: false,
     cell: ({ row }) => {
       const team = row.original.team;
       if (!team) return <span className="text-muted-foreground text-xs">—</span>;
@@ -145,34 +155,86 @@ const columns: ColumnDef<Ticket>[] = [
       );
     },
   },
-  {
-    accessorKey: "createdAt",
-    header: "Created",
-    cell: ({ row }) =>
-      new Date(row.original.createdAt).toLocaleDateString(),
+  assignee: {
+    id: "assignee",
+    header: "Assignee",
+    enableSorting: false,
+    cell: ({ row }) => {
+      const a = row.original.assignedTo;
+      if (!a) return <span className="text-muted-foreground text-xs">Unassigned</span>;
+      return <span className="text-sm">{a.name}</span>;
+    },
   },
-  {
-    id: "sla",
+  slaStatus: {
+    id: "slaStatus",
     header: "SLA",
+    enableSorting: false,
     cell: ({ row }) => {
       const { slaStatus, minutesUntilBreach, firstResponseDueAt, resolutionDueAt } =
         row.original;
-      if (!firstResponseDueAt && !resolutionDueAt) {
+      if (!firstResponseDueAt && !resolutionDueAt)
         return <span className="text-muted-foreground text-xs">—</span>;
-      }
       if (!slaStatus) return null;
+      return <SlaCountdown status={slaStatus} minutesUntilBreach={minutesUntilBreach} />;
+    },
+  },
+  createdAt: {
+    accessorKey: "createdAt",
+    header: "Created",
+    enableSorting: true,
+    cell: ({ row }) => new Date(row.original.createdAt).toLocaleDateString(),
+  },
+  updatedAt: {
+    accessorKey: "updatedAt",
+    header: "Updated",
+    enableSorting: true,
+    cell: ({ row }) => new Date(row.original.updatedAt).toLocaleDateString(),
+  },
+  source: {
+    id: "source",
+    header: "Source",
+    enableSorting: false,
+    cell: ({ row }) => {
+      const src = row.original.source;
+      if (!src) return <span className="text-muted-foreground text-xs">—</span>;
+      const labels: Record<string, string> = {
+        email: "Email",
+        portal: "Portal",
+        agent: "Agent",
+      };
       return (
-        <SlaCountdown status={slaStatus} minutesUntilBreach={minutesUntilBreach} />
+        <Badge variant="outline" className="text-xs capitalize">
+          {labels[src] ?? src}
+        </Badge>
       );
     },
   },
-];
+  organization: {
+    id: "organization",
+    header: "Organization",
+    enableSorting: false,
+    cell: ({ row }) => {
+      const org = row.original.organization;
+      if (!org) return <span className="text-muted-foreground text-xs">—</span>;
+      return <span className="text-sm">{org}</span>;
+    },
+  },
+};
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 10;
 
-export default function TicketsTable({ filters }: { filters: TicketFilters }) {
+interface TicketsTableProps {
+  filters: TicketFilters;
+  viewConfig?: SavedViewConfig;
+}
+
+export default function TicketsTable({ filters, viewConfig }: TicketsTableProps) {
+  const defaultSort = viewConfig?.sort;
+
   const [sorting, setSorting] = useState<SortingState>([
-    { id: "createdAt", desc: true },
+    { id: defaultSort?.by ?? "createdAt", desc: (defaultSort?.order ?? "desc") === "desc" },
   ]);
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
@@ -180,22 +242,33 @@ export default function TicketsTable({ filters }: { filters: TicketFilters }) {
   });
 
   useEffect(() => {
-    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+    setPagination(prev => ({ ...prev, pageIndex: 0 }));
   }, [filters]);
 
+  // Build the active column list from viewConfig
+  const columns = useMemo<ColumnDef<Ticket>[]>(() => {
+    if (!viewConfig) {
+      // No view config — show default visible columns in default order
+      return Object.entries(COLUMN_META)
+        .filter(([, meta]) => meta.defaultVisible)
+        .map(([id]) => ALL_COLUMN_DEFS[id as ColumnId]);
+    }
+    return viewConfig.columns
+      .filter(c => c.visible)
+      .map(c => ALL_COLUMN_DEFS[c.id]);
+  }, [viewConfig]);
+
   const sortBy = sorting[0]?.id ?? "createdAt";
+  // Map column id to API sort key (e.g. "requester" → "senderName")
+  const apiSortKey = COLUMN_META[sortBy as ColumnId]?.sortKey ?? sortBy;
   const sortOrder = sorting[0]?.desc ?? true ? "desc" : "asc";
 
-  const {
-    data,
-    isLoading,
-    error,
-  } = useQuery({
-    queryKey: ["tickets", sortBy, sortOrder, filters, pagination.pageIndex],
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["tickets", apiSortKey, sortOrder, filters, pagination.pageIndex],
     queryFn: async () => {
       const { data } = await axios.get<TicketsResponse>("/api/tickets", {
         params: {
-          sortBy,
+          sortBy: apiSortKey,
           sortOrder,
           ...filters,
           page: pagination.pageIndex + 1,
@@ -213,9 +286,9 @@ export default function TicketsTable({ filters }: { filters: TicketFilters }) {
     data: data?.tickets ?? [],
     columns,
     state: { sorting, pagination },
-    onSortingChange: (updater) => {
+    onSortingChange: updater => {
       setSorting(updater);
-      setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+      setPagination(prev => ({ ...prev, pageIndex: 0 }));
     },
     onPaginationChange: setPagination,
     manualSorting: true,
@@ -229,34 +302,42 @@ export default function TicketsTable({ filters }: { filters: TicketFilters }) {
     return <ErrorAlert message="Failed to fetch tickets" />;
   }
 
+  const visibleColCount = columns.length;
+
   return (
     <div>
       <Table>
         <TableHeader>
-          {table.getHeaderGroups().map((headerGroup) => (
+          {table.getHeaderGroups().map(headerGroup => (
             <TableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <TableHead key={header.id}>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="-ml-3"
-                    onClick={header.column.getToggleSortingHandler()}
-                  >
-                    {flexRender(
-                      header.column.columnDef.header,
-                      header.getContext()
-                    )}
-                    {header.column.getIsSorted() === "asc" ? (
-                      <ArrowUp className="ml-2 h-4 w-4" />
-                    ) : header.column.getIsSorted() === "desc" ? (
-                      <ArrowDown className="ml-2 h-4 w-4" />
+              {headerGroup.headers.map(header => {
+                const canSort = header.column.getCanSort();
+                return (
+                  <TableHead key={header.id}>
+                    {canSort ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="-ml-3"
+                        onClick={header.column.getToggleSortingHandler()}
+                      >
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {header.column.getIsSorted() === "asc" ? (
+                          <ArrowUp className="ml-2 h-4 w-4" />
+                        ) : header.column.getIsSorted() === "desc" ? (
+                          <ArrowDown className="ml-2 h-4 w-4" />
+                        ) : (
+                          <ArrowUpDown className="ml-2 h-4 w-4" />
+                        )}
+                      </Button>
                     ) : (
-                      <ArrowUpDown className="ml-2 h-4 w-4" />
+                      <span className="px-2 py-1 text-sm font-medium">
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                      </span>
                     )}
-                  </Button>
-                </TableHead>
-              ))}
+                  </TableHead>
+                );
+              })}
             </TableRow>
           ))}
         </TableHeader>
@@ -264,49 +345,18 @@ export default function TicketsTable({ filters }: { filters: TicketFilters }) {
           {isLoading
             ? Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  <TableCell>
-                    <Skeleton className="h-4 w-16 font-mono" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-48" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-5 w-20 rounded-full" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-40" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-5 w-16 rounded-full" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-5 w-16 rounded-full" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-5 w-16 rounded-full" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-5 w-24 rounded-full" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-24" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-5 w-20 rounded-full" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-5 w-20 rounded-full" />
-                  </TableCell>
+                  {Array.from({ length: visibleColCount }).map((_, j) => (
+                    <TableCell key={j}>
+                      <Skeleton className="h-4 w-20" />
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))
-            : table.getRowModel().rows.map((row) => (
+            : table.getRowModel().rows.map(row => (
                 <TableRow key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
+                  {row.getVisibleCells().map(cell => (
                     <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}
                 </TableRow>
@@ -319,7 +369,10 @@ export default function TicketsTable({ filters }: { filters: TicketFilters }) {
           <p className="text-sm text-muted-foreground">
             {total === 0
               ? "No tickets"
-              : `Showing ${pagination.pageIndex * pagination.pageSize + 1}–${Math.min((pagination.pageIndex + 1) * pagination.pageSize, total)} of ${total} tickets`}
+              : `Showing ${pagination.pageIndex * pagination.pageSize + 1}–${Math.min(
+                  (pagination.pageIndex + 1) * pagination.pageSize,
+                  total,
+                )} of ${total} tickets`}
           </p>
           <div className="flex items-center gap-1">
             <Button

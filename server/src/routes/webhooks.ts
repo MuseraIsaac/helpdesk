@@ -149,6 +149,7 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
       senderEmail: data.from,
       customerId,
       assignedToId: AI_AGENT_ID,
+      source: "email",
       firstResponseDueAt: slaDeadlines.firstResponseDueAt,
       resolutionDueAt: slaDeadlines.resolutionDueAt,
       emailMessageId,

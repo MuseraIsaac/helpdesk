@@ -1,6 +1,7 @@
 export interface Note {
   id: number;
   body: string;
+  bodyHtml: string | null;
   isPinned: boolean;
   authorId: string;
   author: { id: string; name: string };

@@ -109,6 +109,7 @@ model User {
   teamMemberships     TeamMember[]
   preference          UserPreference?
   dashboards          DashboardConfig[]
+  savedTicketViews    SavedTicketView[]
 
   @@map("user")
 }
@@ -234,6 +235,8 @@ model Ticket {
   // Email threading: Message-ID header from the original inbound email.
   // Used to set In-Reply-To / References when sending agent replies.
   emailMessageId String?
+  // Channel that created this ticket: "email", "portal", "agent", or null for legacy rows.
+  source         String?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   replies      Reply[]
@@ -330,6 +333,7 @@ model Attachment {
 model Note {
   id               Int      @id @default(autoincrement())
   body             String
+  bodyHtml         String?
   isPinned         Boolean  @default(false)
   ticketId         Int
   ticket           Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
@@ -552,4 +556,31 @@ model DashboardConfig {
   user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("dashboard_config")
+}
+
+/**
+ * SavedTicketView — a named, savable ticket list view configuration per user.
+ *
+ * Design:
+ *   - config stores column visibility/order, default sort, and optional filter preset
+ *   - isDefault: the user's active column layout (only one per user at a time)
+ *   - isShared: admin-created views visible to all users (read-only for non-admins)
+ *   - config is validated against SavedViewConfig in core/schemas/ticket-view.ts
+ */
+model SavedTicketView {
+  id        Int      @id @default(autoincrement())
+  userId    String   @map("user_id")
+  name      String
+  emoji     String?
+  isDefault Boolean  @default(false) @map("is_default")
+  isShared  Boolean  @default(false) @map("is_shared")
+  config    Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "saved_ticket_view_user_id_idx")
+  @@index([isShared], map: "saved_ticket_view_is_shared_idx")
+  @@map("saved_ticket_view")
 }
