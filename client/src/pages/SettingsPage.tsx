@@ -14,9 +14,18 @@ import {
   Plug,
   Wrench,
   Search,
+  Siren,
+  PackageCheck,
+  GitBranch,
+  CheckSquare,
+  ClipboardList,
+  Database,
+  Bell,
+  ShieldCheck,
+  ScrollText,
+  CalendarDays,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   settingsSections,
   settingsSectionMeta,
@@ -36,7 +45,42 @@ import {
   AppearanceSection,
   IntegrationsSection,
   AdvancedSection,
+  IncidentsSection,
+  RequestsSection,
+  ProblemsSection,
+  ChangesSection,
+  ApprovalsSection,
+  CmdbSection,
+  NotificationsSection,
+  SecuritySection,
+  AuditSection,
+  BusinessHoursSection,
 } from "./settings/sections";
+
+// ── Section groups for sidebar organisation ───────────────────────────────────
+
+const SECTION_GROUPS: { label: string; sections: SettingsSection[] }[] = [
+  {
+    label: "Platform",
+    sections: ["general", "branding", "appearance", "users_roles", "advanced"],
+  },
+  {
+    label: "Tickets & SLA",
+    sections: ["tickets", "ticket_numbering", "sla", "business_hours", "automations", "templates"],
+  },
+  {
+    label: "Knowledge Base",
+    sections: ["knowledge_base"],
+  },
+  {
+    label: "ITSM Modules",
+    sections: ["incidents", "requests", "problems", "changes", "approvals", "cmdb"],
+  },
+  {
+    label: "System",
+    sections: ["notifications", "security", "audit", "integrations"],
+  },
+];
 
 // ── Icon map ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +97,16 @@ const sectionIcons: Record<SettingsSection, React.ReactNode> = {
   appearance:       <Monitor className="h-4 w-4" />,
   integrations:     <Plug className="h-4 w-4" />,
   advanced:         <Wrench className="h-4 w-4" />,
+  incidents:        <Siren className="h-4 w-4" />,
+  requests:         <PackageCheck className="h-4 w-4" />,
+  problems:         <GitBranch className="h-4 w-4" />,
+  changes:          <ClipboardList className="h-4 w-4" />,
+  approvals:        <CheckSquare className="h-4 w-4" />,
+  cmdb:             <Database className="h-4 w-4" />,
+  notifications:    <Bell className="h-4 w-4" />,
+  security:         <ShieldCheck className="h-4 w-4" />,
+  audit:            <ScrollText className="h-4 w-4" />,
+  business_hours:   <CalendarDays className="h-4 w-4" />,
 };
 
 // ── Section component map ─────────────────────────────────────────────────────
@@ -70,21 +124,28 @@ const sectionComponents: Record<SettingsSection, React.FC> = {
   appearance:       AppearanceSection,
   integrations:     IntegrationsSection,
   advanced:         AdvancedSection,
+  incidents:        IncidentsSection,
+  requests:         RequestsSection,
+  problems:         ProblemsSection,
+  changes:          ChangesSection,
+  approvals:        ApprovalsSection,
+  cmdb:             CmdbSection,
+  notifications:    NotificationsSection,
+  security:         SecuritySection,
+  audit:            AuditSection,
+  business_hours:   BusinessHoursSection,
 };
 
 // ── Search index ──────────────────────────────────────────────────────────────
-// Each entry is a searchable token derived from a section's label + description + keywords.
 
 interface SearchEntry {
   section: SettingsSection;
-  tokens: string; // normalised string of all searchable text for this section
+  tokens: string;
 }
 
 const searchIndex: SearchEntry[] = settingsSections.map((section) => {
   const meta = settingsSectionMeta[section];
-  const tokens = [meta.label, meta.description, ...meta.keywords]
-    .join(" ")
-    .toLowerCase();
+  const tokens = [meta.label, meta.description, ...meta.keywords].join(" ").toLowerCase();
   return { section, tokens };
 });
 
@@ -101,17 +162,17 @@ export default function SettingsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
 
-  // Validate section param — redirect to general if unknown
   if (!isSettingsSection(section)) {
     return <Navigate to="/settings/general" replace />;
   }
 
-  const visibleSections = useMemo(
-    () => searchIndex.filter((e) => matchesSearch(e, search)),
+  const matchedSections = useMemo(
+    () => new Set(searchIndex.filter((e) => matchesSearch(e, search)).map((e) => e.section)),
     [search]
   );
 
   const SectionComponent = sectionComponents[section];
+  const isSearching = search.trim().length > 0;
 
   return (
     <div className="flex gap-0 -mx-6 -my-8 min-h-[calc(100vh-56px)]">
@@ -138,38 +199,38 @@ export default function SettingsPage() {
 
         {/* Section list */}
         <nav className="flex-1 overflow-y-auto py-2 px-2">
-          {visibleSections.length === 0 && (
+          {matchedSections.size === 0 && (
             <p className="text-xs text-muted-foreground text-center py-6 px-2">
               No settings match "{search}"
             </p>
           )}
-          {visibleSections.map(({ section: s }) => {
-            const meta = settingsSectionMeta[s];
-            const isActive = s === section;
-            return (
-              <button
-                key={s}
-                onClick={() => {
-                  navigate(`/settings/${s}`);
-                  setSearch("");
-                }}
-                className={[
-                  "w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent",
-                ].join(" ")}
-              >
-                <span className="shrink-0">{sectionIcons[s]}</span>
-                <span className="truncate font-medium">{meta.label}</span>
-              </button>
-            );
-          })}
 
-          {/* Show section count when searching */}
-          {search.trim() && visibleSections.length > 0 && (
+          {isSearching ? (
+            // Flat list when searching
+            [...matchedSections].map((s) => (
+              <NavButton key={s} s={s} isActive={s === section} onSelect={(s) => { navigate(`/settings/${s}`); setSearch(""); }} />
+            ))
+          ) : (
+            // Grouped list when not searching
+            SECTION_GROUPS.map((group) => {
+              const groupSections = group.sections.filter((s) => matchedSections.has(s));
+              if (groupSections.length === 0) return null;
+              return (
+                <div key={group.label} className="mb-3">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-2.5 py-1">
+                    {group.label}
+                  </p>
+                  {groupSections.map((s) => (
+                    <NavButton key={s} s={s} isActive={s === section} onSelect={(s) => navigate(`/settings/${s}`)} />
+                  ))}
+                </div>
+              );
+            })
+          )}
+
+          {isSearching && matchedSections.size > 0 && (
             <p className="text-[10px] text-muted-foreground text-center pt-2 pb-1">
-              {visibleSections.length} of {settingsSections.length} sections
+              {matchedSections.size} of {settingsSections.length} sections
             </p>
           )}
         </nav>
@@ -177,12 +238,37 @@ export default function SettingsPage() {
 
       {/* ── Main content ──────────────────────────────────────────────────── */}
       <main className="flex-1 overflow-y-auto px-8 py-8 min-w-0">
-        {/* Breadcrumb */}
         <p className="text-xs text-muted-foreground mb-6">
           Settings / {settingsSectionMeta[section].label}
         </p>
         <SectionComponent />
       </main>
     </div>
+  );
+}
+
+function NavButton({
+  s,
+  isActive,
+  onSelect,
+}: {
+  s: SettingsSection;
+  isActive: boolean;
+  onSelect: (s: SettingsSection) => void;
+}) {
+  const meta = settingsSectionMeta[s];
+  return (
+    <button
+      onClick={() => onSelect(s)}
+      className={[
+        "w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors",
+        isActive
+          ? "bg-primary text-primary-foreground"
+          : "text-muted-foreground hover:text-foreground hover:bg-accent",
+      ].join(" ")}
+    >
+      <span className="shrink-0">{sectionIcons[s]}</span>
+      <span className="truncate font-medium">{meta.label}</span>
+    </button>
   );
 }

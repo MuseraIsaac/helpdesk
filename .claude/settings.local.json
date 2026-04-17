@@ -58,7 +58,9 @@
       "Bash(grep -v '^ui$')",
       "Bash(xargs grep *)",
       "Bash(bun prisma *)",
-      "Bash(grep -n \"portal\\\\|customer\\\\|Portal\" \"C:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/client/src/pages/\"*)"
+      "Bash(grep -n \"portal\\\\|customer\\\\|Portal\" \"C:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/client/src/pages/\"*)",
+      "Bash(node -e ' *)",
+      "Bash(bun -e ' *)"
     ]
   }
 }

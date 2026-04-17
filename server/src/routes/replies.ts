@@ -95,6 +95,9 @@ router.post("/", requireAuth, async (req, res) => {
       senderType: "agent",
       ticketId,
       userId: req.user.id,
+      // Agent replies go out via email (the platform's primary outbound channel)
+      channel: "email",
+      channelMeta: { agentId: req.user.id, via: "agent_reply" },
     },
     include: {
       user: { select: { id: true, name: true } },

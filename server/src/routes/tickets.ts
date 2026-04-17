@@ -15,6 +15,7 @@ import { workflowEngine } from "../lib/workflow";
 import { upsertCustomer } from "../lib/upsert-customer";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { htmlToText } from "../lib/html-to-text";
+import { notify } from "../lib/notify";
 
 interface TicketStatsRow {
   totalTickets: bigint;
@@ -498,6 +499,18 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
           : null,
       })
     );
+    // Notify the new assignee (skip if self-assigned or unassigned)
+    if (data.assignedToId && data.assignedToId !== req.user.id) {
+      void notify({
+        event: "ticket.assigned",
+        recipientIds: [data.assignedToId],
+        title: `Ticket assigned to you`,
+        body: `#${updated.ticketNumber} — ${updated.subject}`,
+        entityType: "ticket",
+        entityId: String(id),
+        entityUrl: `/tickets/${id}`,
+      });
+    }
   }
   await Promise.all(auditLogs);
 

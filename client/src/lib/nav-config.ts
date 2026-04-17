@@ -28,6 +28,9 @@ import {
   Wrench,
   UserCog,
   CheckSquare,
+  ShoppingBag,
+  Contact,
+  Building2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { can, type Permission } from "core/constants/permission.ts";
@@ -144,6 +147,13 @@ export const NAV_SECTIONS: NavSection[] = [
         permission: "cmdb.view",
       },
       {
+        id: "catalog",
+        to: "/catalog",
+        label: "Service Catalog",
+        icon: ShoppingBag,
+        permission: "catalog.view",
+      },
+      {
         id: "assets",
         to: "/assets",
         label: "Assets",
@@ -157,6 +167,29 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Approvals",
         icon: CheckSquare,
         permission: "approvals.view",
+      },
+    ],
+  },
+
+  // ── Contacts ───────────────────────────────────────────────────────────────
+  {
+    id: "contacts",
+    label: "Contacts",
+    permission: "contacts.view",
+    items: [
+      {
+        id: "customers",
+        to: "/customers",
+        label: "Customers",
+        icon: Contact,
+        permission: "contacts.view",
+      },
+      {
+        id: "organizations",
+        to: "/organizations",
+        label: "Organizations",
+        icon: Building2,
+        permission: "contacts.view",
       },
     ],
   },
@@ -271,5 +304,8 @@ export function resolveModuleBreadcrumb(pathname: string, role: string): string 
   }
   if (pathname.startsWith("/settings")) return "Administration  ·  Settings";
   if (pathname.startsWith("/profile")) return "Account  ·  Profile";
+  if (pathname.startsWith("/customers")) return "Contacts  ·  Customers";
+  if (pathname.startsWith("/organizations")) return "Contacts  ·  Organizations";
+  if (pathname.startsWith("/notifications")) return "Account  ·  Notifications";
   return "ITSM Platform";
 }

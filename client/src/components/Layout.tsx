@@ -9,8 +9,11 @@ import {
   type NavSection,
 } from "../lib/nav-config";
 import { signOut, useSession } from "../lib/auth-client";
+import { useBranding } from "../lib/useBranding";
 import ProfileMenu from "./ProfileMenu";
-import { Settings, ChevronLeft, ChevronRight, Menu, X } from "lucide-react";
+import NotificationBell from "./NotificationBell";
+import GlobalSearch from "./GlobalSearch";
+import { Settings, ChevronLeft, ChevronRight, Menu, X, Search } from "lucide-react";
 
 // ── Sidebar collapse — persisted to localStorage ───────────────────────────────
 
@@ -136,6 +139,8 @@ function SidebarContent({
   onClose,
 }: SidebarContentProps) {
   const initials = getInitials(name);
+  const { data: branding } = useBranding();
+  const logoDataUrl = branding?.logoDataUrl;
 
   return (
     <div className="flex flex-col h-full select-none">
@@ -151,16 +156,23 @@ function SidebarContent({
           onClick={onClose}
           className="flex items-center gap-2.5 min-w-0 group"
         >
-          {/* Logo mark: two-letter monogram on primary background */}
-          <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center shrink-0">
-            <span className="text-primary-foreground font-bold text-[11px] tracking-tight">
-              IT
-            </span>
-          </div>
+          {logoDataUrl ? (
+            <img
+              src={logoDataUrl}
+              alt="Zentra"
+              className="h-7 w-7 rounded-lg object-contain shrink-0"
+            />
+          ) : (
+            <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center shrink-0">
+              <span className="text-primary-foreground font-bold text-[11px] tracking-tight">
+                Z
+              </span>
+            </div>
+          )}
           {!collapsed && (
             <div className="min-w-0">
               <span className="text-[14px] font-semibold tracking-tight truncate block group-hover:text-foreground transition-colors">
-                ITSM Platform
+                Zentra
               </span>
             </div>
           )}
@@ -362,6 +374,25 @@ export default function Layout() {
 
           <div className="flex-1" />
 
+          {/* Global search trigger */}
+          <button
+            onClick={() => {
+              // Dispatch synthetic Ctrl+K to open GlobalSearch
+              document.dispatchEvent(
+                new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true })
+              );
+            }}
+            className="hidden sm:flex items-center gap-2 h-8 px-3 rounded-lg border bg-muted/50 text-muted-foreground text-[13px] hover:bg-accent hover:text-foreground transition-colors"
+            title="Search (Ctrl+K)"
+          >
+            <Search className="h-3.5 w-3.5" />
+            <span>Search</span>
+            <kbd className="ml-2 text-[10px] border rounded px-1 py-0.5 bg-background">⌘K</kbd>
+          </button>
+
+          {/* Notification bell */}
+          <NotificationBell />
+
           {/* Profile menu */}
           <ProfileMenu onSignOut={handleSignOut} />
         </header>
@@ -371,6 +402,9 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Global search overlay — rendered outside the sidebar/content split */}
+      <GlobalSearch />
     </div>
   );
 }

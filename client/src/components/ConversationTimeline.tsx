@@ -4,6 +4,7 @@ import axios from "axios";
 import { type Ticket } from "core/constants/ticket.ts";
 import { type Note } from "core/constants/note.ts";
 import { type SenderType, senderTypeLabel } from "core/constants/sender-type.ts";
+import { type IntakeChannel, CHANNEL_ICON, CHANNEL_SHORT_LABEL } from "core/constants/channel.ts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,6 +24,7 @@ interface Reply {
   body: string;
   bodyHtml: string | null;
   senderType: SenderType;
+  channel: IntakeChannel | null;
   user: { id: string; name: string } | null;
   createdAt: string;
   attachments: AttachmentInfo[];
@@ -169,9 +171,15 @@ export default function ConversationTimeline({ ticket }: ConversationTimelinePro
                   </div>
                   <div>
                     <CardTitle className="text-sm font-medium">{displayName}</CardTitle>
-                    <CardDescription className="text-xs">
-                      {senderTypeLabel[reply.senderType]} &middot;{" "}
-                      {new Date(reply.createdAt).toLocaleString()}
+                    <CardDescription className="text-xs flex items-center gap-1.5 flex-wrap">
+                      {senderTypeLabel[reply.senderType]}
+                      {reply.channel && (
+                        <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0 text-[10px] font-medium bg-muted text-muted-foreground border">
+                          <span>{CHANNEL_ICON[reply.channel]}</span>
+                          <span>{CHANNEL_SHORT_LABEL[reply.channel]}</span>
+                        </span>
+                      )}
+                      &middot; {new Date(reply.createdAt).toLocaleString()}
                     </CardDescription>
                   </div>
                 </div>

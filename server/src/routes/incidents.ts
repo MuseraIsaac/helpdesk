@@ -18,6 +18,7 @@ import {
 } from "../lib/incident-sla";
 import { logIncidentEvent } from "../lib/incident-events";
 import { generateTicketNumber } from "../lib/ticket-number";
+import { notify } from "../lib/notify";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -384,6 +385,24 @@ router.patch(
           {}
         )
       );
+      // Notify commander and assignee when a major incident is declared
+      if (data.isMajor === true) {
+        const recipients = [
+          updated.commander?.id,
+          updated.assignedTo?.id,
+        ].filter((x): x is string => !!x && x !== req.user.id);
+        if (recipients.length > 0) {
+          void notify({
+            event: "incident.major_flagged",
+            recipientIds: [...new Set(recipients)],
+            title: "Major incident declared",
+            body: updated.title,
+            entityType: "incident",
+            entityId: String(id),
+            entityUrl: `/incidents/${id}`,
+          });
+        }
+      }
     }
 
     await Promise.all(auditTasks);

@@ -67,13 +67,16 @@ async function saveInboundAttachments(
       continue;
     }
     try {
-      const storageKey = await saveFile(file.buffer, file.originalname);
+      const { key: storageKey, checksum, provider: storageProvider } = await saveFile(file.buffer, file.originalname);
       await prisma.attachment.create({
         data: {
           filename: file.originalname,
           mimeType: file.mimetype,
           size: file.size,
           storageKey,
+          storageProvider,
+          checksum,
+          virusScanStatus: "skipped", // inbound attachments are not scanned synchronously
           ticketId,
           replyId: replyId ?? null,
           uploadedById: null, // inbound — no agent user
@@ -126,6 +129,12 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
         ticketId: existingTicket.id,
         userId: null,
         emailMessageId,
+        channel: "email",
+        channelMeta: {
+          messageId: emailMessageId ?? null,
+          from: parsed.from ?? null,
+          via: "email_inbound",
+        },
       },
     });
     await saveInboundAttachments(files, existingTicket.id, reply.id);

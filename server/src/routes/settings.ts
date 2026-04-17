@@ -10,7 +10,23 @@ import { getSection, setSection, getAllSettings, redactSensitive } from "../lib/
 
 const router = Router();
 
-// All settings routes are admin-only
+/**
+ * GET /api/settings/branding/public
+ * Public endpoint — no auth required. Returns only safe display fields used
+ * by layouts and the favicon injector before the user is authenticated.
+ */
+router.get("/branding/public", async (_req, res) => {
+  const data = await getSection("branding");
+  res.json({
+    data: {
+      logoDataUrl:  (data as Record<string, unknown>).logoDataUrl  ?? "",
+      companyName:  (data as Record<string, unknown>).companyName  ?? "",
+      primaryColor: (data as Record<string, unknown>).primaryColor ?? "#6366f1",
+    },
+  });
+});
+
+// All other settings routes are admin-only
 router.use(requireAuth, requireAdmin);
 
 /**

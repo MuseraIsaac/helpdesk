@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router";
+import { useBranding } from "@/lib/useBranding";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
 import CustomerRoute from "./components/CustomerRoute";
@@ -33,14 +35,44 @@ import PortalNewTicketPage from "./pages/portal/PortalNewTicketPage";
 import PortalRequestsPage from "./pages/portal/PortalRequestsPage";
 import PortalRequestDetailPage from "./pages/portal/PortalRequestDetailPage";
 import PortalNewRequestPage from "./pages/portal/PortalNewRequestPage";
+import NotificationsPage from "./pages/NotificationsPage";
 import CmdbPage from "./pages/CmdbPage";
 import CmdbDetailPage from "./pages/CmdbDetailPage";
+import CatalogPage from "./pages/CatalogPage";
+import CatalogItemPage from "./pages/CatalogItemPage";
+import CatalogAdminPage from "./pages/CatalogAdminPage";
+import PortalCatalogPage from "./pages/portal/PortalCatalogPage";
+import PortalCatalogItemPage from "./pages/portal/PortalCatalogItemPage";
 import HelpCenterPage from "./pages/help/HelpCenterPage";
 import HelpArticlePage from "./pages/help/HelpArticlePage";
+import CustomersPage from "./pages/CustomersPage";
+import CustomerDetailPage from "./pages/CustomerDetailPage";
+import OrganizationsPage from "./pages/OrganizationsPage";
+import OrganizationDetailPage from "./pages/OrganizationDetailPage";
+
+/** Applies the uploaded logo as the browser favicon whenever branding changes. */
+function FaviconEffect() {
+  const { data: branding } = useBranding();
+  useEffect(() => {
+    const dataUrl = branding?.logoDataUrl;
+    if (!dataUrl) return;
+    let link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+    link.type = dataUrl.startsWith("data:image/svg") ? "image/svg+xml" : "image/png";
+    link.href = dataUrl;
+  }, [branding?.logoDataUrl]);
+  return null;
+}
 
 function App() {
   return (
-    <Routes>
+    <>
+      <FaviconEffect />
+      <Routes>
       {/* ── Agent / admin ───────────────────────────────────────────────── */}
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute />}>
@@ -57,10 +89,18 @@ function App() {
           <Route path="/problems" element={<ProblemsPage />} />
           <Route path="/problems/:id" element={<ProblemDetailPage />} />
           <Route path="/changes" element={<PlaceholderPage title="Change Requests" description="Change advisory board and change management is coming soon." />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/cmdb" element={<CmdbPage />} />
           <Route path="/cmdb/:id" element={<CmdbDetailPage />} />
+          <Route path="/catalog" element={<CatalogPage />} />
+          <Route path="/catalog/:id" element={<CatalogItemPage />} />
           <Route path="/assets" element={<PlaceholderPage title="Assets" description="IT asset management and CMDB integration is coming soon." />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
+          {/* Contacts */}
+          <Route path="/customers" element={<CustomersPage />} />
+          <Route path="/customers/:id" element={<CustomerDetailPage />} />
+          <Route path="/organizations" element={<OrganizationsPage />} />
+          <Route path="/organizations/:id" element={<OrganizationDetailPage />} />
           {/* /settings redirects non-admins to home; admin sub-routes below */}
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
 
@@ -72,6 +112,7 @@ function App() {
             <Route path="/templates" element={<PlaceholderPage title="Templates" description="Response templates will be available here." />} />
             <Route path="/automations" element={<PlaceholderPage title="Automations" description="Scenario automations and rule management is coming soon." />} />
             <Route path="/reports" element={<PlaceholderPage title="Reports" description="Advanced reporting and analytics is coming soon." />} />
+            <Route path="/catalog/admin" element={<CatalogAdminPage />} />
           </Route>
           <Route element={<SupervisorRoute />}>
             <Route path="/kb" element={<KbPage />} />
@@ -92,6 +133,8 @@ function App() {
           <Route path="/portal/requests" element={<PortalRequestsPage />} />
           <Route path="/portal/requests/:id" element={<PortalRequestDetailPage />} />
           <Route path="/portal/new-request" element={<PortalNewRequestPage />} />
+          <Route path="/portal/catalog" element={<PortalCatalogPage />} />
+          <Route path="/portal/catalog/:id" element={<PortalCatalogItemPage />} />
         </Route>
       </Route>
 
@@ -103,6 +146,7 @@ function App() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }
 

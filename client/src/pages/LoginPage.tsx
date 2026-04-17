@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { signIn, useSession } from "@/lib/auth-client";
+import { useBranding } from "@/lib/useBranding";
 import {
   Card,
   CardContent,
@@ -29,6 +30,8 @@ export default function LoginPage() {
   const { data: session, isPending } = useSession();
   const navigate = useNavigate();
   const [serverError, setServerError] = useState("");
+  const { data: branding } = useBranding();
+  const logoDataUrl = branding?.logoDataUrl;
 
   const {
     register,
@@ -68,14 +71,18 @@ export default function LoginPage() {
     <div className="flex items-center justify-center min-h-screen bg-background">
       <div className="w-full max-w-[400px] px-4 animate-in-page">
         <div className="flex flex-col items-center mb-10">
-          <div className="h-12 w-12 rounded-2xl bg-primary flex items-center justify-center mb-5">
-            <span className="text-primary-foreground font-bold text-xl">H</span>
-          </div>
+          {logoDataUrl ? (
+            <img src={logoDataUrl} alt="Zentra" className="h-12 w-12 rounded-2xl object-contain mb-5" />
+          ) : (
+            <div className="h-12 w-12 rounded-2xl bg-primary flex items-center justify-center mb-5">
+              <span className="text-primary-foreground font-bold text-xl">Z</span>
+            </div>
+          )}
           <h1 className="text-2xl font-semibold tracking-tight">
             Welcome back
           </h1>
           <p className="text-muted-foreground text-sm mt-1.5">
-            Sign in to your helpdesk account
+            Sign in to your Zentra account
           </p>
         </div>
         <Card>

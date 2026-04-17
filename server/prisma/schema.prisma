@@ -34,6 +34,13 @@ enum SenderType {
   customer
 }
 
+enum VirusScanStatus {
+  pending
+  clean
+  infected
+  skipped
+}
+
 enum TicketCategory {
   general_question
   technical_question
@@ -71,6 +78,18 @@ enum KbArticleStatus {
   published
 }
 
+enum KbReviewStatus {
+  draft
+  in_review
+  approved
+  archived
+}
+
+enum KbVisibility {
+  public
+  internal
+}
+
 enum TicketType {
   incident
   service_request
@@ -104,7 +123,10 @@ model User {
   notes               Note[]
   auditEvents         AuditEvent[]
   macros              Macro[]
-  kbArticles          KbArticle[]
+  kbArticlesAuthored      KbArticle[]        @relation("KbArticleAuthor")
+  kbArticlesOwned         KbArticle[]        @relation("KbArticleOwner")
+  kbArticlesReviewed      KbArticle[]        @relation("KbArticleReviewer")
+  kbArticleVersions       KbArticleVersion[]
   uploadedAttachments Attachment[]
   teamMemberships     TeamMember[]
   preference          UserPreference?
@@ -138,6 +160,12 @@ model User {
   cisOwned              ConfigItem[]        @relation("CiOwner")
   cisCreated            ConfigItem[]        @relation("CiCreatedBy")
   ciEvents              CiEvent[]           @relation("CiEventActor")
+  // Catalog relations
+  catalogItemsCreated   CatalogItem[]       @relation("CatalogItemCreatedBy")
+  // Notification relations
+  notifications         Notification[]      @relation("NotificationRecipient")
+  // Organization account management
+  accountManagerFor     Organization[]      @relation("OrgAccountManager")
 
   @@map("user")
 }
@@ -198,14 +226,29 @@ model Account {
 }
 
 model Organization {
-  id        Int        @id @default(autoincrement())
-  name      String
-  domain    String?    @unique
-  notes     String?
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  customers Customer[]
+  id               Int        @id @default(autoincrement())
+  name             String
+  domain           String?    @unique
+  notes            String?
+  // ── Enrichment ───────────────────────────────────────────────────────────
+  website          String?    @map("website")
+  industry         String?    @map("industry")
+  employeeCount    Int?       @map("employee_count")
+  country          String?    @map("country")
+  address          String?    @map("address")
+  // Support configuration
+  supportTier      String     @default("standard") @map("support_tier")
+  accountManagerId String?    @map("account_manager_id")
+  accountManager   User?      @relation("OrgAccountManager", fields: [accountManagerId], references: [id])
+  isActive         Boolean    @default(true) @map("is_active")
+  // ─────────────────────────────────────────────────────────────────────────
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  customers  Customer[]
+  entitlements ServiceEntitlement[]
 
+  @@index([supportTier])
+  @@index([isActive])
   @@map("organization")
 }
 
@@ -216,12 +259,51 @@ model Customer {
   organizationId Int?
   organization   Organization? @relation(fields: [organizationId], references: [id])
   notes          String?
+  // ── Enrichment ───────────────────────────────────────────────────────────
+  phone            String?  @map("phone")
+  jobTitle         String?  @map("job_title")
+  timezone         String   @default("UTC") @map("timezone")
+  language         String   @default("en") @map("language")
+  preferredChannel String?  @map("preferred_channel")
+  isVip            Boolean  @default(false) @map("is_vip")
+  supportTier      String   @default("standard") @map("support_tier")
+  avatarUrl        String?  @map("avatar_url")
+  // ─────────────────────────────────────────────────────────────────────────
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   tickets          Ticket[]
   serviceRequests  ServiceRequest[]
 
+  @@index([isVip])
+  @@index([supportTier])
+  @@index([organizationId])
   @@map("customer")
+}
+
+/**
+ * ServiceEntitlement — records the support contract or service tier for an organization.
+ * Placeholder model: gates, limits, and SLA policies are wired up as entitlements mature.
+ *
+ * tier: "free" | "standard" | "premium" | "enterprise"
+ * slaPolicy: name of an SLA policy to apply to tickets from this org
+ */
+model ServiceEntitlement {
+  id             Int          @id @default(autoincrement())
+  organizationId Int          @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tier           String       @default("standard") @map("tier")
+  maxUsers       Int?         @map("max_users")
+  slaPolicy      String?      @map("sla_policy")
+  features       String[]     @map("features")
+  startsAt       DateTime?    @map("starts_at")
+  expiresAt      DateTime?    @map("expires_at")
+  isActive       Boolean      @default(true) @map("is_active")
+  notes          String?      @map("notes")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  @@index([organizationId, isActive])
+  @@map("service_entitlement")
 }
 
 model TicketCounter {
@@ -320,9 +402,19 @@ model Reply {
   user           User?        @relation(fields: [userId], references: [id])
   // Email threading: Message-ID for this specific reply (inbound from header, outbound generated).
   emailMessageId String?
+  // ── Channel metadata ────────────────────────────────────────────────────
+  // channel: the intake or outbound channel for this message.
+  // Values: "email" | "portal" | "api" | "chat" | "whatsapp" | "slack_teams" | "voice" | "social"
+  // Null on legacy rows pre-omnichannel.
+  channel        String?      @map("channel")
+  // channelMeta: channel-specific structured data (e.g. WhatsApp waId, email Message-ID chain).
+  // Kept as untyped JSON so channel adapters can store what they need without migrations.
+  channelMeta    Json?        @map("channel_meta")
+  // ────────────────────────────────────────────────────────────────────────
   createdAt      DateTime     @default(now())
   attachments    Attachment[]
 
+  @@index([channel])
   @@map("reply")
 }
 
@@ -342,21 +434,31 @@ model Reply {
  *   - replyId is set for reply-level attachments (inbound email replies or agent replies).
  */
 model Attachment {
-  id           Int      @id @default(autoincrement())
-  filename     String
-  mimeType     String
-  size         Int
-  storageKey   String   @unique
-  ticketId     Int
-  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  replyId      Int?
-  reply        Reply?   @relation(fields: [replyId], references: [id], onDelete: SetNull)
-  uploadedById String?
-  uploadedBy   User?    @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
-  createdAt    DateTime @default(now())
+  id              Int             @id @default(autoincrement())
+  filename        String
+  mimeType        String
+  size            Int
+  storageKey      String          @unique
+  /// Which backend holds this file: "local", "s3", "gcs", "r2".
+  /// Used to route load/remove calls to the correct provider on retrieval.
+  storageProvider String          @default("local")
+  /// SHA-256 hex digest of the raw file bytes. Null for legacy uploads
+  /// created before this column was added.
+  checksum        String?
+  /// Result of the virus scan. "skipped" means no scanner was configured.
+  /// Block downloads when status is "infected" or optionally when "pending".
+  virusScanStatus VirusScanStatus @default(skipped)
+  ticketId        Int
+  ticket          Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  replyId         Int?
+  reply           Reply?          @relation(fields: [replyId], references: [id], onDelete: SetNull)
+  uploadedById    String?
+  uploadedBy      User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt       DateTime        @default(now())
 
   @@index([ticketId])
   @@index([replyId])
+  @@index([virusScanStatus])
   @@map("attachment")
 }
 
@@ -473,22 +575,73 @@ model KbCategory {
  * viewCount is incremented on each public read (for popularity ordering).
  */
 model KbArticle {
-  id         Int             @id @default(autoincrement())
-  title      String
-  slug       String          @unique
-  body       String
-  status     KbArticleStatus @default(draft)
-  categoryId Int?
-  category   KbCategory?     @relation(fields: [categoryId], references: [id])
-  authorId   String
-  author     User            @relation(fields: [authorId], references: [id])
-  viewCount  Int             @default(0)
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
+  id              Int              @id @default(autoincrement())
+  title           String
+  slug            String           @unique
+  body            String
+  status          KbArticleStatus  @default(draft)
+  reviewStatus    KbReviewStatus   @default(draft)
+  visibility      KbVisibility     @default(public)
+  categoryId      Int?
+  category        KbCategory?      @relation(fields: [categoryId], references: [id])
+  authorId        String
+  author          User             @relation("KbArticleAuthor", fields: [authorId], references: [id])
+  ownerId         String?
+  owner           User?            @relation("KbArticleOwner", fields: [ownerId], references: [id])
+  reviewedById    String?
+  reviewedBy      User?            @relation("KbArticleReviewer", fields: [reviewedById], references: [id])
+  publishedAt     DateTime?
+  reviewedAt      DateTime?
+  viewCount       Int              @default(0)
+  helpfulCount    Int              @default(0)
+  notHelpfulCount Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  versions        KbArticleVersion[]
+  feedback        KbArticleFeedback[]
 
   @@index([status])
+  @@index([reviewStatus])
   @@index([categoryId])
   @@map("kb_article")
+}
+
+/**
+ * KbArticleVersion — immutable snapshot of an article at a point in time.
+ * Created automatically whenever a published article is updated.
+ */
+model KbArticleVersion {
+  id            Int       @id @default(autoincrement())
+  articleId     Int
+  article       KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  versionNumber Int
+  title         String
+  body          String
+  changeNote    String?
+  createdById   String
+  createdBy     User      @relation(fields: [createdById], references: [id])
+  createdAt     DateTime  @default(now())
+
+  @@unique([articleId, versionNumber])
+  @@index([articleId])
+  @@map("kb_article_version")
+}
+
+/**
+ * KbArticleFeedback — helpfulness vote from a help-center visitor.
+ * sessionId is optional (anonymous tracking).
+ */
+model KbArticleFeedback {
+  id          Int       @id @default(autoincrement())
+  articleId   Int
+  article     KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  helpful     Boolean
+  comment     String?
+  sessionId   String?
+  submittedAt DateTime  @default(now())
+
+  @@index([articleId])
+  @@map("kb_article_feedback")
 }
 
 model Verification {
@@ -523,6 +676,7 @@ model Team {
   fulfillmentTasks FulfillmentTask[]
   problems         Problem[]
   configItems      ConfigItem[]
+  catalogItems     CatalogItem[]     @relation("CatalogItemFulfillmentTeam")
   members          TeamMember[]
 
   @@map("queue")
@@ -1087,9 +1241,10 @@ model ServiceRequest {
   teamId       Int?    @map("team_id")
   team         Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
-  // Catalog item snapshot (FK placeholder — CatalogItem table to be added later)
-  catalogItemId   Int?    @map("catalog_item_id")
-  catalogItemName String? @map("catalog_item_name")
+  // Catalog item — FK wired to CatalogItem; snapshot name survives catalog edits
+  catalogItemId   Int?         @map("catalog_item_id")
+  catalogItem     CatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+  catalogItemName String?      @map("catalog_item_name")
 
   // Submitted form variables
   formData Json @default("{}") @map("form_data")
@@ -1377,6 +1532,85 @@ model ProblemEvent {
   @@map("problem_event")
 }
 
+// ── Service Catalog ────────────────────────────────────────────────────────────
+
+/**
+ * CatalogCategory — groups related catalog items into sections.
+ *
+ * Position controls display order. Inactive categories are hidden from users
+ * but retained for historical request references.
+ */
+model CatalogCategory {
+  id          Int           @id @default(autoincrement())
+  name        String
+  slug        String        @unique
+  description String?
+  position    Int           @default(0)
+  isActive    Boolean       @default(true) @map("is_active")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  items CatalogItem[]
+
+  @@index([isActive])
+  @@map("catalog_category")
+}
+
+/**
+ * CatalogItem — a single service offering that users can request.
+ *
+ * Design principles:
+ *  - shortDescription: one-line summary shown on catalog cards.
+ *  - description: rich detail shown on the item's detail page.
+ *  - requestorInstructions: shown to the user before submitting (SLAs, notes).
+ *  - formSchema: JSON array of FormField definitions. Rendered client-side into
+ *    a dynamic form. Submitted values are stored in ServiceRequest.formData.
+ *  - requiresApproval + approvalMode + approverIds: catalog-level approval config.
+ *    When set, every submitted request from this item goes through the approval
+ *    engine with these approvers before fulfillment begins.
+ *  - fulfillmentTeamId: the team auto-assigned to requests from this item.
+ *  - position: display order within the category.
+ *  - icon: optional emoji or short string used as a visual marker on cards.
+ */
+model CatalogItem {
+  id                   Int              @id @default(autoincrement())
+  name                 String
+  shortDescription     String?          @map("short_description")
+  description          String?
+  categoryId           Int?             @map("category_id")
+  category             CatalogCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  isActive             Boolean          @default(true)  @map("is_active")
+  requestorInstructions String?         @map("requestor_instructions")
+
+  /// Support team auto-assigned to fulfillment tasks for this item
+  fulfillmentTeamId    Int?   @map("fulfillment_team_id")
+  fulfillmentTeam      Team?  @relation("CatalogItemFulfillmentTeam", fields: [fulfillmentTeamId], references: [id], onDelete: SetNull)
+
+  /// Whether requests submitted from this item require approval
+  requiresApproval     Boolean  @default(false) @map("requires_approval")
+  /// "all" = every approver must sign off | "any" = first approval suffices
+  approvalMode         String   @default("all") @map("approval_mode")
+  /// Ordered list of User.id strings who must approve (stored on the item)
+  approverIds          String[] @default([]) @map("approver_ids")
+
+  /// JSON array of FormField objects — defines the dynamic request form
+  formSchema Json @default("[]") @map("form_schema")
+
+  position Int     @default(0)
+  icon     String? /// emoji or short label shown on catalog cards
+
+  createdById String?  @map("created_by_id")
+  createdBy   User?    @relation("CatalogItemCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  requests ServiceRequest[]
+
+  @@index([categoryId])
+  @@index([isActive])
+  @@map("catalog_item")
+}
+
 // ── CMDB — Configuration Management Database ───────────────────────────────────
 
 /**
@@ -1592,4 +1826,79 @@ model CiEvent {
 
   @@index([ciId, createdAt])
   @@map("ci_event")
+}
+
+// ── Notification System ────────────────────────────────────────────────────────
+
+/**
+ * Notification — a single per-user notification record.
+ *
+ * event naming: "<domain>.<verb>" — e.g. "ticket.assigned", "approval.requested".
+ * entityType / entityId / entityUrl provide navigation context for the UI.
+ * readAt null means unread.
+ */
+model Notification {
+  id         Int      @id @default(autoincrement())
+  userId     String   @map("user_id")
+  user       User     @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  event      String   @map("event")
+  title      String   @map("title")
+  body       String?  @map("body")
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id")
+  entityUrl  String?  @map("entity_url")
+  readAt     DateTime? @map("read_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  deliveries NotificationDelivery[]
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("notification")
+}
+
+/**
+ * NotificationDelivery — records the delivery attempt for each channel.
+ *
+ * channel: "in_app" | "email" | "slack" | "webhook"
+ * status: "pending" | "sent" | "failed" | "skipped"
+ *
+ * For in_app, delivery is considered "sent" as soon as the Notification row
+ * is created (the record itself is the delivery). For async channels (email,
+ * slack, webhook) this row tracks the send attempt.
+ */
+model NotificationDelivery {
+  id             Int          @id @default(autoincrement())
+  notificationId Int          @map("notification_id")
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  channel        String       @map("channel")
+  status         String       @default("pending") @map("status")
+  error          String?      @map("error")
+  sentAt         DateTime?    @map("sent_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@index([notificationId])
+  @@index([channel, status])
+  @@map("notification_delivery")
+}
+
+/**
+ * NotificationRule — admin-configurable rules that map events to channels and
+ * recipient strategies. Foundation for a rule-based notification engine.
+ *
+ * recipientType: "assignee" | "reporter" | "commander" | "team" | "role" | "all_agents"
+ * channels: JSON array of channel names — e.g. ["in_app", "email"]
+ */
+model NotificationRule {
+  id            Int      @id @default(autoincrement())
+  name          String   @map("name")
+  description   String?  @map("description")
+  event         String   @map("event")
+  channels      String[] @map("channels")
+  recipientType String   @default("assignee") @map("recipient_type")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([event, isActive])
+  @@map("notification_rule")
 }

@@ -20,9 +20,11 @@ import {
 } from "core/schemas/portal.ts";
 import { submitCsatSchema } from "core/schemas/csat.ts";
 import { portalCreateRequestSchema } from "core/schemas/requests.ts";
+import { submitCatalogRequestSchema } from "core/schemas/catalog.ts";
 import { generateTicketNumber as generateRequestNumber } from "../lib/ticket-number";
 import { computeRequestSlaDueAt } from "../lib/request-sla";
 import { logRequestEvent } from "../lib/request-events";
+import { createApproval } from "../lib/approval-engine";
 import type { Prisma as PrismaTypes } from "../generated/prisma/client";
 
 const router = Router();
@@ -263,6 +265,8 @@ router.post("/tickets/:id/replies", requireCustomer, async (req, res) => {
       senderType: "customer",
       ticketId: id,
       userId: null,
+      channel: "portal",
+      channelMeta: { userId: req.user.id, via: "portal" },
     },
     select: {
       id: true,
@@ -343,18 +347,26 @@ router.get("/attachments/:id/download", requireCustomer, async (req, res) => {
     include: { ticket: { select: { senderEmail: true } } },
   });
 
+  // Respond 404 (not 403) to avoid confirming the existence of other customers' files
   if (!attachment || attachment.ticket.senderEmail !== req.user.email) {
     res.status(404).json({ error: "Attachment not found" });
     return;
   }
 
+  // Block infected files
+  if (attachment.virusScanStatus === "infected") {
+    res.status(451).json({ error: "This file was flagged by the virus scanner and cannot be downloaded." });
+    return;
+  }
+
   const buffer = await loadFile(attachment.storageKey);
 
+  // RFC 5987 / RFC 6266 filename encoding — handles non-ASCII filenames
+  const ascii = attachment.filename.replace(/[^\x20-\x7e]/g, "_");
+  const encoded = encodeURIComponent(attachment.filename);
+
   res.setHeader("Content-Type", attachment.mimeType);
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${encodeURIComponent(attachment.filename)}"`
-  );
+  res.setHeader("Content-Disposition", `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`);
   res.setHeader("Content-Length", buffer.length);
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.send(buffer);
@@ -498,6 +510,176 @@ router.post("/requests", requireCustomer, async (req, res) => {
     via: "portal",
     requesterEmail: req.user.email,
   });
+
+  res.status(201).json({ request });
+});
+
+// ─── Portal: Service Catalog ───────────────────────────────────────────────
+
+const PORTAL_CATALOG_CATEGORY_SELECT = {
+  id: true,
+  name: true,
+  slug: true,
+  description: true,
+  position: true,
+} as const;
+
+const PORTAL_CATALOG_ITEM_SELECT = {
+  id: true,
+  name: true,
+  shortDescription: true,
+  icon: true,
+  requiresApproval: true,
+  position: true,
+  category: { select: PORTAL_CATALOG_CATEGORY_SELECT },
+} as const;
+
+const PORTAL_CATALOG_ITEM_DETAIL_SELECT = {
+  ...PORTAL_CATALOG_ITEM_SELECT,
+  description: true,
+  requestorInstructions: true,
+  formSchema: true,
+  approvalMode: true,
+  fulfillmentTeam: { select: { id: true, name: true, color: true } },
+} as const;
+
+/** GET /api/portal/catalog — list active catalog items grouped by category */
+router.get("/catalog", requireCustomer, async (_req, res) => {
+  const [categories, items] = await Promise.all([
+    prisma.catalogCategory.findMany({
+      where: { isActive: true },
+      orderBy: { position: "asc" },
+      select: PORTAL_CATALOG_CATEGORY_SELECT,
+    }),
+    prisma.catalogItem.findMany({
+      where: { isActive: true },
+      orderBy: [{ categoryId: "asc" }, { position: "asc" }],
+      select: PORTAL_CATALOG_ITEM_SELECT,
+    }),
+  ]);
+
+  // Group items under their categories; uncategorized items go under null
+  const grouped = categories.map((cat) => ({
+    category: cat,
+    items: items.filter((i) => i.category?.id === cat.id),
+  }));
+
+  const uncategorized = items.filter((i) => !i.category);
+  if (uncategorized.length > 0) {
+    grouped.push({ category: null as any, items: uncategorized });
+  }
+
+  res.json({ catalog: grouped });
+});
+
+/** GET /api/portal/catalog/:id — active catalog item detail */
+router.get("/catalog/:id", requireCustomer, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  const item = await prisma.catalogItem.findUnique({
+    where: { id, isActive: true },
+    select: PORTAL_CATALOG_ITEM_DETAIL_SELECT,
+  });
+
+  if (!item) { res.status(404).json({ error: "Catalog item not found" }); return; }
+
+  res.json({ item });
+});
+
+/** POST /api/portal/catalog/:id/request — submit a request from a catalog item */
+router.post("/catalog/:id/request", requireCustomer, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  const data = validate(submitCatalogRequestSchema, req.body, res);
+  if (!data) return;
+
+  const item = await prisma.catalogItem.findUnique({
+    where: { id, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      requiresApproval: true,
+      approvalMode: true,
+      approverIds: true,
+      fulfillmentTeamId: true,
+      formSchema: true,
+    },
+  });
+
+  if (!item) { res.status(404).json({ error: "Catalog item not found" }); return; }
+
+  // Validate required form fields
+  const schema = Array.isArray(item.formSchema) ? item.formSchema as Array<{ id: string; required: boolean; label: string }> : [];
+  const missing = schema
+    .filter((f) => f.required)
+    .filter((f) => {
+      const val = (data.formData as Record<string, unknown>)[f.id];
+      return val === undefined || val === null || val === "";
+    })
+    .map((f) => f.label);
+
+  if (missing.length > 0) {
+    res.status(422).json({ error: `Missing required fields: ${missing.join(", ")}` });
+    return;
+  }
+
+  const now = new Date();
+  const requestNumber = await generateRequestNumber("service_request", now);
+  const customerId = await upsertCustomer(req.user.email, req.user.name);
+  const slaDueAt = computeRequestSlaDueAt(data.priority, now);
+  const requiresApproval = item.requiresApproval && item.approverIds.length > 0;
+  const initialStatus = requiresApproval ? "pending_approval" : "submitted";
+  const approvalStatus = requiresApproval ? "pending" : "not_required";
+
+  const request = await prisma.serviceRequest.create({
+    data: {
+      requestNumber,
+      title: item.name,
+      description: data.description ?? null,
+      priority: data.priority,
+      status: initialStatus,
+      approvalStatus,
+      requesterCustomerId: customerId,
+      requesterName: req.user.name,
+      requesterEmail: req.user.email,
+      catalogItemId: item.id,
+      catalogItemName: item.name,
+      formData: data.formData as PrismaTypes.InputJsonValue,
+      teamId: item.fulfillmentTeamId ?? null,
+      slaDueAt,
+    },
+    select: { id: true, requestNumber: true, title: true, status: true, approvalStatus: true, createdAt: true },
+  });
+
+  void logRequestEvent(request.id, null, "request.created", {
+    via: "portal",
+    catalogItemId: item.id,
+    catalogItemName: item.name,
+  });
+
+  if (requiresApproval) {
+    try {
+      const { approvalRequest } = await createApproval(
+        {
+          subjectType: "service_request",
+          subjectId: String(request.id),
+          title: `Approval for: ${item.name}`,
+          approvalMode: item.approvalMode as "all" | "any",
+          requiredCount: 1,
+          approverIds: item.approverIds,
+        },
+        req.user.id
+      );
+      await prisma.serviceRequest.update({
+        where: { id: request.id },
+        data: { approvalRequestId: approvalRequest.id },
+      });
+    } catch (err) {
+      console.error("Failed to create approval for catalog request:", err);
+    }
+  }
 
   res.status(201).json({ request });
 });

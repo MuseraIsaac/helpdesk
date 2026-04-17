@@ -1,12 +1,15 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { signOut, useSession } from "../lib/auth-client";
+import { useBranding } from "../lib/useBranding";
 import { useTheme } from "../lib/theme";
-import { Ticket, PlusCircle, LogOut, Sun, Moon, BookOpen, Inbox } from "lucide-react";
+import { Ticket, PlusCircle, LogOut, Sun, Moon, BookOpen, Inbox, ShoppingBag } from "lucide-react";
 
 export default function PortalLayout() {
   const { data: session } = useSession();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { data: branding } = useBranding();
+  const logoDataUrl = branding?.logoDataUrl;
 
   const handleSignOut = async () => {
     await signOut();
@@ -25,11 +28,15 @@ export default function PortalLayout() {
       <nav className="sticky top-0 z-50 bg-background border-b px-6 h-14 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <div className="flex items-center gap-2 mr-5">
-            <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">H</span>
-            </div>
+            {logoDataUrl ? (
+              <img src={logoDataUrl} alt="Zentra" className="h-7 w-7 rounded-lg object-contain" />
+            ) : (
+              <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center">
+                <span className="text-primary-foreground font-bold text-sm">Z</span>
+              </div>
+            )}
             <span className="text-[15px] font-semibold tracking-tight">
-              Support Portal
+              Zentra Support
             </span>
           </div>
           <NavLink to="/portal/tickets" className={navLinkClass}>
@@ -47,6 +54,10 @@ export default function PortalLayout() {
           <NavLink to="/portal/new-request" className={navLinkClass}>
             <PlusCircle className="h-3.5 w-3.5" />
             New Request
+          </NavLink>
+          <NavLink to="/portal/catalog" className={navLinkClass}>
+            <ShoppingBag className="h-3.5 w-3.5" />
+            Service Catalog
           </NavLink>
           <Link
             to="/help"

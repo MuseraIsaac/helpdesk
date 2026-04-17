@@ -21,6 +21,7 @@
 
 import prisma from "../db";
 import Sentry from "./sentry";
+import { notify } from "./notify";
 import type { CreateApprovalInput } from "core/schemas/approvals.ts";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -103,6 +104,17 @@ export async function createApproval(
     approverCount: input.approverIds.length,
   });
 
+  // Notify all approvers
+  void notify({
+    event: "approval.requested",
+    recipientIds: input.approverIds,
+    title: `Approval required: ${input.title}`,
+    body: input.description,
+    entityType: "approval",
+    entityId: String(request.id),
+    entityUrl: `/approvals`,
+  });
+
   return { approvalRequest: request };
 }
 
@@ -135,6 +147,7 @@ export async function decide(
     include: {
       steps: { orderBy: { stepOrder: "asc" } },
     },
+    // title and requestedById are on the model directly (not from include)
   });
 
   if (!request) return { outcome: "error", message: "Approval request not found" };
@@ -178,11 +191,29 @@ export async function decide(
   // ── Advance request state ────────────────────────────────────────────────
   const isAny = request.approvalMode === "any";
 
-  if (isAny) {
-    return advanceAnyMode(request, step, decisionValue);
-  } else {
-    return advanceAllMode(request, step, decisionValue);
+  const result = isAny
+    ? await advanceAnyMode(request, step, decisionValue)
+    : await advanceAllMode(request, step, decisionValue);
+
+  // Notify the requester when the request reaches a final state
+  if (
+    result.outcome === "decision_recorded" &&
+    (result.requestStatus === "approved" || result.requestStatus === "rejected") &&
+    request.requestedById
+  ) {
+    void notify({
+      event: result.requestStatus === "approved" ? "approval.approved" : "approval.rejected",
+      recipientIds: [request.requestedById],
+      title: result.requestStatus === "approved"
+        ? `Approval approved: ${request.title}`
+        : `Approval rejected: ${request.title}`,
+      entityType: "approval",
+      entityId: String(request.id),
+      entityUrl: `/approvals`,
+    });
   }
+
+  return result;
 }
 
 // ── All-mode advancement ───────────────────────────────────────────────────────

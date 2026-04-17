@@ -119,6 +119,10 @@ export type Permission =
   | "services.view"
   | "services.manage"
 
+  // ── Contacts (Customers & Organizations) ──────────────────────────────────
+  | "contacts.view"
+  | "contacts.manage"
+
   // ── Catalog & Workflow ─────────────────────────────────────────────────────
   | "catalog.view"
   | "catalog.manage"
@@ -173,6 +177,9 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "assets.manage",
   "services.view",
   "services.manage",
+  // Contacts
+  "contacts.view",
+  "contacts.manage",
   // Catalog & Workflow
   "catalog.view",
   "catalog.manage",
@@ -226,6 +233,9 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "assets.manage",
   "services.view",
   "services.manage",   // Service catalog curation
+  // Contacts
+  "contacts.view",
+  "contacts.manage",
   // Catalog & Workflow
   "catalog.view",
   "catalog.manage",
@@ -268,6 +278,9 @@ const AGENT_PERMISSIONS: Permission[] = [
   "cmdb.view",         // Look up CIs when working incidents/requests
   "assets.view",       // Look up assets when working tickets
   "services.view",     // Browse service definitions
+  // Contacts
+  "contacts.view",
+  "contacts.manage",   // Agents can create and update customer records
   // Catalog & Workflow
   "catalog.view",
   "catalog.request",   // Submit requests on behalf of users
@@ -297,6 +310,8 @@ const READONLY_PERMISSIONS: Permission[] = [
   "cmdb.view",
   "assets.view",
   "services.view",
+  // Contacts
+  "contacts.view",
   // Catalog & Workflow
   "catalog.view",
   "approvals.view",

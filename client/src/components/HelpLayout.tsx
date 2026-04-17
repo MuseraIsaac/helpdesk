@@ -1,14 +1,22 @@
 import { Link, NavLink, Outlet } from "react-router";
 import { BookOpen } from "lucide-react";
+import { useBranding } from "@/lib/useBranding";
 
 export default function HelpLayout() {
+  const { data: branding } = useBranding();
+  const logoDataUrl = branding?.logoDataUrl;
+
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <nav className="sticky top-0 z-50 bg-background border-b px-6 h-14 flex items-center justify-between">
         <Link to="/help" className="flex items-center gap-2 group">
-          <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center">
-            <BookOpen className="h-4 w-4 text-primary-foreground" />
-          </div>
+          {logoDataUrl ? (
+            <img src={logoDataUrl} alt="Zentra" className="h-7 w-7 rounded-lg object-contain" />
+          ) : (
+            <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center">
+              <BookOpen className="h-4 w-4 text-primary-foreground" />
+            </div>
+          )}
           <span className="text-[15px] font-semibold tracking-tight group-hover:text-foreground transition-colors">
             Help Center
           </span>

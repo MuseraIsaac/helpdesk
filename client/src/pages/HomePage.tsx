@@ -7,8 +7,11 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Line,
+  LineChart,
   XAxis,
   YAxis,
+  ReferenceLine,
 } from "recharts";
 import {
   Card,
@@ -37,6 +40,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -50,6 +54,7 @@ import {
   CircleDot,
   Sparkles,
   TrendingUp,
+  TrendingDown,
   Clock,
   ShieldCheck,
   ShieldAlert,
@@ -63,6 +68,13 @@ import {
   Hourglass,
   Info,
   Settings2,
+  Siren,
+  PackageCheck,
+  GitBranch,
+  CheckSquare,
+  Users,
+  Repeat2,
+  ClipboardList,
 } from "lucide-react";
 
 // ── Density context ───────────────────────────────────────────────────────────
@@ -169,6 +181,57 @@ interface CsatSummary {
   }[];
 }
 
+interface SlaDimEntry {
+  key: string;
+  label: string;
+  totalWithSla: number;
+  breached: number;
+  compliance: number | null;
+}
+interface SlaDimData {
+  byPriority: SlaDimEntry[];
+  byCategory: SlaDimEntry[];
+  byTeam:     SlaDimEntry[];
+}
+
+interface IncidentStats {
+  total: number;
+  majorCount: number;
+  slaBreached: number;
+  mtta: number | null;
+  mttr: number | null;
+  byStatus:   { status: string; count: number }[];
+  byPriority: { priority: string; count: number }[];
+  volume:     { date: string; count: number }[];
+}
+
+interface RequestStats {
+  total: number;
+  slaBreached: number;
+  avgFulfillmentSeconds: number | null;
+  slaCompliance: number | null;
+  byStatus: { status: string; count: number }[];
+  topItems: { name: string; count: number; avgSeconds: number | null }[];
+}
+
+interface ProblemStats {
+  total: number;
+  knownErrors: number;
+  withIncidents: number;
+  recurring: number;
+  avgResolutionDays: number | null;
+  byStatus: { status: string; count: number }[];
+}
+
+interface ApprovalStats {
+  total: number;
+  avgTurnaroundSeconds: number | null;
+  byStatus: { status: string; count: number }[];
+  oldestPending: { id: number; title: string; subjectType: string; createdAt: string; daysOpen: number }[];
+}
+
+interface CsatTrendPoint { date: string; avgRating: number | null; count: number; }
+
 // ── Chart configs ─────────────────────────────────────────────────────────────
 
 const volumeChartConfig = {
@@ -196,6 +259,35 @@ const AGING_COLORS: Record<number, string> = {
   3: "#f97316",
   4: "hsl(var(--destructive))",
 };
+
+const incidentChartConfig = {
+  count: { label: "Incidents", color: "var(--primary)" },
+} satisfies ChartConfig;
+
+const csatTrendChartConfig = {
+  avgRating: { label: "Avg Rating", color: "var(--primary)" },
+} satisfies ChartConfig;
+
+const INCIDENT_PRIORITY_COLORS: Record<string, string> = {
+  p1: "hsl(var(--destructive))",
+  p2: "#f97316",
+  p3: "#eab308",
+  p4: "#22c55e",
+};
+
+const INCIDENT_STATUS_COLORS: Record<string, string> = {
+  new:          "hsl(var(--muted))",
+  acknowledged: "#3b82f6",
+  in_progress:  "#8b5cf6",
+  resolved:     "#22c55e",
+  closed:       "hsl(var(--muted))",
+};
+
+/** Compact compliance badge coloring */
+function complianceVariant(v: number | null): Variant {
+  if (v == null) return "default";
+  return v >= 90 ? "good" : v >= 70 ? "warn" : "bad";
+}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -476,6 +568,42 @@ export default function HomePage() {
       queryFn: async () => (await axios.get("/api/csat/summary")).data,
     });
 
+  const { data: slaDim, isLoading: slaDimLoading } =
+    useQuery<SlaDimData>({
+      queryKey: ["reports-sla-dim", period],
+      queryFn: async () => (await axios.get(`/api/reports/sla-by-dimension?from=${from}`)).data,
+    });
+
+  const { data: incidents, isLoading: incidentsLoading } =
+    useQuery<IncidentStats>({
+      queryKey: ["reports-incidents", period],
+      queryFn: async () => (await axios.get(`/api/reports/incidents?period=${period}`)).data,
+    });
+
+  const { data: requests, isLoading: requestsLoading } =
+    useQuery<RequestStats>({
+      queryKey: ["reports-requests", period],
+      queryFn: async () => (await axios.get(`/api/reports/requests?period=${period}`)).data,
+    });
+
+  const { data: problems, isLoading: problemsLoading } =
+    useQuery<ProblemStats>({
+      queryKey: ["reports-problems", period],
+      queryFn: async () => (await axios.get(`/api/reports/problems?period=${period}`)).data,
+    });
+
+  const { data: approvals, isLoading: approvalsLoading } =
+    useQuery<ApprovalStats>({
+      queryKey: ["reports-approvals", period],
+      queryFn: async () => (await axios.get(`/api/reports/approvals?period=${period}`)).data,
+    });
+
+  const { data: csatTrend, isLoading: csatTrendLoading } =
+    useQuery<{ data: CsatTrendPoint[] }>({
+      queryKey: ["reports-csat-trend", period],
+      queryFn: async () => (await axios.get(`/api/reports/csat-trend?period=${period}`)).data,
+    });
+
   // ── Derived variants ─────────────────────────────────────────────────────────
 
   const slaVariant: Variant =
@@ -544,10 +672,10 @@ export default function HomePage() {
       case "performance":
         return (
           <section key="performance" className="space-y-3">
-            <SectionHeading>Performance</SectionHeading>
+            <SectionHeading>Performance (MTTA / MTTR)</SectionHeading>
             <div className={`grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 ${density === "compact" ? "gap-2" : "gap-4"}`}>
-              <MetricCard title="Avg First Response"  value={formatDuration(overview?.avgFirstResponseSeconds)} icon={Timer}       loading={overviewLoading} hint="Average time from ticket creation to the first agent reply." href={ticketsUrl({ status: "open" })} />
-              <MetricCard title="Avg Resolution Time" value={formatDuration(overview?.avgResolutionSeconds)}    icon={Hourglass}   loading={overviewLoading} hint="Average time from creation to resolution." href={ticketsUrl({ status: "open" })} />
+              <MetricCard title="MTTA" value={formatDuration(overview?.avgFirstResponseSeconds)} icon={Timer}       loading={overviewLoading} hint="Mean Time To Acknowledge — average time from ticket creation to first agent reply. Lower is better." href={ticketsUrl({ status: "open" })} />
+              <MetricCard title="MTTR" value={formatDuration(overview?.avgResolutionSeconds)}    icon={Hourglass}   loading={overviewLoading} hint="Mean Time To Resolve — average time from creation to resolution. Core ITSM efficiency metric." href={ticketsUrl({ status: "open" })} />
               <MetricCard title="AI Resolution Rate"  value={overview ? `${overview.aiResolutionRate}%` : undefined} icon={Sparkles} loading={overviewLoading} hint="Percentage of resolved tickets handled entirely by the AI agent." href={ticketsUrl({ status: "resolved" })} />
               <MetricCard title="SLA Compliance"      value={pct(overview?.slaComplianceRate)} icon={ShieldCheck} loading={overviewLoading} variant={slaVariant} hint="Percentage of SLA-tracked tickets resolved within deadline." href={ticketsUrl({ view: "overdue" })} />
               <MetricCard title="SLA Breached"        value={overview?.breachedTickets} icon={ShieldAlert} loading={overviewLoading} variant={overview?.breachedTickets ? "bad" : "default"} hint="Tickets that exceeded their SLA resolution deadline." href={ticketsUrl({ view: "overdue" })} />
@@ -754,6 +882,339 @@ export default function HomePage() {
               </Card>
             </div>
           </section>
+        );
+
+      // ── SLA by Dimension ─────────────────────────────────────────────────────
+      case "sla_by_dimension": {
+        const fmtRow = (rows: SlaDimEntry[]) =>
+          rows.filter(r => r.totalWithSla > 0).map(r => ({
+            ...r,
+            compliancePct: r.compliance ?? 0,
+          }));
+
+        const SlaDimTable = ({ rows }: { rows: SlaDimEntry[] }) => {
+          const filtered = fmtRow(rows);
+          if (!filtered.length) return <p className="text-sm text-muted-foreground py-4 text-center">No SLA-tracked data</p>;
+          return (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Dimension</TableHead>
+                  <TableHead className="text-right">SLA Total</TableHead>
+                  <TableHead className="text-right">Breached</TableHead>
+                  <TableHead className="text-right">Compliance</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map(r => {
+                  const v = complianceVariant(r.compliance);
+                  const cls = v === "good" ? "text-green-600 dark:text-green-400 font-semibold" : v === "warn" ? "text-amber-500 font-semibold" : v === "bad" ? "text-destructive font-semibold" : "";
+                  return (
+                    <TableRow key={r.key}>
+                      <TableCell className="font-medium">{r.label}</TableCell>
+                      <TableCell className="text-right tabular-nums">{r.totalWithSla}</TableCell>
+                      <TableCell className="text-right tabular-nums">{r.breached}</TableCell>
+                      <TableCell className={`text-right tabular-nums ${cls}`}>{r.compliance != null ? `${r.compliance}%` : "—"}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          );
+        };
+
+        return (
+          <Card key="sla_by_dimension">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> SLA Compliance by Dimension</CardTitle>
+              <CardDescription>Ticket SLA compliance broken down by priority, category, and team · {period}d</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {slaDimLoading ? (
+                <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>
+              ) : (
+                <Tabs defaultValue="priority">
+                  <TabsList className="mb-4">
+                    <TabsTrigger value="priority">By Priority</TabsTrigger>
+                    <TabsTrigger value="category">By Category</TabsTrigger>
+                    <TabsTrigger value="team">By Team</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="priority"><SlaDimTable rows={slaDim?.byPriority ?? []} /></TabsContent>
+                  <TabsContent value="category"><SlaDimTable rows={slaDim?.byCategory ?? []} /></TabsContent>
+                  <TabsContent value="team"><SlaDimTable rows={slaDim?.byTeam ?? []} /></TabsContent>
+                </Tabs>
+              )}
+            </CardContent>
+          </Card>
+        );
+      }
+
+      // ── Incident Analytics ────────────────────────────────────────────────────
+      case "incident_analytics":
+        return (
+          <section key="incident_analytics" className="space-y-4">
+            <SectionHeading>Incident Analytics</SectionHeading>
+            <div className={`grid grid-cols-2 sm:grid-cols-4 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <MetricCard title="Total Incidents" value={incidents?.total}     icon={Siren}      loading={incidentsLoading} hint="All incidents in the selected period." href="/incidents" />
+              <MetricCard title="Major Incidents" value={incidents?.majorCount} icon={AlertTriangle} loading={incidentsLoading} variant={incidents?.majorCount ? "bad" : "default"} hint="Incidents flagged as major (war-room severity)." href="/incidents" />
+              <MetricCard title="MTTA (Incidents)" value={formatDuration(incidents?.mtta)} icon={Timer}  loading={incidentsLoading} hint="Mean Time To Acknowledge — average time from incident creation to acknowledgement." />
+              <MetricCard title="MTTR (Incidents)" value={formatDuration(incidents?.mttr)} icon={Hourglass} loading={incidentsLoading} hint="Mean Time To Resolve — average time from incident creation to resolution." />
+            </div>
+            <div className={`grid grid-cols-1 lg:grid-cols-2 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">Incident Volume</CardTitle>
+                  <CardDescription>Daily count · {period}d</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {incidentsLoading ? <Skeleton className="h-[180px] w-full" /> : (
+                    <ChartContainer config={incidentChartConfig} className="h-[180px] w-full">
+                      <BarChart data={incidents?.volume ?? []}>
+                        <CartesianGrid vertical={false} />
+                        <XAxis dataKey="date" tickLine={false} axisLine={false} tickFormatter={(v: string) => formatDate(v, period)} interval="preserveStartEnd" minTickGap={40} />
+                        <ChartTooltip content={<ChartTooltipContent labelFormatter={(v: string) => new Date(v + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })} />} />
+                        <Bar dataKey="count" fill="var(--color-count)" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ChartContainer>
+                  )}
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">By Status &amp; Priority</CardTitle>
+                  <CardDescription>Current breakdown</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {incidentsLoading ? (
+                    <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-6">
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Status</p>
+                        <div className="space-y-1.5">
+                          {(incidents?.byStatus ?? []).map(s => (
+                            <div key={s.status} className="flex items-center justify-between text-sm gap-2">
+                              <span className="capitalize text-muted-foreground">{s.status.replace("_", " ")}</span>
+                              <span className="font-semibold tabular-nums">{s.count}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Priority</p>
+                        <div className="space-y-1.5">
+                          {(incidents?.byPriority ?? []).map(p => (
+                            <div key={p.priority} className="flex items-center justify-between text-sm gap-2">
+                              <span className="font-medium uppercase" style={{ color: INCIDENT_PRIORITY_COLORS[p.priority] ?? "var(--foreground)" }}>{p.priority}</span>
+                              <span className="font-semibold tabular-nums">{p.count}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </section>
+        );
+
+      // ── Request Fulfillment ───────────────────────────────────────────────────
+      case "request_fulfillment":
+        return (
+          <section key="request_fulfillment" className="space-y-4">
+            <SectionHeading>Request Fulfillment</SectionHeading>
+            <div className={`grid grid-cols-2 sm:grid-cols-4 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <MetricCard title="Total Requests"       value={requests?.total}                                   icon={PackageCheck}  loading={requestsLoading} href="/requests" />
+              <MetricCard title="Avg Fulfillment Time" value={formatDuration(requests?.avgFulfillmentSeconds)}   icon={Hourglass}     loading={requestsLoading} hint="Average time from request submission to fulfilment (closed/resolved)." />
+              <MetricCard title="SLA Compliance"       value={pct(requests?.slaCompliance)}                      icon={ShieldCheck}   loading={requestsLoading} variant={complianceVariant(requests?.slaCompliance ?? null)} hint="Percentage of SLA-tracked requests fulfilled within target." />
+              <MetricCard title="SLA Breached"         value={requests?.slaBreached}                             icon={ShieldAlert}   loading={requestsLoading} variant={requests?.slaBreached ? "bad" : "default"} />
+            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Top Catalog Items</CardTitle>
+                <CardDescription>Most requested · {period}d · avg fulfillment time per item</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {requestsLoading ? (
+                  <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>
+                ) : !(requests?.topItems.length) ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">No requests in this period.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Catalog Item</TableHead>
+                        <TableHead className="text-right">Requests</TableHead>
+                        <TableHead className="text-right">Avg Fulfillment</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {requests.topItems.map((item, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="font-medium">{item.name}</TableCell>
+                          <TableCell className="text-right tabular-nums">{item.count}</TableCell>
+                          <TableCell className="text-right text-muted-foreground">{formatDuration(item.avgSeconds)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+        );
+
+      // ── Problem Recurrence ────────────────────────────────────────────────────
+      case "problem_recurrence":
+        return (
+          <section key="problem_recurrence" className="space-y-4">
+            <SectionHeading>Problem Recurrence</SectionHeading>
+            <div className={`grid grid-cols-2 sm:grid-cols-4 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <MetricCard title="Total Problems"     value={problems?.total}                                               icon={GitBranch}  loading={problemsLoading} href="/problems" />
+              <MetricCard title="Known Errors"        value={problems?.knownErrors}                                         icon={ClipboardList} loading={problemsLoading} hint="Problems in KEDB — root cause identified; workaround or fix documented." href="/problems" />
+              <MetricCard title="Recurring (≥2 INC)" value={problems?.recurring}                                           icon={Repeat2}    loading={problemsLoading} variant={problems?.recurring ? "warn" : "default"} hint="Problems linked to 2 or more incidents — likely systemic issues requiring permanent fix." />
+              <MetricCard title="Avg Days to Resolve" value={problems?.avgResolutionDays != null ? `${problems.avgResolutionDays}d` : "—"} icon={Clock} loading={problemsLoading} hint="Average calendar days from problem creation to resolution." />
+            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Problem Status Breakdown</CardTitle>
+                <CardDescription>{period}d · problems with linked incidents surface systemic risk</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {problemsLoading ? (
+                  <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      {(problems?.byStatus ?? []).map(s => (
+                        <div key={s.status} className="flex items-center justify-between text-sm gap-2">
+                          <span className="capitalize text-muted-foreground">{s.status.replace(/_/g, " ")}</span>
+                          <div className="flex items-center gap-2">
+                            <Progress value={problems && problems.total > 0 ? Math.round((s.count / problems.total) * 100) : 0} className="h-1.5 w-20" />
+                            <span className="font-semibold tabular-nums w-6 text-right">{s.count}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-3 text-sm border-l pl-6">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">With any linked incident</span>
+                        <span className="font-semibold">{problems?.withIncidents ?? "—"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Recurring (≥ 2 incidents)</span>
+                        <span className={`font-semibold ${problems?.recurring ? "text-amber-500" : ""}`}>{problems?.recurring ?? "—"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Known errors in KEDB</span>
+                        <span className="font-semibold">{problems?.knownErrors ?? "—"}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+        );
+
+      // ── Approval Turnaround ───────────────────────────────────────────────────
+      case "approval_turnaround":
+        return (
+          <section key="approval_turnaround" className="space-y-4">
+            <SectionHeading>Approval Turnaround</SectionHeading>
+            <div className={`grid grid-cols-2 sm:grid-cols-4 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <MetricCard title="Total Approvals"    value={approvals?.total}                                         icon={CheckSquare}  loading={approvalsLoading} href="/approvals" />
+              <MetricCard title="Avg Turnaround"     value={formatDuration(approvals?.avgTurnaroundSeconds)}          icon={Timer}        loading={approvalsLoading} hint="Average time from approval request creation to a final approved/rejected decision." />
+              <MetricCard title="Pending"            value={approvals?.byStatus.find(s => s.status === "pending")?.count ?? 0} icon={Clock} loading={approvalsLoading} variant={approvals?.byStatus.find(s => s.status === "pending")?.count ? "warn" : "default"} hint="Approvals currently awaiting a decision — long queues block fulfilment." />
+              <MetricCard title="Approved"           value={approvals?.byStatus.find(s => s.status === "approved")?.count ?? 0} icon={TrendingUp} loading={approvalsLoading} variant="good" />
+            </div>
+            {(approvals?.oldestPending.length ?? 0) > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <TrendingDown className="h-4 w-4 text-amber-500" />
+                    Oldest Pending Approvals
+                  </CardTitle>
+                  <CardDescription>Longest-waiting items — stale approvals block request fulfilment</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {approvalsLoading ? (
+                    <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Title</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead className="text-right">Days Open</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(approvals?.oldestPending ?? []).map(a => (
+                          <TableRow key={a.id}>
+                            <TableCell className="font-medium max-w-[260px] truncate">{a.title}</TableCell>
+                            <TableCell className="text-muted-foreground capitalize">{a.subjectType.replace(/_/g, " ")}</TableCell>
+                            <TableCell className={`text-right tabular-nums font-semibold ${a.daysOpen >= 7 ? "text-destructive" : a.daysOpen >= 3 ? "text-amber-500" : ""}`}>{a.daysOpen}d</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </section>
+        );
+
+      // ── CSAT Trend ────────────────────────────────────────────────────────────
+      case "csat_trend":
+        return (
+          <Card key="csat_trend">
+            <CardHeader>
+              <CardTitle>CSAT Trend</CardTitle>
+              <CardDescription>Daily average satisfaction score · {period}d · hover for detail</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {csatTrendLoading ? (
+                <Skeleton className="h-[200px] w-full" />
+              ) : (
+                <ChartContainer config={csatTrendChartConfig} className="h-[200px] w-full">
+                  <LineChart data={csatTrend?.data ?? []} margin={{ left: 4, right: 4 }}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis dataKey="date" tickLine={false} axisLine={false} tickFormatter={(v: string) => formatDate(v, period)} interval="preserveStartEnd" minTickGap={40} />
+                    <YAxis domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} tickLine={false} axisLine={false} width={24} tick={{ fontSize: 11 }} />
+                    <ReferenceLine y={4} stroke="#22c55e" strokeDasharray="4 2" strokeOpacity={0.5} />
+                    <ReferenceLine y={3} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.5} />
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent
+                          labelFormatter={(v: string) =>
+                            new Date(v + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })
+                          }
+                          formatter={(value, _name, props) => {
+                            const count = (props.payload as CsatTrendPoint)?.count;
+                            return [`${value} / 5 (${count} rating${count === 1 ? "" : "s"})`, "Avg Rating"];
+                          }}
+                        />
+                      }
+                    />
+                    <Line
+                      dataKey="avgRating"
+                      type="monotone"
+                      stroke="var(--color-avgRating)"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: "var(--color-avgRating)" }}
+                      connectNulls={false}
+                    />
+                  </LineChart>
+                </ChartContainer>
+              )}
+              <p className="text-xs text-muted-foreground mt-2">
+                Green reference line = 4★ target · amber = 3★ threshold · gaps = no ratings that day
+              </p>
+            </CardContent>
+          </Card>
         );
 
       default:

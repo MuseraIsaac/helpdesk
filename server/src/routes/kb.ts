@@ -10,6 +10,8 @@ import {
   createKbArticleSchema,
   updateKbArticleSchema,
   kbArticleSearchSchema,
+  submitArticleFeedbackSchema,
+  kbWorkflowActionSchema,
 } from "core/schemas/kb.ts";
 import prisma from "../db";
 
@@ -53,20 +55,48 @@ function buildExcerpt(body: string, keywords: string[]): string {
   return stripped.slice(0, 150) + (stripped.length > 150 ? "…" : "");
 }
 
-// ── Public routes (no auth required) ────────────────────────────────────────
+/** Save a version snapshot of an article. Called before updating published articles. */
+async function saveVersion(
+  articleId: number,
+  title: string,
+  body: string,
+  createdById: string,
+  changeNote?: string
+): Promise<void> {
+  const lastVersion = await prisma.kbArticleVersion.findFirst({
+    where: { articleId },
+    orderBy: { versionNumber: "desc" },
+    select: { versionNumber: true },
+  });
+  const versionNumber = (lastVersion?.versionNumber ?? 0) + 1;
+  await prisma.kbArticleVersion.create({
+    data: { articleId, versionNumber, title, body, createdById, changeNote: changeNote ?? null },
+  });
+}
+
+// ── Shared article include ────────────────────────────────────────────────────
+
+const articleInclude = {
+  category: { select: { id: true, name: true, slug: true } },
+  author:   { select: { id: true, name: true } },
+  owner:    { select: { id: true, name: true } },
+  reviewedBy: { select: { id: true, name: true } },
+} as const;
+
+// ── Public routes (no auth required) ─────────────────────────────────────────
 
 // GET /api/kb/public/categories
 router.get("/public/categories", async (_req, res) => {
   const categories = await prisma.kbCategory.findMany({
     orderBy: { position: "asc" },
     include: {
-      _count: { select: { articles: { where: { status: "published" } } } },
+      _count: { select: { articles: { where: { status: "published", visibility: "public" } } } },
     },
   });
   res.json({ categories });
 });
 
-// GET /api/kb/public/articles — list published articles, optional search + category filter
+// GET /api/kb/public/articles — list published public articles, optional search + category filter
 router.get("/public/articles", async (req, res) => {
   const parsed = kbArticleSearchSchema.safeParse(req.query);
   if (!parsed.success) {
@@ -78,6 +108,7 @@ router.get("/public/articles", async (req, res) => {
   const articles = await prisma.kbArticle.findMany({
     where: {
       status: "published",
+      visibility: "public",
       ...(categoryId ? { categoryId } : {}),
       ...(q
         ? {
@@ -94,9 +125,13 @@ router.get("/public/articles", async (req, res) => {
       title: true,
       slug: true,
       status: true,
+      visibility: true,
       categoryId: true,
       category: { select: { id: true, name: true, slug: true } },
       viewCount: true,
+      helpfulCount: true,
+      notHelpfulCount: true,
+      publishedAt: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -107,10 +142,10 @@ router.get("/public/articles", async (req, res) => {
 // GET /api/kb/public/articles/:slug — article detail, increments viewCount
 router.get("/public/articles/:slug", async (req, res) => {
   const article = await prisma.kbArticle.findFirst({
-    where: { slug: req.params.slug, status: "published" },
+    where: { slug: req.params.slug, status: "published", visibility: "public" },
     include: {
-      category: { select: { id: true, name: true, slug: true } },
-      author: { select: { id: true, name: true } },
+      ...articleInclude,
+      _count: { select: { feedback: true } },
     },
   });
   if (!article) {
@@ -127,9 +162,42 @@ router.get("/public/articles/:slug", async (req, res) => {
   res.json({ article });
 });
 
+// POST /api/kb/public/articles/:slug/feedback — helpful/not-helpful vote (public)
+router.post("/public/articles/:slug/feedback", async (req, res) => {
+  const article = await prisma.kbArticle.findFirst({
+    where: { slug: req.params.slug, status: "published", visibility: "public" },
+    select: { id: true, helpfulCount: true, notHelpfulCount: true },
+  });
+  if (!article) {
+    res.status(404).json({ error: "Article not found" });
+    return;
+  }
+
+  const data = validate(submitArticleFeedbackSchema, req.body, res);
+  if (!data) return;
+
+  // Record feedback row
+  await prisma.kbArticleFeedback.create({
+    data: {
+      articleId: article.id,
+      helpful:   data.helpful,
+      comment:   data.comment ?? null,
+      sessionId: data.sessionId ?? null,
+    },
+  });
+
+  // Update denormalised counters
+  await prisma.kbArticle.update({
+    where: { id: article.id },
+    data: data.helpful
+      ? { helpfulCount: { increment: 1 } }
+      : { notHelpfulCount: { increment: 1 } },
+  });
+
+  res.status(201).json({ ok: true });
+});
+
 // GET /api/kb/public/suggest?q=<text> — keyword-matched article suggestions
-// Returns up to 3 published articles ranked by keyword overlap with the query.
-// Structured for a future drop-in upgrade to vector/AI retrieval.
 router.get("/public/suggest", async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (!q || q.length < 3) {
@@ -143,27 +211,22 @@ router.get("/public/suggest", async (req, res) => {
     return;
   }
 
-  // Fetch published articles whose title OR body contains at least one keyword.
-  // Prisma's OR flattening means a single DB round-trip.
   const candidates = await prisma.kbArticle.findMany({
     where: {
       status: "published",
+      visibility: "public",
       OR: keywords.flatMap((kw) => [
         { title: { contains: kw, mode: "insensitive" } },
         { body: { contains: kw, mode: "insensitive" } },
       ]),
     },
     select: {
-      id: true,
-      title: true,
-      slug: true,
-      body: true,
+      id: true, title: true, slug: true, body: true,
       category: { select: { id: true, name: true, slug: true } },
     },
     take: 20,
   });
 
-  // Score by keyword hit-count (title matches count double)
   const scored = candidates
     .map((a) => {
       const titleLower = a.title.toLowerCase();
@@ -184,23 +247,25 @@ router.get("/public/suggest", async (req, res) => {
   res.json({ articles: scored });
 });
 
-// ── Authenticated routes (agents + admins) ───────────────────────────────────
+// ── Authenticated routes (agents + admins) ────────────────────────────────────
 
 router.use(requireAuth);
 
-// GET /api/kb/articles — all articles (including drafts) for agent/admin view
+// GET /api/kb/articles — all articles (including drafts, internal) for agent/admin view
 router.get("/articles", async (req, res) => {
   const parsed = kbArticleSearchSchema.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid query params" });
     return;
   }
-  const { q, categoryId, status } = parsed.data;
+  const { q, categoryId, status, reviewStatus, visibility } = parsed.data;
 
   const articles = await prisma.kbArticle.findMany({
     where: {
-      ...(status ? { status } : {}),
-      ...(categoryId ? { categoryId } : {}),
+      ...(status       ? { status }       : {}),
+      ...(reviewStatus ? { reviewStatus } : {}),
+      ...(visibility   ? { visibility }   : {}),
+      ...(categoryId   ? { categoryId }   : {}),
       ...(q
         ? {
             OR: [
@@ -212,14 +277,14 @@ router.get("/articles", async (req, res) => {
     },
     orderBy: { updatedAt: "desc" },
     include: {
-      category: { select: { id: true, name: true, slug: true } },
-      author: { select: { id: true, name: true } },
+      ...articleInclude,
+      _count: { select: { feedback: true, versions: true } },
     },
   });
   res.json({ articles });
 });
 
-// GET /api/kb/articles/:id — single article by numeric ID (agents can see drafts)
+// GET /api/kb/articles/:id — single article by numeric ID (agents can see drafts/internal)
 router.get("/articles/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
@@ -229,8 +294,8 @@ router.get("/articles/:id", async (req, res) => {
   const article = await prisma.kbArticle.findUnique({
     where: { id },
     include: {
-      category: { select: { id: true, name: true, slug: true } },
-      author: { select: { id: true, name: true } },
+      ...articleInclude,
+      _count: { select: { feedback: true, versions: true } },
     },
   });
   if (!article) {
@@ -240,13 +305,25 @@ router.get("/articles/:id", async (req, res) => {
   res.json({ article });
 });
 
+// GET /api/kb/articles/:id/versions — version history
+router.get("/articles/:id/versions", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid article ID" }); return; }
+
+  const versions = await prisma.kbArticleVersion.findMany({
+    where: { articleId: id },
+    orderBy: { versionNumber: "desc" },
+    include: { createdBy: { select: { id: true, name: true } } },
+  });
+  res.json({ versions });
+});
+
 // ── Admin + supervisor routes ─────────────────────────────────────────────────
 
 router.use(requirePermission("kb.manage"));
 
 // ── Categories ────────────────────────────────────────────────────────────────
 
-// GET /api/kb/categories
 router.get("/categories", async (_req, res) => {
   const categories = await prisma.kbCategory.findMany({
     orderBy: { position: "asc" },
@@ -255,7 +332,6 @@ router.get("/categories", async (_req, res) => {
   res.json({ categories });
 });
 
-// POST /api/kb/categories
 router.post("/categories", async (req, res) => {
   const data = validate(createKbCategorySchema, req.body, res);
   if (!data) return;
@@ -270,28 +346,19 @@ router.post("/categories", async (req, res) => {
   res.status(201).json({ category });
 });
 
-// PATCH /api/kb/categories/:id
 router.patch("/categories/:id", async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) {
-    res.status(400).json({ error: "Invalid category ID" });
-    return;
-  }
+  if (!id) { res.status(400).json({ error: "Invalid category ID" }); return; }
   const data = validate(updateKbCategorySchema, req.body, res);
   if (!data) return;
 
   const existing = await prisma.kbCategory.findUnique({ where: { id } });
-  if (!existing) {
-    res.status(404).json({ error: "Category not found" });
-    return;
-  }
+  if (!existing) { res.status(404).json({ error: "Category not found" }); return; }
 
   let slug = existing.slug;
   if (data.name && data.name !== existing.name) {
     slug = await uniqueSlug(data.name, (s) =>
-      prisma.kbCategory
-        .findFirst({ where: { slug: s, NOT: { id } } })
-        .then(Boolean)
+      prisma.kbCategory.findFirst({ where: { slug: s, NOT: { id } } }).then(Boolean)
     );
   }
 
@@ -302,30 +369,18 @@ router.patch("/categories/:id", async (req, res) => {
   res.json({ category });
 });
 
-// DELETE /api/kb/categories/:id
 router.delete("/categories/:id", async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) {
-    res.status(400).json({ error: "Invalid category ID" });
-    return;
-  }
+  if (!id) { res.status(400).json({ error: "Invalid category ID" }); return; }
   const existing = await prisma.kbCategory.findUnique({ where: { id } });
-  if (!existing) {
-    res.status(404).json({ error: "Category not found" });
-    return;
-  }
-  // Unlink articles before deleting
-  await prisma.kbArticle.updateMany({
-    where: { categoryId: id },
-    data: { categoryId: null },
-  });
+  if (!existing) { res.status(404).json({ error: "Category not found" }); return; }
+  await prisma.kbArticle.updateMany({ where: { categoryId: id }, data: { categoryId: null } });
   await prisma.kbCategory.delete({ where: { id } });
   res.status(204).send();
 });
 
 // ── Articles ──────────────────────────────────────────────────────────────────
 
-// POST /api/kb/articles
 router.post("/articles", async (req, res) => {
   const data = validate(createKbArticleSchema, req.body, res);
   if (!data) return;
@@ -334,73 +389,192 @@ router.post("/articles", async (req, res) => {
     prisma.kbArticle.findUnique({ where: { slug: s } }).then(Boolean)
   );
 
+  const publishedAt = data.status === "published" ? new Date() : null;
+
   const article = await prisma.kbArticle.create({
     data: {
-      title: data.title,
+      title:        data.title,
       slug,
-      body: data.body,
-      status: data.status ?? "draft",
-      categoryId: data.categoryId ?? null,
-      authorId: req.user.id,
+      body:         data.body,
+      status:       data.status ?? "draft",
+      reviewStatus: data.reviewStatus ?? "draft",
+      visibility:   data.visibility ?? "public",
+      categoryId:   data.categoryId ?? null,
+      ownerId:      data.ownerId ?? null,
+      authorId:     req.user.id,
+      publishedAt,
     },
-    include: {
-      category: { select: { id: true, name: true, slug: true } },
-      author: { select: { id: true, name: true } },
-    },
+    include: { ...articleInclude, _count: { select: { feedback: true, versions: true } } },
   });
+
+  // Save initial version if publishing immediately
+  if (data.status === "published") {
+    saveVersion(article.id, article.title, article.body, req.user.id, "Initial publish").catch(() => {});
+  }
+
   res.status(201).json({ article });
 });
 
-// PATCH /api/kb/articles/:id
 router.patch("/articles/:id", async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) {
-    res.status(400).json({ error: "Invalid article ID" });
-    return;
-  }
+  if (!id) { res.status(400).json({ error: "Invalid article ID" }); return; }
   const data = validate(updateKbArticleSchema, req.body, res);
   if (!data) return;
 
   const existing = await prisma.kbArticle.findUnique({ where: { id } });
-  if (!existing) {
-    res.status(404).json({ error: "Article not found" });
-    return;
+  if (!existing) { res.status(404).json({ error: "Article not found" }); return; }
+
+  // Save version snapshot before overwriting a published article
+  if (existing.status === "published" && (data.body || data.title)) {
+    saveVersion(
+      id,
+      existing.title,
+      existing.body,
+      req.user.id,
+      (req.body as { changeNote?: string }).changeNote
+    ).catch(() => {});
   }
 
   let slug = existing.slug;
   if (data.title && data.title !== existing.title) {
     slug = await uniqueSlug(data.title, (s) =>
-      prisma.kbArticle
-        .findFirst({ where: { slug: s, NOT: { id } } })
-        .then(Boolean)
+      prisma.kbArticle.findFirst({ where: { slug: s, NOT: { id } } }).then(Boolean)
     );
   }
 
+  // Set publishedAt when transitioning to published for the first time
+  const publishedAt =
+    data.status === "published" && !existing.publishedAt ? new Date() : existing.publishedAt;
+
   const article = await prisma.kbArticle.update({
     where: { id },
-    data: { ...data, slug },
-    include: {
-      category: { select: { id: true, name: true, slug: true } },
-      author: { select: { id: true, name: true } },
-    },
+    data: { ...data, slug, publishedAt },
+    include: { ...articleInclude, _count: { select: { feedback: true, versions: true } } },
   });
   res.json({ article });
 });
 
-// DELETE /api/kb/articles/:id
 router.delete("/articles/:id", async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) {
-    res.status(400).json({ error: "Invalid article ID" });
-    return;
-  }
+  if (!id) { res.status(400).json({ error: "Invalid article ID" }); return; }
   const existing = await prisma.kbArticle.findUnique({ where: { id } });
-  if (!existing) {
-    res.status(404).json({ error: "Article not found" });
-    return;
-  }
+  if (!existing) { res.status(404).json({ error: "Article not found" }); return; }
   await prisma.kbArticle.delete({ where: { id } });
   res.status(204).send();
+});
+
+// ── Workflow transitions ───────────────────────────────────────────────────────
+
+// POST /api/kb/articles/:id/submit-review — author submits for review
+router.post("/articles/:id/submit-review", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid article ID" }); return; }
+  const data = validate(kbWorkflowActionSchema, req.body, res);
+  if (!data) return;
+
+  const existing = await prisma.kbArticle.findUnique({ where: { id } });
+  if (!existing) { res.status(404).json({ error: "Article not found" }); return; }
+  if (existing.reviewStatus !== "draft") {
+    res.status(400).json({ error: "Only draft articles can be submitted for review" });
+    return;
+  }
+
+  const article = await prisma.kbArticle.update({
+    where: { id },
+    data: { reviewStatus: "in_review" },
+    include: articleInclude,
+  });
+  res.json({ article });
+});
+
+// POST /api/kb/articles/:id/approve — reviewer approves
+router.post("/articles/:id/approve", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid article ID" }); return; }
+  const data = validate(kbWorkflowActionSchema, req.body, res);
+  if (!data) return;
+
+  const existing = await prisma.kbArticle.findUnique({ where: { id } });
+  if (!existing) { res.status(404).json({ error: "Article not found" }); return; }
+  if (existing.reviewStatus !== "in_review") {
+    res.status(400).json({ error: "Article must be in review to approve" });
+    return;
+  }
+
+  const article = await prisma.kbArticle.update({
+    where: { id },
+    data: {
+      reviewStatus: "approved",
+      reviewedById: req.user.id,
+      reviewedAt:   new Date(),
+    },
+    include: articleInclude,
+  });
+  res.json({ article });
+});
+
+// POST /api/kb/articles/:id/publish — publish an approved (or any) article
+router.post("/articles/:id/publish", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid article ID" }); return; }
+  const data = validate(kbWorkflowActionSchema, req.body, res);
+  if (!data) return;
+
+  const existing = await prisma.kbArticle.findUnique({ where: { id } });
+  if (!existing) { res.status(404).json({ error: "Article not found" }); return; }
+
+  const wasPublished = existing.status === "published";
+  if (wasPublished && (existing.body || existing.title)) {
+    saveVersion(id, existing.title, existing.body, req.user.id, data.changeNote ?? "Published").catch(() => {});
+  }
+
+  const article = await prisma.kbArticle.update({
+    where: { id },
+    data: {
+      status:      "published",
+      reviewStatus: "approved",
+      publishedAt:  existing.publishedAt ?? new Date(),
+    },
+    include: articleInclude,
+  });
+
+  if (!wasPublished) {
+    saveVersion(article.id, article.title, article.body, req.user.id, data.changeNote ?? "Published").catch(() => {});
+  }
+
+  res.json({ article });
+});
+
+// POST /api/kb/articles/:id/unpublish — revert to draft
+router.post("/articles/:id/unpublish", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid article ID" }); return; }
+
+  const existing = await prisma.kbArticle.findUnique({ where: { id } });
+  if (!existing) { res.status(404).json({ error: "Article not found" }); return; }
+
+  const article = await prisma.kbArticle.update({
+    where: { id },
+    data: { status: "draft", reviewStatus: "draft" },
+    include: articleInclude,
+  });
+  res.json({ article });
+});
+
+// POST /api/kb/articles/:id/archive — archive an article
+router.post("/articles/:id/archive", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid article ID" }); return; }
+
+  const existing = await prisma.kbArticle.findUnique({ where: { id } });
+  if (!existing) { res.status(404).json({ error: "Article not found" }); return; }
+
+  const article = await prisma.kbArticle.update({
+    where: { id },
+    data: { status: "draft", reviewStatus: "archived" },
+    include: articleInclude,
+  });
+  res.json({ article });
 });
 
 export default router;

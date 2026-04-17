@@ -15,6 +15,17 @@ export const settingsSections = [
   "appearance",
   "integrations",
   "advanced",
+  // ── Enterprise ITSM sections ──
+  "incidents",
+  "requests",
+  "problems",
+  "changes",
+  "approvals",
+  "cmdb",
+  "notifications",
+  "security",
+  "audit",
+  "business_hours",
 ] as const;
 
 export type SettingsSection = (typeof settingsSections)[number];
@@ -35,7 +46,7 @@ export interface SettingsSectionMeta {
 export const settingsSectionMeta: Record<SettingsSection, SettingsSectionMeta> = {
   general: {
     label: "General",
-    description: "Helpdesk name, support email, default locale and time format",
+    description: "Organisation name, support email, default locale and time format",
     keywords: ["name", "email", "timezone", "language", "locale", "date", "time"],
   },
   branding: {
@@ -93,6 +104,56 @@ export const settingsSectionMeta: Record<SettingsSection, SettingsSectionMeta> =
     description: "Maintenance mode, session timeouts, file uploads, and debug settings",
     keywords: ["maintenance", "debug", "upload", "file", "session", "timeout", "log"],
   },
+  incidents: {
+    label: "Incidents",
+    description: "Incident severity levels, escalation rules, and major-incident thresholds",
+    keywords: ["incident", "severity", "major", "escalate", "mtta", "mttr", "p1", "critical", "sev"],
+  },
+  requests: {
+    label: "Requests",
+    description: "Service request approval requirements, fulfillment targets, and catalog settings",
+    keywords: ["request", "service", "catalog", "approval", "fulfillment", "sr"],
+  },
+  problems: {
+    label: "Problems",
+    description: "Problem management, RCA templates, known-error KB integration, and recurrence detection",
+    keywords: ["problem", "rca", "root cause", "known error", "recurrence", "pir", "prb"],
+  },
+  changes: {
+    label: "Changes",
+    description: "Change types, CAB approval requirements, risk assessment, and freeze windows",
+    keywords: ["change", "cab", "risk", "normal", "standard", "emergency", "freeze", "chg"],
+  },
+  approvals: {
+    label: "Approvals",
+    description: "Approval workflow reminders, escalation timeouts, and delegation rules",
+    keywords: ["approval", "delegate", "remind", "escalate", "timeout", "matrix"],
+  },
+  cmdb: {
+    label: "CMDB & Services",
+    description: "Configuration item types, service catalog visibility, and dependency mapping",
+    keywords: ["cmdb", "ci", "asset", "service", "dependency", "impact", "catalog", "configuration"],
+  },
+  notifications: {
+    label: "Notifications",
+    description: "Email notification events, digest mode, and agent notification preferences",
+    keywords: ["notification", "email", "digest", "alert", "event", "subscribe", "watch"],
+  },
+  security: {
+    label: "Security",
+    description: "Password policy, MFA enforcement, IP allowlisting, and failed-login lockout",
+    keywords: ["security", "password", "mfa", "2fa", "ip", "lockout", "policy", "auth"],
+  },
+  audit: {
+    label: "Audit Log",
+    description: "Audit log retention period, events to capture, and export settings",
+    keywords: ["audit", "log", "retention", "export", "event", "history", "trail"],
+  },
+  business_hours: {
+    label: "Business Hours",
+    description: "Named business calendars, public holidays, and exclusion periods",
+    keywords: ["business hours", "calendar", "holiday", "schedule", "working hours", "exclusion"],
+  },
 };
 
 // ── Section schemas ───────────────────────────────────────────────────────────
@@ -100,7 +161,7 @@ export const settingsSectionMeta: Record<SettingsSection, SettingsSectionMeta> =
 // On read, stored data is merged with schema defaults — new fields are transparent.
 
 export const generalSettingsSchema = z.object({
-  helpdeskName:   z.string().min(1).max(100).default("Helpdesk"),
+  helpdeskName:   z.string().min(1).max(100).default("Zentra"),
   supportEmail:   z.string().default(""),
   timezone:       z.string().default("UTC"),
   language:       z.string().default("en"),
@@ -110,8 +171,7 @@ export const generalSettingsSchema = z.object({
 
 export const brandingSettingsSchema = z.object({
   companyName:        z.string().max(100).default(""),
-  logoUrl:            z.string().default(""),
-  faviconUrl:         z.string().default(""),
+  logoDataUrl:        z.string().default(""),
   primaryColor:       z.string().default("#6366f1"),
   helpCenterTitle:    z.string().max(100).default("Help Center"),
   helpCenterTagline:  z.string().max(200).default(""),
@@ -231,7 +291,167 @@ export const advancedSettingsSchema = z.object({
   maxAttachmentSizeMb:      z.number().int().min(1).max(100).default(10),
   allowedFileExtensions:    z.string().default("pdf,doc,docx,xls,xlsx,png,jpg,jpeg,gif,webp,zip,txt"),
   sessionTimeoutMinutes:    z.number().int().min(5).max(43200).default(1440),
-  // Future: IP allowlist, 2FA enforcement, audit log retention
+});
+
+// ── Enterprise ITSM section schemas ──────────────────────────────────────────
+
+export const incidentsSettingsSchema = z.object({
+  enabled:                   z.boolean().default(true),
+  // Major incident threshold: severity at or above this triggers major-incident workflow
+  majorIncidentSeverity:     z.enum(["sev1", "sev2", "sev3"]).default("sev1"),
+  // Auto-escalate to on-call when breach imminent (minutes before SLA breach)
+  autoEscalateMinutesBefore: z.number().int().min(0).default(15),
+  requireRcaAboveSeverity:   z.enum(["sev1", "sev2", "sev3", "none"]).default("sev2"),
+  // Default MTTA/MTTR targets (minutes) by severity — complements ticket-level SLA
+  mttaSev1: z.number().int().positive().default(15),
+  mttaSev2: z.number().int().positive().default(30),
+  mttaSev3: z.number().int().positive().default(60),
+  mttrSev1: z.number().int().positive().default(60),
+  mttrSev2: z.number().int().positive().default(240),
+  mttrSev3: z.number().int().positive().default(480),
+  // Automatically link related incidents to a problem record above this count
+  autoProblemLinkThreshold:  z.number().int().min(2).default(3),
+  notifyStakeholdersOnMajor: z.boolean().default(true),
+});
+
+export const requestsSettingsSchema = z.object({
+  enabled:                    z.boolean().default(true),
+  requireApprovalByDefault:   z.boolean().default(false),
+  // Default fulfillment SLA (hours) when no catalog item SLA is set
+  defaultFulfillmentHours:    z.number().int().positive().default(24),
+  allowSelfService:           z.boolean().default(true),
+  catalogPubliclyVisible:     z.boolean().default(false),
+  // Automatically close fulfilled requests after N days with no activity
+  autoCloseFulfilledAfterDays: z.number().int().min(0).default(7),
+  requireJustificationAboveImpact: z.enum(["low", "medium", "high", "none"]).default("high"),
+});
+
+export const problemsSettingsSchema = z.object({
+  enabled:                     z.boolean().default(true),
+  enableKnownErrorIntegration: z.boolean().default(true),
+  // Days to look back when detecting recurring incidents for auto-problem creation
+  recurrenceWindowDays:        z.number().int().min(1).default(30),
+  // Auto-create problem record when this many linked incidents exist
+  autoCreateProblemThreshold:  z.number().int().min(2).default(3),
+  requireRcaTemplate:          z.boolean().default(false),
+  pirTemplateEnabled:          z.boolean().default(false),
+  // Link known-error articles to KB automatically
+  autoPublishKnownErrorToKb:  z.boolean().default(false),
+});
+
+export const changesSettingsSchema = z.object({
+  enabled:                     z.boolean().default(true),
+  requireCabForNormal:         z.boolean().default(true),
+  requireCabForEmergency:      z.boolean().default(false),
+  standardChangesEnabled:      z.boolean().default(true),
+  // Freeze window: no normal/major changes deployed (emergency still allowed)
+  freezeWindowEnabled:         z.boolean().default(false),
+  freezeWindowStart:           z.string().default(""),
+  freezeWindowEnd:             z.string().default(""),
+  // Risk matrix thresholds (1-10 score)
+  lowRiskMaxScore:             z.number().int().min(1).max(10).default(3),
+  highRiskMinScore:            z.number().int().min(1).max(10).default(7),
+  requireTestPlanAboveRisk:    z.enum(["low", "medium", "high"]).default("medium"),
+  requireRollbackPlan:         z.boolean().default(true),
+  autoApproveStandardChanges:  z.boolean().default(true),
+});
+
+export const approvalsSettingsSchema = z.object({
+  reminderIntervalHours:       z.number().int().min(1).default(24),
+  escalationTimeoutHours:      z.number().int().min(1).default(72),
+  allowDelegation:             z.boolean().default(true),
+  maxApprovalLevels:           z.number().int().min(1).max(10).default(3),
+  requireCommentOnRejection:   z.boolean().default(true),
+  // Quorum mode: require all approvers or just a majority
+  quorumMode:                  z.enum(["all", "majority", "any_one"]).default("all"),
+  // Auto-approve after timeout if no response
+  autoApproveOnTimeout:        z.boolean().default(false),
+  notifyRequesterOnDecision:   z.boolean().default(true),
+});
+
+export const cmdbSettingsSchema = z.object({
+  enabled:                     z.boolean().default(false),
+  trackSoftwareCIs:            z.boolean().default(true),
+  trackHardwareCIs:            z.boolean().default(true),
+  trackServiceCIs:             z.boolean().default(true),
+  trackNetworkCIs:             z.boolean().default(false),
+  autoDiscoveryEnabled:        z.boolean().default(false),
+  // Link tickets to CIs automatically based on category/affected system
+  autoLinkTicketsToCIs:        z.boolean().default(false),
+  impactAnalysisEnabled:       z.boolean().default(true),
+  // Max depth for dependency chain rendering
+  dependencyTreeDepth:         z.number().int().min(1).max(10).default(3),
+});
+
+export const notificationsSettingsSchema = z.object({
+  // Global toggles
+  emailNotificationsEnabled:   z.boolean().default(true),
+  inAppNotificationsEnabled:   z.boolean().default(true),
+  // Digest mode — batch notifications instead of instant
+  digestModeEnabled:           z.boolean().default(false),
+  digestIntervalHours:         z.number().int().min(1).max(24).default(4),
+  // Events to notify agents about
+  notifyOnNewTicketAssigned:   z.boolean().default(true),
+  notifyOnTicketReplied:       z.boolean().default(true),
+  notifyOnSlaBreachImminent:   z.boolean().default(true),
+  notifyOnTicketEscalated:     z.boolean().default(true),
+  notifyOnMentioned:           z.boolean().default(true),
+  notifyOnApprovalRequired:    z.boolean().default(true),
+  notifyOnApprovalDecision:    z.boolean().default(true),
+  // Agent-facing notification sound
+  notificationSoundEnabled:    z.boolean().default(false),
+});
+
+export const securitySettingsSchema = z.object({
+  // Password policy
+  passwordMinLength:           z.number().int().min(6).max(128).default(8),
+  passwordRequireUppercase:    z.boolean().default(false),
+  passwordRequireNumber:       z.boolean().default(true),
+  passwordRequireSymbol:       z.boolean().default(false),
+  // MFA
+  mfaEnabled:                  z.boolean().default(false),
+  mfaRequiredForAdmins:        z.boolean().default(false),
+  mfaRequiredForAll:           z.boolean().default(false),
+  // Failed login policy
+  failedLoginLockoutEnabled:   z.boolean().default(true),
+  failedLoginMaxAttempts:      z.number().int().min(3).max(20).default(5),
+  lockoutDurationMinutes:      z.number().int().min(1).max(1440).default(30),
+  // IP allowlist (comma-separated CIDRs)
+  ipAllowlistEnabled:          z.boolean().default(false),
+  ipAllowlist:                 z.string().default(""),
+  // Session
+  enforceSessionTimeout:       z.boolean().default(false),
+});
+
+export const auditSettingsSchema = z.object({
+  enabled:                     z.boolean().default(true),
+  retentionDays:               z.number().int().min(30).max(3650).default(365),
+  // Which event categories to capture
+  captureAuthEvents:           z.boolean().default(true),
+  captureTicketEvents:         z.boolean().default(true),
+  captureSettingsChanges:      z.boolean().default(true),
+  captureUserManagement:       z.boolean().default(true),
+  captureKbEvents:             z.boolean().default(false),
+  // Export
+  exportEnabled:               z.boolean().default(true),
+  exportFormat:                z.enum(["json", "csv"]).default("json"),
+});
+
+export const businessHoursSettingsSchema = z.object({
+  // Default calendar name shown in UI
+  defaultCalendarName:         z.string().max(100).default("Default"),
+  // Business days and hours (mirrors SLA section but separate for non-SLA uses)
+  workDays:                    z.array(z.number().int().min(0).max(6)).default([1, 2, 3, 4, 5]),
+  workStart:                   z.string().default("09:00"),
+  workEnd:                     z.string().default("17:00"),
+  // Public holidays (comma-separated YYYY-MM-DD dates)
+  publicHolidays:              z.string().default(""),
+  // Exclusion period (e.g. company shutdown) — comma-separated date ranges "YYYY-MM-DD:YYYY-MM-DD"
+  exclusionPeriods:            z.string().default(""),
+  // Timezone for this calendar (defaults to general.timezone if blank)
+  calendarTimezone:            z.string().default(""),
+  // Announce upcoming out-of-office in portal
+  showHoursInPortal:           z.boolean().default(true),
 });
 
 // ── Master map ────────────────────────────────────────────────────────────────
@@ -249,22 +469,42 @@ export const sectionSchemas = {
   appearance:       appearanceSettingsSchema,
   integrations:     integrationsSettingsSchema,
   advanced:         advancedSettingsSchema,
+  incidents:        incidentsSettingsSchema,
+  requests:         requestsSettingsSchema,
+  problems:         problemsSettingsSchema,
+  changes:          changesSettingsSchema,
+  approvals:        approvalsSettingsSchema,
+  cmdb:             cmdbSettingsSchema,
+  notifications:    notificationsSettingsSchema,
+  security:         securitySettingsSchema,
+  audit:            auditSettingsSchema,
+  business_hours:   businessHoursSettingsSchema,
 } as const satisfies Record<SettingsSection, z.ZodObject<z.ZodRawShape>>;
 
 // ── Inferred types ────────────────────────────────────────────────────────────
 
-export type GeneralSettings       = z.infer<typeof generalSettingsSchema>;
-export type BrandingSettings      = z.infer<typeof brandingSettingsSchema>;
-export type TicketsSettings       = z.infer<typeof ticketsSettingsSchema>;
-export type TicketNumberingSettings = z.infer<typeof ticketNumberingSettingsSchema>;
-export type SlaSettings           = z.infer<typeof slaSettingsSchema>;
-export type KnowledgeBaseSettings = z.infer<typeof knowledgeBaseSettingsSchema>;
-export type TemplatesSettings     = z.infer<typeof templatesSettingsSchema>;
-export type AutomationsSettings   = z.infer<typeof automationsSettingsSchema>;
-export type UsersRolesSettings    = z.infer<typeof usersRolesSettingsSchema>;
-export type AppearanceSettings    = z.infer<typeof appearanceSettingsSchema>;
-export type IntegrationsSettings  = z.infer<typeof integrationsSettingsSchema>;
-export type AdvancedSettings      = z.infer<typeof advancedSettingsSchema>;
+export type GeneralSettings          = z.infer<typeof generalSettingsSchema>;
+export type BrandingSettings         = z.infer<typeof brandingSettingsSchema>;
+export type TicketsSettings          = z.infer<typeof ticketsSettingsSchema>;
+export type TicketNumberingSettings  = z.infer<typeof ticketNumberingSettingsSchema>;
+export type SlaSettings              = z.infer<typeof slaSettingsSchema>;
+export type KnowledgeBaseSettings    = z.infer<typeof knowledgeBaseSettingsSchema>;
+export type TemplatesSettings        = z.infer<typeof templatesSettingsSchema>;
+export type AutomationsSettings      = z.infer<typeof automationsSettingsSchema>;
+export type UsersRolesSettings       = z.infer<typeof usersRolesSettingsSchema>;
+export type AppearanceSettings       = z.infer<typeof appearanceSettingsSchema>;
+export type IntegrationsSettings     = z.infer<typeof integrationsSettingsSchema>;
+export type AdvancedSettings         = z.infer<typeof advancedSettingsSchema>;
+export type IncidentsSettings        = z.infer<typeof incidentsSettingsSchema>;
+export type RequestsSettings         = z.infer<typeof requestsSettingsSchema>;
+export type ProblemsSettings         = z.infer<typeof problemsSettingsSchema>;
+export type ChangesSettings          = z.infer<typeof changesSettingsSchema>;
+export type ApprovalsSettings        = z.infer<typeof approvalsSettingsSchema>;
+export type CmdbSettings             = z.infer<typeof cmdbSettingsSchema>;
+export type NotificationsSettings    = z.infer<typeof notificationsSettingsSchema>;
+export type SecuritySettings         = z.infer<typeof securitySettingsSchema>;
+export type AuditSettings            = z.infer<typeof auditSettingsSchema>;
+export type BusinessHoursSettings    = z.infer<typeof businessHoursSettingsSchema>;
 
 export type SectionData<S extends SettingsSection> =
   z.infer<(typeof sectionSchemas)[S]>;
