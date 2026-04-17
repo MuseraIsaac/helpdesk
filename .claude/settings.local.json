@@ -57,7 +57,8 @@
       "Bash(grep -E '\\\\.\\(tsx|ts\\)$')",
       "Bash(grep -v '^ui$')",
       "Bash(xargs grep *)",
-      "Bash(bun prisma *)"
+      "Bash(bun prisma *)",
+      "Bash(grep -n \"portal\\\\|customer\\\\|Portal\" \"C:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/client/src/pages/\"*)"
     ]
   }
 }

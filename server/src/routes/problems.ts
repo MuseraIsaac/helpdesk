@@ -15,6 +15,7 @@ import {
   terminalProblemStatuses,
 } from "core/constants/problem-status.ts";
 import { logProblemEvent } from "../lib/problem-events";
+import { logIncidentEvent } from "../lib/incident-events";
 import { generateTicketNumber } from "../lib/ticket-number";
 import prisma from "../db";
 import type { Prisma, TicketPriority, ProblemStatus } from "../generated/prisma/client";
@@ -46,6 +47,11 @@ const LIST_SELECT = {
   _count: { select: { linkedIncidents: true } },
 } as const;
 
+const CI_SUMMARY_SELECT = {
+  id: true, ciNumber: true, name: true, type: true,
+  environment: true, criticality: true, status: true, tags: true,
+} as const;
+
 const DETAIL_SELECT = {
   ...LIST_SELECT,
   rootCause: true,
@@ -75,6 +81,7 @@ const DETAIL_SELECT = {
       id: true,
       noteType: true,
       body: true,
+      bodyHtml: true,
       author: { select: { id: true, name: true } },
       createdAt: true,
       updatedAt: true,
@@ -88,6 +95,13 @@ const DETAIL_SELECT = {
       meta: true,
       actor: { select: { id: true, name: true } },
       createdAt: true,
+    },
+  },
+  ciLinks: {
+    orderBy: { linkedAt: "asc" as const },
+    select: {
+      ci: { select: CI_SUMMARY_SELECT },
+      linkedAt: true,
     },
   },
 } as const;
@@ -294,6 +308,16 @@ router.post(
         incidentIds: data.linkedIncidentIds,
         via: "creation",
       });
+
+      // Log on each linked incident that it was promoted to a problem
+      await Promise.all(
+        data.linkedIncidentIds.map((incidentId) =>
+          logIncidentEvent(incidentId, req.user.id, "incident.promoted_to_problem", {
+            problemId: problem.id,
+            problemNumber: problem.problemNumber,
+          })
+        )
+      );
     }
 
     // Return full detail shape
@@ -587,12 +611,14 @@ router.post(
         problemId: id,
         noteType: data.noteType,
         body: data.body,
+        bodyHtml: data.bodyHtml ?? null,
         authorId: req.user.id,
       },
       select: {
         id: true,
         noteType: true,
         body: true,
+        bodyHtml: true,
         author: { select: { id: true, name: true } },
         createdAt: true,
         updatedAt: true,

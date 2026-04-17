@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { signOut, useSession } from "../lib/auth-client";
 import { useTheme } from "../lib/theme";
-import { Ticket, PlusCircle, LogOut, Sun, Moon, BookOpen } from "lucide-react";
+import { Ticket, PlusCircle, LogOut, Sun, Moon, BookOpen, Inbox } from "lucide-react";
 
 export default function PortalLayout() {
   const { data: session } = useSession();
@@ -39,6 +39,14 @@ export default function PortalLayout() {
           <NavLink to="/portal/new-ticket" className={navLinkClass}>
             <PlusCircle className="h-3.5 w-3.5" />
             New Ticket
+          </NavLink>
+          <NavLink to="/portal/requests" className={navLinkClass}>
+            <Inbox className="h-3.5 w-3.5" />
+            My Requests
+          </NavLink>
+          <NavLink to="/portal/new-request" className={navLinkClass}>
+            <PlusCircle className="h-3.5 w-3.5" />
+            New Request
           </NavLink>
           <Link
             to="/help"

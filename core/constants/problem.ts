@@ -7,6 +7,7 @@
  */
 
 import type { ProblemStatus } from "./problem-status.ts";
+import type { CiSummary } from "./cmdb.ts";
 
 export interface LinkedIncident {
   id: number;
@@ -23,6 +24,7 @@ export interface ProblemNote {
   id: number;
   noteType: string;
   body: string;
+  bodyHtml: string | null;
   author: { id: string; name: string } | null;
   createdAt: string;
   updatedAt: string;
@@ -76,6 +78,7 @@ export interface Problem {
   linkedIncidents?: LinkedIncident[];
   notes?: ProblemNote[];
   events?: ProblemEvent[];
+  ciLinks?: Array<{ ci: CiSummary; linkedAt: string }>;
 
   /**
    * Future-ready: incident cluster hint.

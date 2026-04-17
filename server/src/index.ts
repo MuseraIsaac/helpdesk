@@ -31,6 +31,7 @@ import approvalsRouter from "./routes/approvals";
 import incidentsRouter from "./routes/incidents";
 import requestsRouter from "./routes/requests";
 import problemsRouter from "./routes/problems";
+import cmdbRouter from "./routes/cmdb";
 import { startQueue, stopQueue } from "./lib/queue";
 
 if (!process.env.BETTER_AUTH_SECRET) {
@@ -97,6 +98,7 @@ app.use("/api/approvals", approvalsRouter);
 app.use("/api/incidents", incidentsRouter);
 app.use("/api/requests", requestsRouter);
 app.use("/api/problems", problemsRouter);
+app.use("/api/cmdb", cmdbRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/theme", themeRouter);
 app.use("/api/users", usersRouter);

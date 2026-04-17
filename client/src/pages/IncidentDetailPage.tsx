@@ -40,6 +40,8 @@ import {
   IncidentStatusBadge,
   SlaBadgeInline,
 } from "./IncidentsPage";
+import NewProblemDialog from "@/components/NewProblemDialog";
+import CiLinksPanel from "@/components/CiLinksPanel";
 import {
   Flame,
   Users,
@@ -52,6 +54,7 @@ import {
   Pencil,
   Save,
   X,
+  GitMerge,
 } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -89,6 +92,7 @@ const EVENT_LABELS: Record<string, (meta: Record<string, unknown>) => string> = 
   "incident.commander_changed": (m) => m.to ? `Commander assigned` : `Commander removed`,
   "incident.assigned":       (m)   => m.to ? `Assignee changed` : `Assignee removed`,
   "incident.update_added":   (m)   => `Update added (${incidentUpdateTypeLabel[m.updateType as string] ?? m.updateType})`,
+  "incident.promoted_to_problem": (m) => `Promoted to problem ${m.problemNumber ?? ""}`,
 };
 
 // ── Update timeline ───────────────────────────────────────────────────────────
@@ -750,6 +754,46 @@ export default function IncidentDetailPage() {
                   <span className="text-foreground">{formatDate(incident.resolvedAt)}</span>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Affected CIs */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Affected CIs</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CiLinksPanel
+                entityType="incidents"
+                entityId={incident.id}
+                linkedCis={incident.ciLinks ?? []}
+                onChanged={() => queryClient.invalidateQueries({ queryKey: ["incident", id] })}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Problem Management */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-1.5">
+                <GitMerge className="h-3.5 w-3.5" />
+                Problem Management
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-muted-foreground mb-3">
+                If this incident has a recurring root cause, promote it to a problem record for investigation.
+              </p>
+              <NewProblemDialog
+                initialIncidentId={incident.id}
+                initialTitle={incident.title}
+                trigger={
+                  <button className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors w-full justify-center">
+                    <GitMerge className="h-3.5 w-3.5" />
+                    Promote to Problem
+                  </button>
+                }
+              />
             </CardContent>
           </Card>
 

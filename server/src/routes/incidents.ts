@@ -52,6 +52,11 @@ const LIST_SELECT = {
   updatedAt: true,
 } as const;
 
+const CI_SUMMARY_SELECT = {
+  id: true, ciNumber: true, name: true, type: true,
+  environment: true, criticality: true, status: true, tags: true,
+} as const;
+
 const DETAIL_SELECT = {
   ...LIST_SELECT,
   description: true,
@@ -73,6 +78,13 @@ const DETAIL_SELECT = {
       meta: true,
       actor: { select: { id: true, name: true } },
       createdAt: true,
+    },
+  },
+  ciLinks: {
+    orderBy: { linkedAt: "asc" as const },
+    select: {
+      ci: { select: CI_SUMMARY_SELECT },
+      linkedAt: true,
     },
   },
 } as const;

@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import axios from "axios";
@@ -18,9 +18,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import RichTextEditor from "@/components/RichTextEditor";
+import RichTextRenderer from "@/components/RichTextRenderer";
 import {
   Select,
   SelectContent,
@@ -38,8 +39,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BackLink from "@/components/BackLink";
 import ErrorAlert from "@/components/ErrorAlert";
-import ErrorMessage from "@/components/ErrorMessage";
 import { ProblemStatusBadge, ProblemPriorityBadge } from "./ProblemsPage";
+import CiLinksPanel from "@/components/CiLinksPanel";
 import {
   BookMarked,
   Plus,
@@ -51,9 +52,9 @@ import {
   X,
   Activity,
   FileText,
-  GitBranch,
   Lightbulb,
   AlertTriangle,
+  Database,
 } from "lucide-react";
 
 // ── Event label map ───────────────────────────────────────────────────────────
@@ -366,24 +367,31 @@ function NotesPanel({
   isTerminal: boolean;
   refetch: () => void;
 }) {
-  const queryClient = useQueryClient();
-  const {
-    register,
-    handleSubmit,
-    reset,
-    control,
-    formState: { errors },
-  } = useForm<CreateProblemNoteInput>({
+  const { control, handleSubmit, reset } = useForm<CreateProblemNoteInput>({
     resolver: zodResolver(createProblemNoteSchema),
-    defaultValues: { noteType: "investigation" },
+    defaultValues: { noteType: "investigation", body: " " },
   });
+
+  const [bodyHtml, setBodyHtml] = useState("");
+  const [bodyText, setBodyText] = useState("");
+
+  const handleEditorChange = useCallback((html: string, text: string) => {
+    setBodyHtml(html);
+    setBodyText(text);
+  }, []);
 
   const addNote = useMutation({
     mutationFn: async (data: CreateProblemNoteInput) => {
-      await axios.post(`/api/problems/${problemId}/notes`, data);
+      await axios.post(`/api/problems/${problemId}/notes`, {
+        ...data,
+        body: bodyText,
+        bodyHtml,
+      });
     },
     onSuccess: () => {
-      reset();
+      reset({ noteType: "investigation", body: " " });
+      setBodyHtml("");
+      setBodyText("");
       refetch();
     },
   });
@@ -431,7 +439,7 @@ function NotesPanel({
                       </Button>
                     )}
                   </div>
-                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{note.body}</p>
+                  <RichTextRenderer content={note.bodyHtml ?? note.body} />
                 </div>
               </li>
             );
@@ -467,14 +475,13 @@ function NotesPanel({
               Adding an RCA note will auto-advance status to "Root Cause Identified"
             </span>
           </div>
-          <Textarea
+          <RichTextEditor
+            content={bodyHtml}
+            onChange={handleEditorChange}
             placeholder="Add investigation notes, RCA findings, or workaround steps…"
-            rows={3}
-            {...register("body")}
+            minHeight="100px"
+            disabled={addNote.isPending}
           />
-          {errors.body && (
-            <p className="text-xs text-destructive">{errors.body.message}</p>
-          )}
           {addNote.error && (
             <ErrorAlert error={addNote.error} fallback="Failed to add note" />
           )}
@@ -482,7 +489,7 @@ function NotesPanel({
             type="submit"
             size="sm"
             className="h-7 text-xs"
-            disabled={addNote.isPending}
+            disabled={!bodyText.trim() || addNote.isPending}
           >
             {addNote.isPending ? "Adding…" : "Add Note"}
           </Button>
@@ -895,6 +902,21 @@ export default function ProblemDetailPage() {
                 }
               />
             </div>
+          </div>
+
+          {/* Affected CIs */}
+          <div className="rounded-md border p-4 space-y-3">
+            <h3 className="font-medium text-sm flex items-center gap-1.5">
+              <Database className="h-3.5 w-3.5" />
+              Affected CIs
+            </h3>
+            <CiLinksPanel
+              entityType="problems"
+              entityId={Number(id)}
+              linkedCis={problem.ciLinks ?? []}
+              readonly={isTerminal}
+              onChanged={() => refetch()}
+            />
           </div>
 
           {/* Dates */}

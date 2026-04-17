@@ -21,6 +21,8 @@ import IncidentsPage from "./pages/IncidentsPage";
 import IncidentDetailPage from "./pages/IncidentDetailPage";
 import RequestsPage from "./pages/RequestsPage";
 import RequestDetailPage from "./pages/RequestDetailPage";
+import ProblemsPage from "./pages/ProblemsPage";
+import ProblemDetailPage from "./pages/ProblemDetailPage";
 import ProfilePage from "./pages/ProfilePage";
 import SettingsPage from "./pages/SettingsPage";
 import PortalLoginPage from "./pages/portal/PortalLoginPage";
@@ -28,6 +30,11 @@ import PortalRegisterPage from "./pages/portal/PortalRegisterPage";
 import PortalTicketsPage from "./pages/portal/PortalTicketsPage";
 import PortalTicketDetailPage from "./pages/portal/PortalTicketDetailPage";
 import PortalNewTicketPage from "./pages/portal/PortalNewTicketPage";
+import PortalRequestsPage from "./pages/portal/PortalRequestsPage";
+import PortalRequestDetailPage from "./pages/portal/PortalRequestDetailPage";
+import PortalNewRequestPage from "./pages/portal/PortalNewRequestPage";
+import CmdbPage from "./pages/CmdbPage";
+import CmdbDetailPage from "./pages/CmdbDetailPage";
 import HelpCenterPage from "./pages/help/HelpCenterPage";
 import HelpArticlePage from "./pages/help/HelpArticlePage";
 
@@ -47,8 +54,11 @@ function App() {
           <Route path="/requests/:id" element={<RequestDetailPage />} />
           <Route path="/incidents" element={<IncidentsPage />} />
           <Route path="/incidents/:id" element={<IncidentDetailPage />} />
-          <Route path="/problems" element={<PlaceholderPage title="Problems" description="Problem management and root cause analysis is coming soon." />} />
+          <Route path="/problems" element={<ProblemsPage />} />
+          <Route path="/problems/:id" element={<ProblemDetailPage />} />
           <Route path="/changes" element={<PlaceholderPage title="Change Requests" description="Change advisory board and change management is coming soon." />} />
+          <Route path="/cmdb" element={<CmdbPage />} />
+          <Route path="/cmdb/:id" element={<CmdbDetailPage />} />
           <Route path="/assets" element={<PlaceholderPage title="Assets" description="IT asset management and CMDB integration is coming soon." />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
           {/* /settings redirects non-admins to home; admin sub-routes below */}
@@ -79,6 +89,9 @@ function App() {
           <Route path="/portal/tickets" element={<PortalTicketsPage />} />
           <Route path="/portal/tickets/:id" element={<PortalTicketDetailPage />} />
           <Route path="/portal/new-ticket" element={<PortalNewTicketPage />} />
+          <Route path="/portal/requests" element={<PortalRequestsPage />} />
+          <Route path="/portal/requests/:id" element={<PortalRequestDetailPage />} />
+          <Route path="/portal/new-request" element={<PortalNewRequestPage />} />
         </Route>
       </Route>
 

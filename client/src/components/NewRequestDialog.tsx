@@ -325,25 +325,11 @@ export default function NewRequestDialog() {
 
             {requiresApproval && (
               <div className="space-y-1.5">
-                <Label htmlFor="approverIds">
-                  Approver IDs <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="approverIds"
-                  placeholder="Paste approver user IDs separated by commas"
-                  onChange={(e) => {
-                    const ids = e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean);
-                    // Directly write into the form
-                  }}
-                />
+                <Label>Select Approvers <span className="text-destructive">*</span></Label>
                 <p className="text-xs text-muted-foreground">
-                  Use the agent selector below to pick approvers by name (full approval
-                  engine integration available in the Approvals module).
+                  Select one or more agents who must approve this request before fulfillment begins.
                 </p>
-                {/* Approver picker — simplified multi-select */}
+                {/* Approver picker — multi-select checkboxes */}
                 <Controller
                   name="approverIds"
                   control={control}

@@ -134,6 +134,10 @@ model User {
   problemNotes          ProblemNote[]       @relation("ProblemNoteAuthor")
   problemIncidentLinks  ProblemIncidentLink[] @relation("ProblemLinkLinkedBy")
   problemEvents         ProblemEvent[]      @relation("ProblemEventActor")
+  // CMDB relations
+  cisOwned              ConfigItem[]        @relation("CiOwner")
+  cisCreated            ConfigItem[]        @relation("CiCreatedBy")
+  ciEvents              CiEvent[]           @relation("CiEventActor")
 
   @@map("user")
 }
@@ -290,6 +294,7 @@ model Ticket {
   notes               Note[]
   auditEvents         AuditEvent[]
   csatRating          CsatRating?
+  ciLinks             TicketCiLink[]
 
   @@map("ticket")
 }
@@ -517,6 +522,7 @@ model Team {
   serviceRequests  ServiceRequest[]
   fulfillmentTasks FulfillmentTask[]
   problems         Problem[]
+  configItems      ConfigItem[]
   members          TeamMember[]
 
   @@map("queue")
@@ -712,6 +718,7 @@ model Incident {
   updates          IncidentUpdate[]
   events           IncidentEvent[]
   problemLinks     ProblemIncidentLink[]
+  ciLinks          IncidentCiLink[]
 
   @@index([status])
   @@index([priority])
@@ -1294,6 +1301,7 @@ model Problem {
   linkedIncidents ProblemIncidentLink[]
   notes           ProblemNote[]
   events          ProblemEvent[]
+  ciLinks         ProblemCiLink[]
 
   @@index([status])
   @@index([priority])
@@ -1339,6 +1347,7 @@ model ProblemNote {
   problem   Problem         @relation(fields: [problemId], references: [id], onDelete: Cascade)
   noteType  ProblemNoteType @default(general) @map("note_type")
   body      String
+  bodyHtml  String?         @map("body_html")
   authorId  String?         @map("author_id")
   author    User?           @relation("ProblemNoteAuthor", fields: [authorId], references: [id])
   createdAt DateTime        @default(now())
@@ -1366,4 +1375,221 @@ model ProblemEvent {
 
   @@index([problemId, createdAt])
   @@map("problem_event")
+}
+
+// ── CMDB — Configuration Management Database ───────────────────────────────────
+
+/**
+ * CiType — the class of a Configuration Item.
+ * Drives icon selection, relationship validation, and impact analysis.
+ */
+enum CiType {
+  server
+  workstation
+  network_device
+  application
+  service
+  database
+  storage
+  virtual_machine
+  container
+  printer
+  mobile_device
+  other
+}
+
+/** CiEnvironment — which deployment tier this CI belongs to. */
+enum CiEnvironment {
+  production
+  staging
+  development
+  test
+  disaster_recovery
+}
+
+/**
+ * CiCriticality — business impact if this CI fails.
+ * Maps to ITIL priority: critical → P1, high → P2, medium → P3, low → P4.
+ */
+enum CiCriticality {
+  critical
+  high
+  medium
+  low
+}
+
+/**
+ * CiStatus — operational lifecycle state of a Configuration Item.
+ *
+ * active         — in production, healthy
+ * maintenance    — under scheduled maintenance; not expected to serve traffic
+ * planned        — approved, not yet deployed
+ * retired        — decommissioned but record retained for audit history
+ * decommissioned — physically removed / license surrendered
+ */
+enum CiStatus {
+  active
+  maintenance
+  planned
+  retired
+  decommissioned
+}
+
+/**
+ * CiRelationshipType — directed relationship between two CIs.
+ *
+ * Direction is always fromCi → toCi:
+ *   depends_on    fromCI requires toCi to function (application depends_on database)
+ *   hosts         fromCI runs/hosts toCi (server hosts virtual_machine)
+ *   is_parent_of  fromCI is the logical parent of toCi (service is_parent_of components)
+ *   connects_to   network-level connection (switch connects_to server)
+ *   backs_up      fromCI backs up toCi (backup server backs_up primary)
+ */
+enum CiRelationshipType {
+  depends_on
+  hosts
+  is_parent_of
+  connects_to
+  backs_up
+}
+
+/**
+ * ConfigItem — a Configuration Item in the CMDB.
+ *
+ * Design principles:
+ *  - ciNumber: generated as CI-NNNN via ticket_counter series "ci".
+ *  - type/environment/criticality/status: enum-driven for structured filtering
+ *    and future impact analysis (which tickets/incidents affect critical CIs?).
+ *  - tags: free-form string array for ad-hoc grouping (e.g. ["finance", "sox"]).
+ *  - owner: the human accountable for this CI's health (not the support team).
+ *  - team: the support team responsible for operating this CI.
+ *  - affectedSystem on Ticket/Incident/Problem is preserved as-is; CI links
+ *    are additive and progressively replace the free-text field.
+ */
+model ConfigItem {
+  id          Int           @id @default(autoincrement())
+  ciNumber    String        @unique @map("ci_number")
+  name        String
+  type        CiType
+  environment CiEnvironment @default(production)
+  criticality CiCriticality @default(medium)
+  status      CiStatus      @default(active)
+  description String?
+  tags        String[]      @default([])
+
+  ownerId String? @map("owner_id")
+  owner   User?   @relation("CiOwner", fields: [ownerId], references: [id])
+
+  teamId Int?  @map("team_id")
+  team   Team? @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  createdById String?  @map("created_by_id")
+  createdBy   User?    @relation("CiCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Directed relationships originating from this CI
+  relationshipsFrom CiRelationship[] @relation("RelationshipFrom")
+  // Directed relationships pointing to this CI
+  relationshipsTo   CiRelationship[] @relation("RelationshipTo")
+
+  // Impact linkage — records that reference this CI
+  ticketLinks   TicketCiLink[]
+  incidentLinks IncidentCiLink[]
+  problemLinks  ProblemCiLink[]
+
+  events CiEvent[]
+
+  @@index([type])
+  @@index([status])
+  @@index([criticality])
+  @@index([environment])
+  @@index([ownerId])
+  @@map("config_item")
+}
+
+/**
+ * CiRelationship — a directed typed edge between two ConfigItems.
+ *
+ * Unique on (fromCiId, toCiId, type) so the same relationship type cannot
+ * be duplicated, but two CIs can have relationships of different types.
+ */
+model CiRelationship {
+  id       Int                @id @default(autoincrement())
+  fromCiId Int                @map("from_ci_id")
+  fromCi   ConfigItem         @relation("RelationshipFrom", fields: [fromCiId], references: [id], onDelete: Cascade)
+  toCiId   Int                @map("to_ci_id")
+  toCi     ConfigItem         @relation("RelationshipTo", fields: [toCiId], references: [id], onDelete: Cascade)
+  type     CiRelationshipType
+
+  createdAt   DateTime @default(now())
+  createdById String?  @map("created_by_id")
+
+  @@unique([fromCiId, toCiId, type])
+  @@index([fromCiId])
+  @@index([toCiId])
+  @@map("ci_relationship")
+}
+
+/** TicketCiLink — links a ticket to one or more CIs for impact tracking. */
+model TicketCiLink {
+  id       Int        @id @default(autoincrement())
+  ticketId Int        @map("ticket_id")
+  ticket   Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ciId     Int        @map("ci_id")
+  ci       ConfigItem @relation(fields: [ciId], references: [id], onDelete: Cascade)
+  linkedAt DateTime   @default(now()) @map("linked_at")
+
+  @@unique([ticketId, ciId])
+  @@index([ticketId])
+  @@index([ciId])
+  @@map("ticket_ci_link")
+}
+
+/** IncidentCiLink — links an incident to one or more affected CIs. */
+model IncidentCiLink {
+  id         Int        @id @default(autoincrement())
+  incidentId Int        @map("incident_id")
+  incident   Incident   @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  ciId       Int        @map("ci_id")
+  ci         ConfigItem @relation(fields: [ciId], references: [id], onDelete: Cascade)
+  linkedAt   DateTime   @default(now()) @map("linked_at")
+
+  @@unique([incidentId, ciId])
+  @@index([incidentId])
+  @@index([ciId])
+  @@map("incident_ci_link")
+}
+
+/** ProblemCiLink — links a problem to one or more root-cause CIs. */
+model ProblemCiLink {
+  id        Int        @id @default(autoincrement())
+  problemId Int        @map("problem_id")
+  problem   Problem    @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  ciId      Int        @map("ci_id")
+  ci        ConfigItem @relation(fields: [ciId], references: [id], onDelete: Cascade)
+  linkedAt  DateTime   @default(now()) @map("linked_at")
+
+  @@unique([problemId, ciId])
+  @@index([problemId])
+  @@index([ciId])
+  @@map("problem_ci_link")
+}
+
+/**
+ * CiEvent — append-only audit trail for every change to a ConfigItem.
+ * action naming: "ci.<verb>" — e.g. "ci.created", "ci.status_changed".
+ */
+model CiEvent {
+  id        Int        @id @default(autoincrement())
+  ciId      Int        @map("ci_id")
+  ci        ConfigItem @relation(fields: [ciId], references: [id], onDelete: Cascade)
+  actorId   String?    @map("actor_id")
+  actor     User?      @relation("CiEventActor", fields: [actorId], references: [id])
+  action    String
+  meta      Json       @default("{}")
+  createdAt DateTime   @default(now())
+
+  @@index([ciId, createdAt])
+  @@map("ci_event")
 }

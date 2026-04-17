@@ -86,6 +86,7 @@ export type LinkIncidentInput = z.infer<typeof linkIncidentSchema>;
 
 export const createProblemNoteSchema = z.object({
   body: z.string().min(1).max(10000),
+  bodyHtml: z.string().max(100000).optional(),
   noteType: z
     .enum(["investigation", "workaround", "rca", "general"])
     .default("general"),

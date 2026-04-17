@@ -19,6 +19,7 @@ import {
   AlertCircle,
   ArrowUpDown,
   Server,
+  Database,
   BookOpen,
   FileText,
   BarChart2,
@@ -134,6 +135,13 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Changes",
         icon: ArrowUpDown,
         permission: "changes.view",
+      },
+      {
+        id: "cmdb",
+        to: "/cmdb",
+        label: "CMDB",
+        icon: Database,
+        permission: "cmdb.view",
       },
       {
         id: "assets",

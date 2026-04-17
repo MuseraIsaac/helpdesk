@@ -1,6 +1,7 @@
 import type { IncidentPriority } from "./incident-priority";
 import type { IncidentStatus } from "./incident-status";
 import type { IncidentUpdateType } from "./incident-update-type";
+import type { CiSummary } from "./cmdb";
 
 export interface IncidentUpdate {
   id: number;
@@ -51,4 +52,5 @@ export interface Incident extends IncidentSlaInfo {
   // Detail-only (not in list responses)
   updates?: IncidentUpdate[];
   events?: IncidentEvent[];
+  ciLinks?: Array<{ ci: CiSummary; linkedAt: string }>;
 }
