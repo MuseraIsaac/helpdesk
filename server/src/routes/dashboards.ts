@@ -1,67 +1,132 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/require-auth";
+import { requirePermission } from "../middleware/require-permission";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
-import { Role } from "core/constants/role.ts";
+import { can } from "core/constants/permission.ts";
 import {
   createDashboardSchema,
   updateDashboardSchema,
+  cloneDashboardSchema,
 } from "core/schemas/dashboard.ts";
 import prisma from "../db";
 
 const router = Router();
 router.use(requireAuth);
 
+// ── Shared select projection ───────────────────────────────────────────────────
+
+const DASHBOARD_SELECT = {
+  id:               true,
+  userId:           true,
+  name:             true,
+  description:      true,
+  isShared:         true,
+  visibilityTeamId: true,
+  sourceId:         true,
+  config:           true,
+  createdAt:        true,
+  updatedAt:        true,
+  visibilityTeam:   { select: { id: true, name: true, color: true } },
+} as const;
+
 // ── List ──────────────────────────────────────────────────────────────────────
 // GET /api/dashboards
-// Returns the user's personal dashboards, all shared dashboards, and the id
-// of their currently-active config (from UserPreference.defaultDashboard).
+// Returns:
+//   personal       — dashboards owned by this user
+//   shared         — isShared=true (admin-published, org-wide)
+//   teamVisible    — visibilityTeamId matches one of the user's team memberships
+//   defaultDashboardId — currently-active dashboard (from UserPreference)
 
 router.get("/", async (req, res) => {
-  const [personal, shared, pref] = await Promise.all([
+  // Resolve the user's team memberships for team-scoped dashboards
+  const memberships = await prisma.teamMember.findMany({
+    where: { userId: req.user.id },
+    select: { teamId: true },
+  });
+  const teamIds = memberships.map((m) => m.teamId);
+
+  const [personal, shared, teamVisible, pref] = await Promise.all([
     prisma.dashboardConfig.findMany({
       where: { userId: req.user.id },
       orderBy: { createdAt: "asc" },
+      select: DASHBOARD_SELECT,
     }),
     prisma.dashboardConfig.findMany({
       where: { isShared: true },
       orderBy: { createdAt: "asc" },
+      select: DASHBOARD_SELECT,
     }),
+    teamIds.length > 0
+      ? prisma.dashboardConfig.findMany({
+          where: {
+            visibilityTeamId: { in: teamIds },
+            isShared: false,
+            // Exclude dashboards already owned by this user (they appear under personal)
+            NOT: { userId: req.user.id },
+          },
+          orderBy: { createdAt: "asc" },
+          select: DASHBOARD_SELECT,
+        })
+      : Promise.resolve([]),
     prisma.userPreference.findUnique({
       where: { userId: req.user.id },
       select: { defaultDashboard: true },
     }),
   ]);
 
-  // defaultDashboard is "overview" (system default) or a numeric string id
   const raw = pref?.defaultDashboard ?? "overview";
   const defaultDashboardId = /^\d+$/.test(raw) ? Number(raw) : null;
 
-  res.json({ personal, shared, defaultDashboardId });
+  res.json({ personal, shared, teamVisible, defaultDashboardId });
 });
 
 // ── Create ────────────────────────────────────────────────────────────────────
 // POST /api/dashboards
-// Creates a personal dashboard. Admins may set isShared: true to publish it
-// for all users. If setAsDefault is true, updates UserPreference immediately.
+// dashboard.manage_own required. Only dashboard.manage_shared can set isShared.
+// dashboard.share_to_team required to set visibilityTeamId (agents: own teams only).
 
-router.post("/", async (req, res) => {
+router.post("/", requirePermission("dashboard.manage_own"), async (req, res) => {
   const data = validate(createDashboardSchema, req.body, res);
   if (!data) return;
 
-  // Only admins can create shared dashboards
-  if (data.isShared && req.user.role !== Role.admin) {
-    res.status(403).json({ error: "Only admins can create shared dashboards" });
+  if (data.isShared && !can(req.user.role, "dashboard.manage_shared")) {
+    res.status(403).json({ error: "Only admins and supervisors can create shared dashboards" });
     return;
+  }
+  if (data.visibilityTeamId) {
+    if (!can(req.user.role, "dashboard.share_to_team")) {
+      res.status(403).json({ error: "You don't have permission to share dashboards to teams" });
+      return;
+    }
+    if (!can(req.user.role, "dashboard.manage_shared")) {
+      // Agents can only share to teams they belong to
+      const membership = await prisma.teamMember.findFirst({
+        where: { userId: req.user.id, teamId: data.visibilityTeamId },
+      });
+      if (!membership) {
+        res.status(403).json({ error: "You can only share a dashboard with a team you belong to" });
+        return;
+      }
+    }
+  }
+
+  // Validate referenced team exists
+  if (data.visibilityTeamId) {
+    const team = await prisma.team.findUnique({ where: { id: data.visibilityTeamId } });
+    if (!team) { res.status(400).json({ error: "Team not found" }); return; }
   }
 
   const dashboard = await prisma.dashboardConfig.create({
     data: {
-      userId:   req.user.id,
-      name:     data.name,
-      isShared: data.isShared,
-      config:   data.config as object,
+      userId:           req.user.id,
+      name:             data.name,
+      description:      data.description ?? null,
+      isShared:         data.isShared,
+      visibilityTeamId: data.visibilityTeamId ?? null,
+      config:           data.config as object,
     },
+    select: DASHBOARD_SELECT,
   });
 
   if (data.setAsDefault) {
@@ -82,22 +147,36 @@ router.get("/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) { res.status(400).json({ error: "Invalid dashboard ID" }); return; }
 
-  const dashboard = await prisma.dashboardConfig.findUnique({ where: { id } });
+  const dashboard = await prisma.dashboardConfig.findUnique({
+    where: { id },
+    select: DASHBOARD_SELECT,
+  });
   if (!dashboard) { res.status(404).json({ error: "Dashboard not found" }); return; }
 
-  const canView =
-    dashboard.userId === req.user.id || dashboard.isShared;
-  if (!canView) { res.status(404).json({ error: "Dashboard not found" }); return; }
+  // Check access: own, shared, or team-visible
+  const isOwn    = dashboard.userId === req.user.id;
+  const isShared = dashboard.isShared;
+  let   isTeam   = false;
+  if (dashboard.visibilityTeamId) {
+    const m = await prisma.teamMember.findFirst({
+      where: { userId: req.user.id, teamId: dashboard.visibilityTeamId },
+    });
+    isTeam = !!m;
+  }
+
+  if (!isOwn && !isShared && !isTeam) {
+    res.status(404).json({ error: "Dashboard not found" }); return;
+  }
 
   res.json({ dashboard });
 });
 
 // ── Update ────────────────────────────────────────────────────────────────────
 // PUT /api/dashboards/:id
-// Users can only update their own personal dashboards.
-// Admins can also update shared dashboards they created.
+// Owners can update name, description, config, visibilityTeamId.
+// Only dashboard.manage_shared can toggle isShared.
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePermission("dashboard.manage_own"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) { res.status(400).json({ error: "Invalid dashboard ID" }); return; }
 
@@ -109,12 +188,44 @@ router.put("/:id", async (req, res) => {
     res.status(404).json({ error: "Dashboard not found" }); return;
   }
 
+  if (data.isShared !== undefined && !can(req.user.role, "dashboard.manage_shared")) {
+    res.status(403).json({ error: "Only admins and supervisors can change sharing settings" });
+    return;
+  }
+
+  if (data.visibilityTeamId) {
+    if (!can(req.user.role, "dashboard.share_to_team")) {
+      res.status(403).json({ error: "You don't have permission to share dashboards to teams" });
+      return;
+    }
+    if (!can(req.user.role, "dashboard.manage_shared")) {
+      // Agents can only share to teams they belong to
+      const membership = await prisma.teamMember.findFirst({
+        where: { userId: req.user.id, teamId: data.visibilityTeamId },
+      });
+      if (!membership) {
+        res.status(403).json({ error: "You can only share a dashboard with a team you belong to" });
+        return;
+      }
+    }
+  }
+
+  // Validate referenced team
+  if (data.visibilityTeamId) {
+    const team = await prisma.team.findUnique({ where: { id: data.visibilityTeamId } });
+    if (!team) { res.status(400).json({ error: "Team not found" }); return; }
+  }
+
   const dashboard = await prisma.dashboardConfig.update({
     where: { id },
     data: {
-      ...(data.name   !== undefined && { name: data.name }),
-      ...(data.config !== undefined && { config: data.config as object }),
+      ...(data.name             !== undefined && { name: data.name }),
+      ...(data.description      !== undefined && { description: data.description }),
+      ...(data.config           !== undefined && { config: data.config as object }),
+      ...(data.isShared         !== undefined && { isShared: data.isShared }),
+      ...(data.visibilityTeamId !== undefined && { visibilityTeamId: data.visibilityTeamId }),
     },
+    select: DASHBOARD_SELECT,
   });
 
   res.json({ dashboard });
@@ -122,24 +233,25 @@ router.put("/:id", async (req, res) => {
 
 // ── Delete ────────────────────────────────────────────────────────────────────
 // DELETE /api/dashboards/:id
-// Users can delete their own personal dashboards.
-// If the deleted dashboard was the user's default, resets defaultDashboard to "overview".
+// Owners can delete their own dashboards.
+// dashboard.manage_shared holders (admin/supervisor) can delete any dashboard.
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePermission("dashboard.manage_own"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) { res.status(400).json({ error: "Invalid dashboard ID" }); return; }
 
   const existing = await prisma.dashboardConfig.findUnique({ where: { id } });
-  if (!existing || existing.userId !== req.user.id) {
+  const canManageAny = can(req.user.role, "dashboard.manage_shared");
+  if (!existing || (!canManageAny && existing.userId !== req.user.id)) {
     res.status(404).json({ error: "Dashboard not found" }); return;
   }
 
   await prisma.dashboardConfig.delete({ where: { id } });
 
-  // If this was the user's active default, reset to system default
+  // Reset any user whose default was this dashboard
   await prisma.userPreference.updateMany({
-    where:  { userId: req.user.id, defaultDashboard: String(id) },
-    data:   { defaultDashboard: "overview" },
+    where: { defaultDashboard: String(id) },
+    data:  { defaultDashboard: "overview" },
   });
 
   res.status(204).send();
@@ -147,15 +259,29 @@ router.delete("/:id", async (req, res) => {
 
 // ── Set as default ────────────────────────────────────────────────────────────
 // POST /api/dashboards/:id/set-default
-// Sets any accessible dashboard (personal or shared) as the user's active default.
 
-router.post("/:id/set-default", async (req, res) => {
+router.post("/:id/set-default", requirePermission("dashboard.manage_own"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) { res.status(400).json({ error: "Invalid dashboard ID" }); return; }
 
-  const dashboard = await prisma.dashboardConfig.findUnique({ where: { id } });
-  const canAccess = dashboard && (dashboard.userId === req.user.id || dashboard.isShared);
-  if (!canAccess) { res.status(404).json({ error: "Dashboard not found" }); return; }
+  const dashboard = await prisma.dashboardConfig.findUnique({
+    where: { id },
+    select: { id: true, userId: true, isShared: true, visibilityTeamId: true },
+  });
+  if (!dashboard) { res.status(404).json({ error: "Dashboard not found" }); return; }
+
+  const isOwn    = dashboard.userId === req.user.id;
+  const isShared = dashboard.isShared;
+  let   isTeam   = false;
+  if (dashboard.visibilityTeamId) {
+    const m = await prisma.teamMember.findFirst({
+      where: { userId: req.user.id, teamId: dashboard.visibilityTeamId },
+    });
+    isTeam = !!m;
+  }
+  if (!isOwn && !isShared && !isTeam) {
+    res.status(404).json({ error: "Dashboard not found" }); return;
+  }
 
   await prisma.userPreference.upsert({
     where:  { userId: req.user.id },
@@ -164,6 +290,61 @@ router.post("/:id/set-default", async (req, res) => {
   });
 
   res.json({ ok: true });
+});
+
+// ── Clone ─────────────────────────────────────────────────────────────────────
+// POST /api/dashboards/:id/clone
+// Creates a personal copy of any accessible dashboard.
+
+router.post("/:id/clone", requirePermission("dashboard.manage_own"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid dashboard ID" }); return; }
+
+  const data = validate(cloneDashboardSchema, req.body, res);
+  if (!data) return;
+
+  const source = await prisma.dashboardConfig.findUnique({
+    where: { id },
+    select: { id: true, userId: true, name: true, description: true, isShared: true, visibilityTeamId: true, config: true },
+  });
+  if (!source) { res.status(404).json({ error: "Dashboard not found" }); return; }
+
+  const isOwn    = source.userId === req.user.id;
+  const isShared = source.isShared;
+  let   isTeam   = false;
+  if (source.visibilityTeamId) {
+    const m = await prisma.teamMember.findFirst({
+      where: { userId: req.user.id, teamId: source.visibilityTeamId },
+    });
+    isTeam = !!m;
+  }
+  if (!isOwn && !isShared && !isTeam) {
+    res.status(404).json({ error: "Dashboard not found" }); return;
+  }
+
+  const clonedName = data.name ?? `${source.name} (Copy)`;
+
+  const cloned = await prisma.dashboardConfig.create({
+    data: {
+      userId:      req.user.id,
+      name:        clonedName,
+      description: source.description,
+      isShared:    false,
+      sourceId:    id,
+      config:      source.config as object,
+    },
+    select: DASHBOARD_SELECT,
+  });
+
+  if (data.setAsDefault) {
+    await prisma.userPreference.upsert({
+      where:  { userId: req.user.id },
+      create: { userId: req.user.id, defaultDashboard: String(cloned.id) },
+      update: { defaultDashboard: String(cloned.id) },
+    });
+  }
+
+  res.status(201).json({ dashboard: cloned });
 });
 
 export default router;

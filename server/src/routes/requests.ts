@@ -21,6 +21,7 @@ import { computeRequestSlaDueAt } from "../lib/request-sla";
 import { logRequestEvent } from "../lib/request-events";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { createApproval } from "../lib/approval-engine";
+import { syncServiceRequestToTicket } from "../lib/ticket-sync";
 import prisma from "../db";
 import type { Prisma, TicketPriority } from "../generated/prisma/client";
 
@@ -100,6 +101,18 @@ const DETAIL_SELECT = {
   items: { orderBy: { createdAt: "asc" as const }, select: ITEM_SELECT },
   tasks: { orderBy: { position: "asc" as const }, select: TASK_SELECT },
   events: { orderBy: { createdAt: "asc" as const }, select: EVENT_SELECT },
+  sourceTicket: {
+    select: {
+      id: true,
+      ticketNumber: true,
+      subject: true,
+      status: true,
+      priority: true,
+      senderName: true,
+      senderEmail: true,
+      createdAt: true,
+    },
+  },
 } as const;
 
 // ── GET /api/requests ─────────────────────────────────────────────────────────
@@ -403,6 +416,16 @@ router.patch(
     }
 
     await Promise.all(auditTasks);
+
+    // Back-sync relevant changes to the linked source ticket (fire-and-forget)
+    const backSyncChanges: { status?: string; assignedToId?: string | null; teamId?: number | null } = {};
+    if (data.status && data.status !== current.status) backSyncChanges.status = data.status;
+    if ("assignedToId" in data) backSyncChanges.assignedToId = data.assignedToId ?? null;
+    if ("teamId" in data) backSyncChanges.teamId = data.teamId ?? null;
+    if (Object.keys(backSyncChanges).length > 0) {
+      void syncServiceRequestToTicket(id, backSyncChanges);
+    }
+
     res.json(updated);
   }
 );

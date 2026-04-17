@@ -28,19 +28,27 @@ import themeRouter from "./routes/theme";
 import dashboardsRouter from "./routes/dashboards";
 import ticketViewsRouter from "./routes/ticket-views";
 import workflowsRouter from "./routes/workflows";
+import scenariosRouter from "./routes/scenarios";
 import approvalsRouter from "./routes/approvals";
 import incidentsRouter from "./routes/incidents";
 import requestsRouter from "./routes/requests";
 import problemsRouter from "./routes/problems";
+import changesRouter from "./routes/changes";
+import changeAttachmentsRouter from "./routes/change-attachments";
 import cmdbRouter from "./routes/cmdb";
 import catalogRouter from "./routes/catalog";
 import notificationsRouter from "./routes/notifications";
 import searchRouter from "./routes/search";
 import { startQueue, stopQueue } from "./lib/queue";
+import { registerApprovalHook } from "./lib/approval-hooks";
+import { onChangeApprovalResolved } from "./lib/change-approval";
 import { registerChannelAdapter } from "./lib/intake/types";
 import { emailAdapter } from "./lib/intake/email";
 import { portalAdapter } from "./lib/intake/portal";
 import { apiAdapter, chatAdapterStub, whatsappAdapterStub, slackTeamsAdapterStub, voiceAdapterStub, socialAdapterStub } from "./lib/intake/api";
+
+// Register approval hooks — must run before any request is served
+registerApprovalHook("change_request", onChangeApprovalResolved);
 
 // Register all intake channel adapters
 registerChannelAdapter(emailAdapter);
@@ -112,10 +120,13 @@ app.use("/api/me", meRouter);
 app.use("/api/dashboards", dashboardsRouter);
 app.use("/api/ticket-views", ticketViewsRouter);
 app.use("/api/workflows", workflowsRouter);
+app.use("/api/scenarios", scenariosRouter);
 app.use("/api/approvals", approvalsRouter);
 app.use("/api/incidents", incidentsRouter);
 app.use("/api/requests", requestsRouter);
 app.use("/api/problems", problemsRouter);
+app.use("/api/changes", changesRouter);
+app.use("/api/changes/:changeId/attachments", changeAttachmentsRouter);
 app.use("/api/cmdb", cmdbRouter);
 app.use("/api/catalog", catalogRouter);
 app.use("/api/notifications", notificationsRouter);

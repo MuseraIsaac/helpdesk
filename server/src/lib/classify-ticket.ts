@@ -1,12 +1,13 @@
 import type { PgBoss } from "pg-boss";
 import { generateText } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { createOpenAI } from "@ai-sdk/openai";
 import {
   ticketCategories,
   type TicketCategory,
 } from "core/constants/ticket-category.ts";
 import Sentry from "./sentry";
 import prisma from "../db";
+import { getSection } from "./settings";
 
 const QUEUE_NAME = "classify-ticket";
 
@@ -27,8 +28,13 @@ export async function registerClassifyWorker(boss: PgBoss): Promise<void> {
     const { ticketId, subject, body } = jobs[0]!.data;
 
     try {
+      const integrations = await getSection("integrations");
+      const apiKey = integrations.openaiApiKey || process.env.OPENAI_API_KEY || "";
+      const modelId = integrations.openaiModel || "gpt-4o-mini";
+      const openai = createOpenAI({ apiKey });
+
       const { text } = await generateText({
-        model: openai("gpt-5-nano"),
+        model: openai(modelId),
         system:
           "You are a support ticket classifier. " +
           "Classify the ticket into exactly one of these categories: " +

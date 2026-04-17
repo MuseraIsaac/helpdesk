@@ -30,6 +30,41 @@ function createdAtFilter(from: Date | null, to: Date | null) {
   };
 }
 
+/**
+ * Resolves a `{ since, until }` window from the request query.
+ * Prefers explicit `from`/`to`; falls back to `period` (integer days).
+ */
+function resolveDateWindow(query: Record<string, unknown>, defaultDays = 30): { since: Date; until: Date } {
+  const { fromDate, toDate } = parseDateRange(query.from, query.to);
+  if (fromDate) {
+    const since = new Date(fromDate); since.setHours(0, 0, 0, 0);
+    const until = toDate ? new Date(toDate) : new Date();
+    until.setHours(23, 59, 59, 999);
+    return { since, until };
+  }
+  const period = Math.min(365, Math.max(1, Number(query.period ?? defaultDays) || defaultDays));
+  const since = new Date(); since.setDate(since.getDate() - (period - 1)); since.setHours(0, 0, 0, 0);
+  const until = new Date(); until.setHours(23, 59, 59, 999);
+  return { since, until };
+}
+
+/** Fill every date between since..until (inclusive) using a lookup map. */
+function fillDateRange<T>(
+  since: Date,
+  until: Date,
+  lookup: Map<string, T>,
+  empty: T,
+): { date: string; value: T }[] {
+  const result: { date: string; value: T }[] = [];
+  const cursor = new Date(since);
+  while (cursor <= until) {
+    const key = cursor.toISOString().slice(0, 10);
+    result.push({ date: key, value: lookup.get(key) ?? empty });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return result;
+}
+
 // ── Overview ─────────────────────────────────────────────────────────────────
 //
 // GET /api/reports/overview?from=&to=
@@ -140,14 +175,28 @@ router.get("/overview", async (req, res) => {
 // with configurable lookback window.
 
 router.get("/volume", async (req, res) => {
-  const period = Math.min(90, Math.max(7, Number(req.query.period ?? 30) || 30));
+  // Prefer explicit from/to; fall back to period (days) for backwards compat.
+  const { fromDate, toDate } = parseDateRange(req.query.from, req.query.to);
 
-  const since = new Date();
-  since.setDate(since.getDate() - (period - 1));
-  since.setHours(0, 0, 0, 0);
+  let since: Date;
+  let until: Date;
+
+  if (fromDate) {
+    since = fromDate;
+    since.setHours(0, 0, 0, 0);
+    until = toDate ?? new Date();
+    until.setHours(23, 59, 59, 999);
+  } else {
+    const period = Math.min(90, Math.max(1, Number(req.query.period ?? 30) || 30));
+    since = new Date();
+    since.setDate(since.getDate() - (period - 1));
+    since.setHours(0, 0, 0, 0);
+    until = new Date();
+    until.setHours(23, 59, 59, 999);
+  }
 
   const tickets = await prisma.ticket.findMany({
-    where: { createdAt: { gte: since } },
+    where: { createdAt: { gte: since, lte: until } },
     select: { createdAt: true },
   });
 
@@ -159,11 +208,11 @@ router.get("/volume", async (req, res) => {
 
   // Fill every date in the window (including zero-count days)
   const data: { date: string; tickets: number }[] = [];
-  for (let i = period - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
+  const cursor = new Date(since);
+  while (cursor <= until) {
+    const key = cursor.toISOString().slice(0, 10);
     data.push({ date: key, tickets: countsByDate.get(key) ?? 0 });
+    cursor.setDate(cursor.getDate() + 1);
   }
 
   res.json({ data });
@@ -393,10 +442,7 @@ router.get("/sla-by-dimension", async (req, res) => {
 // MTTA and MTTR are the canonical incident SLA KPIs in ITIL.
 
 router.get("/incidents", async (req, res) => {
-  const period = Math.min(90, Math.max(7, Number(req.query.period ?? 30) || 30));
-  const since = new Date();
-  since.setDate(since.getDate() - (period - 1));
-  since.setHours(0, 0, 0, 0);
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
   interface IncidentStatsRow {
     total: bigint;
@@ -407,7 +453,7 @@ router.get("/incidents", async (req, res) => {
   }
 
   // Single-pass aggregate for the scalar KPIs
-  const [statsRows, byStatusRaw, byPriorityRaw] = await Promise.all([
+  const [statsRows, byStatusRaw, byPriorityRaw, incidentDates] = await Promise.all([
     prisma.$queryRaw<IncidentStatsRow[]>`
       SELECT
         COUNT(*)                                                              AS total,
@@ -418,25 +464,20 @@ router.get("/incidents", async (req, res) => {
         ROUND(AVG(EXTRACT(EPOCH FROM ("resolved_at"    - "createdAt")))
               FILTER (WHERE "resolved_at" IS NOT NULL
                         AND status IN ('resolved','closed')))::int           AS mttr
-      FROM incident WHERE "createdAt" >= ${since}
+      FROM incident WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
     `,
-    prisma.incident.groupBy({ by: ["status"], where: { createdAt: { gte: since } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
-    prisma.incident.groupBy({ by: ["priority"], where: { createdAt: { gte: since } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
+    prisma.incident.groupBy({ by: ["status"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
+    prisma.incident.groupBy({ by: ["priority"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
+    prisma.incident.findMany({ where: { createdAt: { gte: since, lte: until } }, select: { createdAt: true } }),
   ]);
 
   // Daily volume (fill gaps)
-  const incidents = await prisma.incident.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true } });
   const countsByDate = new Map<string, number>();
-  for (const inc of incidents) {
+  for (const inc of incidentDates) {
     const key = inc.createdAt.toISOString().slice(0, 10);
     countsByDate.set(key, (countsByDate.get(key) ?? 0) + 1);
   }
-  const volume: { date: string; count: number }[] = [];
-  for (let i = period - 1; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
-    volume.push({ date: key, count: countsByDate.get(key) ?? 0 });
-  }
+  const volume = fillDateRange(since, until, countsByDate, 0).map(e => ({ date: e.date, count: e.value }));
 
   const row = statsRows[0];
   res.json({
@@ -459,10 +500,7 @@ router.get("/incidents", async (req, res) => {
 // top catalog items by request count.
 
 router.get("/requests", async (req, res) => {
-  const period = Math.min(90, Math.max(7, Number(req.query.period ?? 30) || 30));
-  const since = new Date();
-  since.setDate(since.getDate() - (period - 1));
-  since.setHours(0, 0, 0, 0);
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
   interface RequestStatsRow {
     total: bigint;
@@ -480,9 +518,9 @@ router.get("/requests", async (req, res) => {
           COALESCE("resolved_at","closed_at") - "createdAt"
         ))) FILTER (WHERE COALESCE("resolved_at","closed_at") IS NOT NULL))::int
                                                                             AS "avgFulfillmentSeconds"
-      FROM service_request WHERE "createdAt" >= ${since}
+      FROM service_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
     `,
-    prisma.serviceRequest.groupBy({ by: ["status"], where: { createdAt: { gte: since } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
+    prisma.serviceRequest.groupBy({ by: ["status"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
     prisma.$queryRaw<TopItemRow[]>`
       SELECT
         COALESCE("catalog_item_name", 'Ad-hoc Request') AS name,
@@ -490,7 +528,7 @@ router.get("/requests", async (req, res) => {
         ROUND(AVG(EXTRACT(EPOCH FROM (
           COALESCE("resolved_at","closed_at") - "createdAt"
         ))) FILTER (WHERE COALESCE("resolved_at","closed_at") IS NOT NULL))::int AS "avgSeconds"
-      FROM service_request WHERE "createdAt" >= ${since}
+      FROM service_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
       GROUP BY "catalog_item_name" ORDER BY count DESC LIMIT 8
     `,
   ]);
@@ -498,7 +536,7 @@ router.get("/requests", async (req, res) => {
   const row = statsRows[0];
   const total = Number(row?.total ?? 0);
   const slaBreached = Number(row?.slaBreached ?? 0);
-  const withSla = await prisma.serviceRequest.count({ where: { createdAt: { gte: since }, slaDueAt: { not: null } } });
+  const withSla = await prisma.serviceRequest.count({ where: { createdAt: { gte: since, lte: until }, slaDueAt: { not: null } } });
 
   res.json({
     total,
@@ -519,10 +557,7 @@ router.get("/requests", async (req, res) => {
 // This surfaces systemic issues that may need permanent fixes.
 
 router.get("/problems", async (req, res) => {
-  const period = Math.min(90, Math.max(7, Number(req.query.period ?? 30) || 30));
-  const since = new Date();
-  since.setDate(since.getDate() - (period - 1));
-  since.setHours(0, 0, 0, 0);
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
   interface ProblemStatsRow { total: bigint; knownErrors: bigint; avgResolutionDays: number | null; }
   interface RecurrenceRow { problemId: number; linkedCount: bigint; }
@@ -536,14 +571,14 @@ router.get("/problems", async (req, res) => {
           COALESCE("resolved_at","closed_at") - "createdAt"
         )) / 86400.0) FILTER (WHERE COALESCE("resolved_at","closed_at") IS NOT NULL), 1)
                                                                            AS "avgResolutionDays"
-      FROM problem WHERE "createdAt" >= ${since}
+      FROM problem WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
     `,
-    prisma.problem.groupBy({ by: ["status"], where: { createdAt: { gte: since } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
+    prisma.problem.groupBy({ by: ["status"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
     prisma.$queryRaw<RecurrenceRow[]>`
       SELECT pil."problem_id" AS "problemId", COUNT(*) AS "linkedCount"
       FROM problem_incident_link pil
       JOIN problem p ON p.id = pil."problem_id"
-      WHERE p."createdAt" >= ${since}
+      WHERE p."createdAt" >= ${since} AND p."createdAt" <= ${until}
       GROUP BY pil."problem_id"
     `,
   ]);
@@ -571,10 +606,7 @@ router.get("/problems", async (req, res) => {
 // Long approval queues are an ITSM efficiency risk.
 
 router.get("/approvals", async (req, res) => {
-  const period = Math.min(90, Math.max(7, Number(req.query.period ?? 30) || 30));
-  const since = new Date();
-  since.setDate(since.getDate() - (period - 1));
-  since.setHours(0, 0, 0, 0);
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
   interface ApprovalStatsRow { total: bigint; avgTurnaroundSeconds: number | null; }
 
@@ -585,9 +617,9 @@ router.get("/approvals", async (req, res) => {
         ROUND(AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")))
               FILTER (WHERE "resolvedAt" IS NOT NULL AND status IN ('approved','rejected')))::int
               AS "avgTurnaroundSeconds"
-      FROM approval_request WHERE "createdAt" >= ${since}
+      FROM approval_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
     `,
-    prisma.approvalRequest.groupBy({ by: ["status"], where: { createdAt: { gte: since } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
+    prisma.approvalRequest.groupBy({ by: ["status"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
     prisma.approvalRequest.findMany({
       where: { status: "pending" },
       orderBy: { createdAt: "asc" },
@@ -622,10 +654,7 @@ router.get("/approvals", async (req, res) => {
 // staffing changes.
 
 router.get("/csat-trend", async (req, res) => {
-  const period = Math.min(90, Math.max(7, Number(req.query.period ?? 30) || 30));
-  const since = new Date();
-  since.setDate(since.getDate() - (period - 1));
-  since.setHours(0, 0, 0, 0);
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
   interface TrendRow { day: string; avgRating: number | null; count: bigint; }
 
@@ -635,21 +664,304 @@ router.get("/csat-trend", async (req, res) => {
       ROUND(AVG(rating)::numeric, 2)        AS "avgRating",
       COUNT(*)                              AS count
     FROM csat_rating
-    WHERE "submittedAt" >= ${since}
+    WHERE "submittedAt" >= ${since} AND "submittedAt" <= ${until}
     GROUP BY day ORDER BY day
   `;
 
   const byDay = new Map(rows.map(r => [r.day, { avgRating: r.avgRating, count: Number(r.count) }]));
-
-  const data: { date: string; avgRating: number | null; count: number }[] = [];
-  for (let i = period - 1; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
-    const entry = byDay.get(key);
-    data.push({ date: key, avgRating: entry?.avgRating ?? null, count: entry?.count ?? 0 });
-  }
+  const data = fillDateRange(
+    since, until, byDay as Map<string, { avgRating: number | null; count: number }>,
+    { avgRating: null, count: 0 },
+  ).map(e => ({ date: e.date, avgRating: e.value.avgRating, count: e.value.count }));
 
   res.json({ data });
+});
+
+// ── Channel Breakdown ─────────────────────────────────────────────────────────
+//
+// GET /api/reports/channel-breakdown?from=&to=
+//
+// Donut/pie breakdown of ticket volume by intake channel (email, portal, agent).
+// Uses the `source` field on the ticket table.
+
+router.get("/channel-breakdown", async (req, res) => {
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+
+  interface SourceRow { source: string | null; count: bigint; }
+
+  const rows = await prisma.$queryRaw<SourceRow[]>`
+    SELECT COALESCE(source, 'unknown') AS source, COUNT(*) AS count
+    FROM ticket
+    WHERE status NOT IN ('new', 'processing')
+      AND "createdAt" >= ${since} AND "createdAt" <= ${until}
+    GROUP BY source
+    ORDER BY count DESC
+  `;
+
+  const SOURCE_LABELS: Record<string, string> = {
+    email:   "Email",
+    portal:  "Portal",
+    agent:   "Agent Created",
+    unknown: "Unknown",
+  };
+
+  res.json({
+    data: rows.map(r => ({
+      source: r.source ?? "unknown",
+      label:  SOURCE_LABELS[r.source ?? "unknown"] ?? (r.source ?? "Unknown"),
+      count:  Number(r.count),
+    })),
+  });
+});
+
+// ── Resolution Time Distribution ──────────────────────────────────────────────
+//
+// GET /api/reports/resolution-distribution?from=&to=
+//
+// Histogram of how long resolved tickets took to close, bucketed by time range.
+// Helps identify bottlenecks (e.g., many tickets in the "3–7 days" bucket).
+
+router.get("/resolution-distribution", async (req, res) => {
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+
+  interface BucketRow { bucket: string; count: bigint; sort: bigint; }
+
+  const rows = await prisma.$queryRaw<BucketRow[]>`
+    SELECT
+      CASE
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 3600   THEN '< 1 hour'
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 14400  THEN '1–4 hours'
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 28800  THEN '4–8 hours'
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 86400  THEN '8–24 hours'
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 259200 THEN '1–3 days'
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 604800 THEN '3–7 days'
+        ELSE '> 7 days'
+      END AS bucket,
+      COUNT(*) AS count,
+      CASE
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 3600   THEN 1
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 14400  THEN 2
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 28800  THEN 3
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 86400  THEN 4
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 259200 THEN 5
+        WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 604800 THEN 6
+        ELSE 7
+      END AS sort
+    FROM ticket
+    WHERE "resolvedAt" IS NOT NULL
+      AND status IN ('resolved', 'closed')
+      AND "createdAt" >= ${since} AND "createdAt" <= ${until}
+    GROUP BY bucket, sort
+    ORDER BY sort
+  `;
+
+  res.json({
+    buckets: rows.map(r => ({
+      label: r.bucket,
+      count: Number(r.count),
+      sort:  Number(r.sort),
+    })),
+  });
+});
+
+// ── Agent Leaderboard ─────────────────────────────────────────────────────────
+//
+// GET /api/reports/agent-leaderboard?from=&to=
+//
+// Agents ranked by tickets resolved, plus avg resolution time and SLA compliance.
+// Surfaces top performers and agents who may need support.
+
+router.get("/agent-leaderboard", async (req, res) => {
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+
+  interface LeaderRow {
+    agentId:              string;
+    agentName:            string;
+    resolved:             bigint;
+    avgResolutionSeconds: number | null;
+    slaTotal:             bigint;
+    slaBreached:          bigint;
+  }
+
+  const rows = await prisma.$queryRawUnsafe<LeaderRow[]>(`
+    SELECT
+      t."assignedToId"                                                               AS "agentId",
+      COALESCE(u.name, 'Unknown')                                                    AS "agentName",
+      COUNT(*) FILTER (WHERE t.status IN ('resolved', 'closed'))                    AS resolved,
+      ROUND(AVG(EXTRACT(EPOCH FROM (t."resolvedAt" - t."createdAt")))
+        FILTER (WHERE t."resolvedAt" IS NOT NULL
+                  AND t.status IN ('resolved','closed')))::int                       AS "avgResolutionSeconds",
+      COUNT(*) FILTER (WHERE t."resolutionDueAt" IS NOT NULL)                       AS "slaTotal",
+      COUNT(*) FILTER (WHERE t."slaBreached" = true)                                AS "slaBreached"
+    FROM ticket t
+    JOIN "user" u ON u.id = t."assignedToId"
+    WHERE t.status NOT IN ('new', 'processing')
+      AND t."assignedToId" IS NOT NULL
+      AND t."createdAt" >= $1 AND t."createdAt" <= $2
+    GROUP BY t."assignedToId", u.name
+    ORDER BY resolved DESC, "agentName" ASC
+    LIMIT 10
+  `, since, until);
+
+  res.json({
+    agents: rows.map(r => {
+      const slaTotal   = Number(r.slaTotal);
+      const slaBreached = Number(r.slaBreached);
+      return {
+        agentId:              r.agentId,
+        agentName:            r.agentName,
+        resolved:             Number(r.resolved),
+        avgResolutionSeconds: r.avgResolutionSeconds ?? null,
+        slaCompliancePct:     slaTotal > 0
+          ? Math.round(((slaTotal - slaBreached) / slaTotal) * 100)
+          : null,
+      };
+    }),
+  });
+});
+
+// ── Backlog Trend ─────────────────────────────────────────────────────────────
+//
+// GET /api/reports/backlog-trend?from=&to=
+//
+// Daily count of tickets opened and closed for the period.
+// When opened > closed the backlog is growing; when closed > opened it is shrinking.
+
+router.get("/backlog-trend", async (req, res) => {
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+
+  interface BacklogRow { date: string; opened: bigint; closed: bigint; }
+
+  const rows = await prisma.$queryRaw<BacklogRow[]>`
+    WITH days AS (
+      SELECT generate_series(
+        ${since}::timestamp,
+        ${until}::timestamp,
+        '1 day'::interval
+      )::date AS day
+    ),
+    events AS (
+      SELECT "createdAt"::date  AS day, 1 AS opened, 0 AS closed
+      FROM ticket
+      WHERE status NOT IN ('new','processing')
+        AND "createdAt" >= ${since} AND "createdAt" <= ${until}
+      UNION ALL
+      SELECT "resolvedAt"::date AS day, 0 AS opened, 1 AS closed
+      FROM ticket
+      WHERE "resolvedAt" IS NOT NULL
+        AND status IN ('resolved','closed')
+        AND "resolvedAt" >= ${since} AND "resolvedAt" <= ${until}
+    )
+    SELECT
+      TO_CHAR(d.day, 'YYYY-MM-DD') AS date,
+      COALESCE(SUM(e.opened), 0)::bigint AS opened,
+      COALESCE(SUM(e.closed), 0)::bigint AS closed
+    FROM days d
+    LEFT JOIN events e ON e.day = d.day
+    GROUP BY d.day
+    ORDER BY d.day
+  `;
+
+  res.json({
+    data: rows.map(r => ({
+      date:   r.date,
+      opened: Number(r.opened),
+      closed: Number(r.closed),
+    })),
+  });
+});
+
+// ── First Contact Resolution ──────────────────────────────────────────────────
+//
+// GET /api/reports/fcr?from=&to=
+//
+// FCR = resolved tickets where the customer sent no follow-up reply after
+// the initial ticket (i.e., customer_reply_count = 0).
+// This is the ITIL-aligned definition: resolution on the first interaction.
+
+router.get("/fcr", async (req, res) => {
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+
+  interface FcrRow { total: bigint; firstContact: bigint; }
+
+  const rows = await prisma.$queryRaw<FcrRow[]>`
+    WITH customer_replies AS (
+      SELECT "ticketId",
+        COUNT(*) FILTER (WHERE "senderType" = 'customer') AS customer_reply_count
+      FROM reply
+      GROUP BY "ticketId"
+    )
+    SELECT
+      COUNT(*)                                                                AS total,
+      COUNT(*) FILTER (WHERE COALESCE(cr.customer_reply_count, 0) = 0)      AS "firstContact"
+    FROM ticket t
+    LEFT JOIN customer_replies cr ON cr."ticketId" = t.id
+    WHERE t.status IN ('resolved', 'closed')
+      AND t."createdAt" >= ${since} AND t."createdAt" <= ${until}
+  `;
+
+  const row = rows[0];
+  const total        = Number(row?.total ?? 0);
+  const firstContact = Number(row?.firstContact ?? 0);
+
+  res.json({
+    total,
+    firstContact,
+    multiContact: total - firstContact,
+    rate: total > 0 ? Math.round((firstContact / total) * 100) : null,
+  });
+});
+
+// ── Top Open Tickets ──────────────────────────────────────────────────────────
+//
+// GET /api/reports/top-open-tickets
+//
+// The 10 longest-waiting open tickets — no date filter, always a live snapshot.
+// Useful for spotting tickets that have been overlooked.
+
+router.get("/top-open-tickets", async (_req, res) => {
+  interface OpenTicketRow {
+    id:               number;
+    ticketNumber:     string;
+    subject:          string;
+    priority:         string | null;
+    slaBreached:      boolean;
+    resolutionDueAt:  Date | null;
+    createdAt:        Date;
+    assigneeName:     string;
+  }
+
+  const rows = await prisma.$queryRaw<OpenTicketRow[]>`
+    SELECT
+      t.id,
+      t."ticketNumber",
+      t.subject,
+      t.priority::text                        AS priority,
+      t."slaBreached",
+      t."resolutionDueAt",
+      t."createdAt",
+      COALESCE(u.name, 'Unassigned')          AS "assigneeName"
+    FROM ticket t
+    LEFT JOIN "user" u ON u.id = t."assignedToId"
+    WHERE t.status = 'open'
+    ORDER BY t."createdAt" ASC
+    LIMIT 10
+  `;
+
+  const now = Date.now();
+  res.json({
+    tickets: rows.map(r => ({
+      id:              r.id,
+      ticketNumber:    r.ticketNumber,
+      subject:         r.subject,
+      priority:        r.priority,
+      slaBreached:     r.slaBreached,
+      resolutionDueAt: r.resolutionDueAt?.toISOString() ?? null,
+      createdAt:       r.createdAt.toISOString(),
+      assigneeName:    r.assigneeName,
+      daysOpen:        Math.floor((now - r.createdAt.getTime()) / 86_400_000),
+    })),
+  });
 });
 
 export default router;

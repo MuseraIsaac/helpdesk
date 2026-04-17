@@ -1207,6 +1207,10 @@ export function IntegrationsSection() {
               )} />
             </SettingsField>
 
+            <SettingsField label="From email address" description="The sender address shown in all outbound emails." htmlFor="fromEmail">
+              <Input id="fromEmail" type="email" placeholder="support@example.com" {...register("fromEmail")} />
+            </SettingsField>
+
             {emailProvider === "sendgrid" && (
               <SettingsField label="SendGrid API key" description="Stored securely. Displayed as ••••••••.">
                 <Input type="password" {...register("sendgridApiKey")} autoComplete="off" />
@@ -1231,6 +1235,37 @@ export function IntegrationsSection() {
             )}
           </>
         )}
+      </SettingsGroup>
+
+      <SettingsGroup title="Inbound Email Webhook">
+        <SettingsField
+          label="Webhook secret"
+          description="Secret token that SendGrid (or your inbound email provider) must send in the X-Webhook-Secret header. Stored securely."
+        >
+          <Input type="password" {...register("webhookSecret")} autoComplete="off" placeholder="Set a strong random secret" />
+        </SettingsField>
+      </SettingsGroup>
+
+      <SettingsGroup title="AI (OpenAI)">
+        <SettingsField
+          label="OpenAI API key"
+          description="Used for ticket classification and AI auto-resolution. Stored securely."
+        >
+          <Input type="password" {...register("openaiApiKey")} autoComplete="off" />
+        </SettingsField>
+        <SettingsField label="Model" description="OpenAI model to use for AI features." htmlFor="openaiModel">
+          <Controller name="openaiModel" control={control} render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger className="w-52" id="openaiModel"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="gpt-4o-mini">GPT-4o Mini (recommended)</SelectItem>
+                <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
+                <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
+              </SelectContent>
+            </Select>
+          )} />
+        </SettingsField>
       </SettingsGroup>
 
       <SettingsGroup title="Slack">
@@ -1603,11 +1638,12 @@ export function ChangesSection() {
     useForm<ChangesSettings>({ resolver: zodResolver(changesSettingsSchema) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
   const freezeEnabled = useWatch({ control, name: "freezeWindowEnabled" });
+  const pirEnabled    = useWatch({ control, name: "postImplementationReviewEnabled" });
 
   return (
     <SettingsFormShell
       title="Changes"
-      description="Change types, CAB requirements, risk assessment, and freeze windows."
+      description="Change types, CAB requirements, risk assessment, scheduling rules, and freeze windows."
       onSubmit={handleSubmit((d) => update.mutate(d))}
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
@@ -1631,6 +1667,47 @@ export function ChangesSection() {
         </SettingsSwitchRow>
       </SettingsGroup>
 
+      <SettingsGroup title="Default Values">
+        <SettingsField label="Default change type" description="Pre-select when agents open the new change form." htmlFor="defaultChangeType">
+          <Controller name="defaultChangeType" control={control} render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">Standard</SelectItem>
+                <SelectItem value="normal">Normal</SelectItem>
+                <SelectItem value="emergency">Emergency</SelectItem>
+              </SelectContent>
+            </Select>
+          )} />
+        </SettingsField>
+        <SettingsField label="Default risk" description="Initial risk classification on new change requests." htmlFor="defaultRisk">
+          <Controller name="defaultRisk" control={control} render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="critical">Critical</SelectItem>
+              </SelectContent>
+            </Select>
+          )} />
+        </SettingsField>
+        <SettingsField label="Default priority" description="Initial priority on new change requests." htmlFor="defaultPriority">
+          <Controller name="defaultPriority" control={control} render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="urgent">Urgent</SelectItem>
+              </SelectContent>
+            </Select>
+          )} />
+        </SettingsField>
+      </SettingsGroup>
+
       <SettingsGroup title="CAB Approval">
         <SettingsSwitchRow label="Require CAB for normal changes" description="Normal and major changes must be reviewed by the Change Advisory Board.">
           <Controller name="requireCabForNormal" control={control} render={({ field }) => (
@@ -1649,11 +1726,37 @@ export function ChangesSection() {
         </SettingsSwitchRow>
       </SettingsGroup>
 
+      <SettingsGroup title="Scheduling Rules">
+        <SettingsField label="Normal change lead time (days)" description="Minimum days between submission and planned start. Set 0 to disable." htmlFor="leadTimeDaysNormal">
+          <div className="flex items-center gap-2">
+            <Input id="leadTimeDaysNormal" type="number" min={0} className="w-20" {...register("leadTimeDaysNormal", { valueAsNumber: true })} />
+            <span className="text-xs text-muted-foreground">days</span>
+          </div>
+        </SettingsField>
+        <SettingsField label="Emergency change lead time (days)" description="Usually 0 — allows immediate scheduling." htmlFor="leadTimeDaysEmergency">
+          <div className="flex items-center gap-2">
+            <Input id="leadTimeDaysEmergency" type="number" min={0} className="w-20" {...register("leadTimeDaysEmergency", { valueAsNumber: true })} />
+            <span className="text-xs text-muted-foreground">days</span>
+          </div>
+        </SettingsField>
+        <SettingsField label="Max implementation window (hours)" description="Warn (but don't block) when the planned change window exceeds this." htmlFor="maxImplementationWindowHours">
+          <div className="flex items-center gap-2">
+            <Input id="maxImplementationWindowHours" type="number" min={1} className="w-20" {...register("maxImplementationWindowHours", { valueAsNumber: true })} />
+            <span className="text-xs text-muted-foreground">hours</span>
+          </div>
+        </SettingsField>
+        <SettingsSwitchRow label="Require scheduled window for normal changes" description="Block normal changes from advancing past draft until a planned start and end are set.">
+          <Controller name="requireScheduledWindowForNormal" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
+
       <SettingsGroup title="Risk Matrix">
         <SettingsField label="Require test plan above risk" description="Mandate a test plan for changes with risk scores at or above this level." htmlFor="requireTestPlanAboveRisk">
           <Controller name="requireTestPlanAboveRisk" control={control} render={({ field }) => (
             <Select value={field.value} onValueChange={field.onChange}>
-              <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="low">Low and above</SelectItem>
                 <SelectItem value="medium">Medium and above</SelectItem>
@@ -1676,6 +1779,37 @@ export function ChangesSection() {
         </SettingsField>
       </SettingsGroup>
 
+      <SettingsGroup title="Post-Implementation Review (PIR)">
+        <SettingsSwitchRow label="Enable PIR" description="Require a post-implementation review to be completed after a change closes.">
+          <Controller name="postImplementationReviewEnabled" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        {pirEnabled && (
+          <>
+            <SettingsField label="PIR required above risk" description="Risk level at or above which a PIR is mandatory. 'None' means never required." htmlFor="pirRequiredAboveRisk">
+              <Controller name="pirRequiredAboveRisk" control={control} render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low and above</SelectItem>
+                    <SelectItem value="medium">Medium and above</SelectItem>
+                    <SelectItem value="high">High only</SelectItem>
+                    <SelectItem value="none">Never required</SelectItem>
+                  </SelectContent>
+                </Select>
+              )} />
+            </SettingsField>
+            <SettingsField label="PIR window (days)" description="Days after implementation close within which the review must be completed." htmlFor="pirWindowDays">
+              <div className="flex items-center gap-2">
+                <Input id="pirWindowDays" type="number" min={1} className="w-20" {...register("pirWindowDays", { valueAsNumber: true })} />
+                <span className="text-xs text-muted-foreground">days</span>
+              </div>
+            </SettingsField>
+          </>
+        )}
+      </SettingsGroup>
+
       <SettingsGroup title="Freeze Window">
         <SettingsSwitchRow label="Enable freeze window" description="Normal and major changes are blocked during the freeze window. Emergency changes are still allowed.">
           <Controller name="freezeWindowEnabled" control={control} render={({ field }) => (
@@ -1692,6 +1826,19 @@ export function ChangesSection() {
             </SettingsField>
           </>
         )}
+      </SettingsGroup>
+
+      <SettingsGroup title="Notifications">
+        <SettingsSwitchRow label="Notify coordinator on state change" description="Send an in-app notification to the coordinator group when a change transitions state.">
+          <Controller name="notifyCoordinatorOnStateChange" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow label="Notify assignee on state change" description="Send an in-app notification to the assigned agent when a change transitions state.">
+          <Controller name="notifyAssigneeOnStateChange" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
       </SettingsGroup>
     </SettingsFormShell>
   );

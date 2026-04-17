@@ -27,6 +27,9 @@ import ProblemsPage from "./pages/ProblemsPage";
 import ProblemDetailPage from "./pages/ProblemDetailPage";
 import ProfilePage from "./pages/ProfilePage";
 import SettingsPage from "./pages/SettingsPage";
+import ScenariosPage from "./pages/ScenariosPage";
+import ChangesPage from "./pages/ChangesPage";
+import ChangeDetailPage from "./pages/ChangeDetailPage";
 import PortalLoginPage from "./pages/portal/PortalLoginPage";
 import PortalRegisterPage from "./pages/portal/PortalRegisterPage";
 import PortalTicketsPage from "./pages/portal/PortalTicketsPage";
@@ -88,7 +91,8 @@ function App() {
           <Route path="/incidents/:id" element={<IncidentDetailPage />} />
           <Route path="/problems" element={<ProblemsPage />} />
           <Route path="/problems/:id" element={<ProblemDetailPage />} />
-          <Route path="/changes" element={<PlaceholderPage title="Change Requests" description="Change advisory board and change management is coming soon." />} />
+          <Route path="/changes" element={<ChangesPage />} />
+          <Route path="/changes/:id" element={<ChangeDetailPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/cmdb" element={<CmdbPage />} />
           <Route path="/cmdb/:id" element={<CmdbDetailPage />} />
@@ -110,7 +114,7 @@ function App() {
             <Route path="/teams" element={<TeamsPage />} />
             <Route path="/macros" element={<MacrosPage />} />
             <Route path="/templates" element={<PlaceholderPage title="Templates" description="Response templates will be available here." />} />
-            <Route path="/automations" element={<PlaceholderPage title="Automations" description="Scenario automations and rule management is coming soon." />} />
+            <Route path="/automations" element={<ScenariosPage />} />
             <Route path="/reports" element={<PlaceholderPage title="Reports" description="Advanced reporting and analytics is coming soon." />} />
             <Route path="/catalog/admin" element={<CatalogAdminPage />} />
           </Route>

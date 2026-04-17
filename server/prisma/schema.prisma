@@ -166,6 +166,17 @@ model User {
   notifications         Notification[]      @relation("NotificationRecipient")
   // Organization account management
   accountManagerFor     Organization[]      @relation("OrgAccountManager")
+  // Scenario automations
+  scenariosCreated      ScenarioDefinition[] @relation("ScenarioCreatedBy")
+  scenarioExecutions    ScenarioExecution[]  @relation("ScenarioInvokedBy")
+  // Change Management relations
+  changesAssigned       Change[]             @relation("ChangeAssignee")
+  changesCreated        Change[]             @relation("ChangeCreatedBy")
+  changeTasksAssigned   ChangeTask[]         @relation("ChangeTaskAssignee")
+  changeTasksCompleted  ChangeTask[]         @relation("ChangeTaskCompletedBy")
+  changeEvents          ChangeEvent[]        @relation("ChangeEventActor")
+  changeCiLinks         ChangeCiLink[]       @relation("ChangeCiLinkLinkedBy")
+  changeAttachments     ChangeAttachment[]   @relation("ChangeAttachmentUploader")
 
   @@map("user")
 }
@@ -377,6 +388,14 @@ model Ticket {
   auditEvents         AuditEvent[]
   csatRating          CsatRating?
   ciLinks             TicketCiLink[]
+
+  // Linked ITIL records — populated when ticketType is incident or service_request.
+  // One-to-one: each ticket links to at most one Incident and one ServiceRequest.
+  linkedIncidentId       Int?            @unique @map("linked_incident_id")
+  linkedIncident         Incident?       @relation("TicketLinkedIncident", fields: [linkedIncidentId], references: [id])
+  linkedServiceRequestId Int?            @unique @map("linked_service_request_id")
+  linkedServiceRequest   ServiceRequest? @relation("TicketLinkedServiceRequest", fields: [linkedServiceRequestId], references: [id])
+  scenarioExecutions     ScenarioExecution[]
 
   @@map("ticket")
 }
@@ -678,6 +697,8 @@ model Team {
   configItems      ConfigItem[]
   catalogItems     CatalogItem[]     @relation("CatalogItemFulfillmentTeam")
   members          TeamMember[]
+  changesCoordinated Change[]        @relation("ChangeCoordinatorGroup")
+  teamDashboards DashboardConfig[]   @relation("DashboardVisibilityTeam")
 
   @@map("queue")
 }
@@ -735,16 +756,26 @@ model SystemSetting {
  *   No DB migration needed — the JSON blob is schema-less on the DB side.
  */
 model DashboardConfig {
-  id        Int      @id @default(autoincrement())
-  userId    String?  @map("user_id")
-  name      String
-  isShared  Boolean  @default(false) @map("is_shared")
-  config    Json
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id               Int      @id @default(autoincrement())
+  userId           String?  @map("user_id")
+  name             String
+  description      String?
+  isShared         Boolean  @default(false) @map("is_shared")
+  /// Team-scoped visibility: visible to all members of this team (but not globally)
+  visibilityTeamId Int?     @map("visibility_team_id")
+  /// Source dashboard this was cloned from (informational)
+  sourceId         Int?     @map("source_id")
+  config           Json
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  visibilityTeam   Team?             @relation("DashboardVisibilityTeam", fields: [visibilityTeamId], references: [id], onDelete: SetNull)
+  source           DashboardConfig?  @relation("DashboardCloneSource", fields: [sourceId], references: [id], onDelete: SetNull)
+  clones           DashboardConfig[] @relation("DashboardCloneSource")
 
+  @@index([userId])
+  @@index([visibilityTeamId])
   @@map("dashboard_config")
 }
 
@@ -873,6 +904,8 @@ model Incident {
   events           IncidentEvent[]
   problemLinks     ProblemIncidentLink[]
   ciLinks          IncidentCiLink[]
+  // Back-relation: the source ticket that generated this incident (if any)
+  sourceTicket     Ticket?              @relation("TicketLinkedIncident")
 
   @@index([status])
   @@index([priority])
@@ -1160,6 +1193,75 @@ model WorkflowExecutionStep {
   @@map("workflow_execution_step")
 }
 
+// ── Scenario Automations ───────────────────────────────────────────────────────
+//
+// A ScenarioDefinition is a named, reusable set of actions an agent can
+// manually invoke on a ticket. Unlike WorkflowDefinitions (which run
+// automatically on trigger events), scenarios are intentionally invoked
+// — they have no triggers and no conditions.
+
+/**
+ * ScenarioDefinition — admin-configured action sequence.
+ * actions: WorkflowAction[] serialised as JSON (same union as workflow engine).
+ */
+model ScenarioDefinition {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  color       String?  // hex colour for UI chip, e.g. "#3b82f6"
+  isEnabled   Boolean  @default(true)
+  actions     Json     // WorkflowAction[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+  createdBy   User?    @relation("ScenarioCreatedBy", fields: [createdById], references: [id])
+
+  executions ScenarioExecution[]
+
+  @@index([isEnabled])
+  @@map("scenario_definition")
+}
+
+/**
+ * ScenarioExecution — one record per manual invocation.
+ * invokedById is always set (unlike workflow executions where actorId is null).
+ */
+model ScenarioExecution {
+  id           Int                     @id @default(autoincrement())
+  scenarioId   Int
+  scenario     ScenarioDefinition      @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  ticketId     Int
+  ticket       Ticket                  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  invokedById  String
+  invokedBy    User                    @relation("ScenarioInvokedBy", fields: [invokedById], references: [id])
+  status       WorkflowExecutionStatus @default(running)
+  startedAt    DateTime                @default(now())
+  completedAt  DateTime?
+
+  steps ScenarioExecutionStep[]
+
+  @@index([scenarioId])
+  @@index([ticketId])
+  @@map("scenario_execution")
+}
+
+/**
+ * ScenarioExecutionStep — one record per action within an execution.
+ */
+model ScenarioExecutionStep {
+  id            Int               @id @default(autoincrement())
+  executionId   Int
+  execution     ScenarioExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  actionType    String
+  applied       Boolean           @default(false)
+  skippedReason String?
+  errorMessage  String?
+  createdAt     DateTime          @default(now())
+
+  @@index([executionId])
+  @@map("scenario_execution_step")
+}
+
 // ── Service Request Management ─────────────────────────────────────────────────
 
 /**
@@ -1267,6 +1369,8 @@ model ServiceRequest {
   items  RequestItem[]
   tasks  FulfillmentTask[]
   events RequestEvent[]
+  // Back-relation: the source ticket that generated this service request (if any)
+  sourceTicket Ticket? @relation("TicketLinkedServiceRequest")
 
   @@index([status])
   @@index([priority])
@@ -1457,6 +1561,8 @@ model Problem {
   notes           ProblemNote[]
   events          ProblemEvent[]
   ciLinks         ProblemCiLink[]
+  /// Change requests that were raised to resolve this problem
+  linkedChanges   Change[]             @relation("ChangeProblem")
 
   @@index([status])
   @@index([priority])
@@ -1532,6 +1638,439 @@ model ProblemEvent {
   @@map("problem_event")
 }
 
+// ── Change Management ─────────────────────────────────────────────────────────
+
+/**
+ * ChangeType — the ITIL-defined type of the change request.
+ *
+ *   standard  — pre-approved, low-risk, follows a well-known procedure (e.g. patch)
+ *   normal    — follows the full CAB review and approval cycle
+ *   emergency — bypasses normal scheduling; reviewed by ECAB post-facto or urgently
+ */
+enum ChangeType {
+  standard
+  normal
+  emergency
+}
+
+/**
+ * ChangeModel — the workflow model that governs approvals and tasks.
+ *
+ *   standard_change   — pre-approved model; minimal friction
+ *   normal_change     — full CAB review; multi-stage approval
+ *   emergency_change  — expedited; ECAB approval, post-implementation review required
+ *   major_change      — high-impact; requires executive sign-off and full CAB
+ */
+enum ChangeModel {
+  standard_change
+  normal_change
+  emergency_change
+  major_change
+}
+
+/**
+ * ChangeState — the full ITIL lifecycle for a change request.
+ *
+ *   draft      — being authored; not yet submitted for review
+ *   submitted  — submitted by the requester; awaiting triage / assessment
+ *   assess     — CAB/coordinator is evaluating risk and impact
+ *   authorize  — awaiting formal approval from approvers or CAB
+ *   scheduled  — approved and placed on the change calendar
+ *   implement  — actively being implemented
+ *   review     — post-implementation review (PIR) in progress
+ *   closed     — PIR complete, change formally closed
+ *   cancelled  — abandoned before implementation
+ *   failed     — implementation attempted but unsuccessful; rollback performed
+ */
+enum ChangeState {
+  draft
+  submitted
+  assess
+  authorize
+  scheduled
+  implement
+  review
+  closed
+  cancelled
+  failed
+}
+
+/**
+ * ChangeRisk — overall risk level assessed during the authorize phase.
+ *
+ * Separate from TicketPriority to reflect CAB-assessed risk rather than
+ * business priority. Both fields can coexist on a change.
+ */
+enum ChangeRisk {
+  low
+  medium
+  high
+  critical
+}
+
+/**
+ * ChangePurpose — the primary motivation for the change.
+ *
+ *   improvement    — enhances a service or process
+ *   optimization   — reduces cost, complexity, or resource usage
+ *   remediation    — fixes a known defect or problem (see Problem link)
+ *   compliance     — mandated by legal, regulatory, or audit requirements
+ *   maintenance    — routine upkeep (e.g. certificate renewal, capacity)
+ *   emergency_fix  — unplanned fix to restore service; aligned with emergency type
+ */
+enum ChangePurpose {
+  improvement
+  optimization
+  remediation
+  compliance
+  maintenance
+  emergency_fix
+}
+
+/**
+ * ChangeTaskPhase — when in the change lifecycle a task must execute.
+ *
+ *   pre_implementation  — must be completed before the change window opens
+ *   implementation      — performed during the change window
+ *   post_implementation — performed after the change window to confirm success
+ */
+enum ChangeTaskPhase {
+  pre_implementation
+  implementation
+  post_implementation
+}
+
+/**
+ * ChangeTaskStatus — execution state of a single ChangeTask.
+ */
+enum ChangeTaskStatus {
+  pending
+  in_progress
+  completed
+  skipped
+  failed
+}
+
+/**
+ * ImplementationOutcome — the overall result of a change after implementation.
+ *
+ *   successful        — all objectives met, no issues.
+ *   successful_issues — objectives met but with minor deviations or surprises.
+ *   partial           — change partially delivered; some scope deferred.
+ *   rolled_back       — rollback plan executed; environment restored to pre-change state.
+ *   failed            — implementation failed; rollback may or may not have worked.
+ *   cancelled         — change was withdrawn before implementation began.
+ */
+enum ImplementationOutcome {
+  successful
+  successful_issues @map("successful_issues")
+  partial
+  rolled_back       @map("rolled_back")
+  failed
+  cancelled
+}
+
+/**
+ * Change — the central ITIL Change Management record (@@map: "change_request").
+ *
+ * Design principles:
+ *  - changeNumber: sequential identifier in format CHG-NNNN. Generated via
+ *    the ticket_counter series "change" (same pattern as Problem → PRB-NNNN).
+ *  - changeType + changeModel distinguish HOW the change is processed from
+ *    WHAT kind of change it is conceptually.
+ *  - state: the lifecycle stage. Transitions are enforced in the route layer.
+ *  - risk: assessed by the coordinator/CAB during the assess/authorize phases.
+ *  - priority, impact, urgency: reuse existing TicketPriority, TicketImpact,
+ *    TicketUrgency enums for consistency with incident/ticket modules.
+ *  - changePurpose: the strategic reason for the change (for reporting).
+ *
+ * Categorization:
+ *  - categorizationTier1/2/3: hierarchical service taxonomy (e.g. IT / Network / Firewall).
+ *    Free-text in this phase; future: FK to a ServiceCategory table.
+ *  - serviceCategoryTier2/3: secondary service path for cross-service changes.
+ *  - serviceId / serviceName: snapshot of the primary affected service at submission time.
+ *    serviceId is a FK to CatalogItem (the service catalog entry); serviceName is a
+ *    denormalized snapshot retained if the catalog entry is later deleted.
+ *  - configurationItemId: the primary CI being changed. Additional CIs are tracked
+ *    via ChangeCiLink (many-to-many).
+ *
+ * Staffing:
+ *  - coordinatorGroupId: the Team responsible for shepherding the change through CAB.
+ *  - assignedToId: the individual implementation owner.
+ *  - createdById: the change requester (may be an agent or end-user).
+ *
+ * Planning:
+ *  - plannedStart / plannedEnd: the approved change window.
+ *  - actualStart / actualEnd: recorded when implementation begins and ends.
+ *  - submittedAt / approvedAt / closedAt: key lifecycle timestamps for SLA reporting.
+ *
+ * Rich text fields (all stored as plain text; HTML mirrors via *Html columns):
+ *  - description, justification, workInstructions, serviceImpactAssessment,
+ *    rollbackPlan, riskAssessmentAndMitigation, prechecks, postchecks
+ *
+ * Linked problem:
+ *  - linkedProblemId: optional FK to the Problem that this change resolves.
+ *    Replaces the free-text Problem.linkedChangeRef placeholder for changes
+ *    created through this module.
+ */
+model Change {
+  id           Int         @id @default(autoincrement())
+  /// Unique sequential identifier — format: CHG-NNNN
+  changeNumber String      @unique @map("change_number")
+  title        String
+  description  String?
+  descriptionHtml String?  @map("description_html")
+
+  // ── Classification ────────────────────────────────────────────────────────
+  changeType   ChangeType  @default(normal)   @map("change_type")
+  changeModel  ChangeModel @default(normal_change) @map("change_model")
+  state        ChangeState @default(draft)
+  risk         ChangeRisk  @default(medium)
+  changePurpose ChangePurpose? @map("change_purpose")
+
+  // ── Priority / Impact / Urgency ───────────────────────────────────────────
+  /// Business priority assigned by the change coordinator
+  priority     TicketPriority  @default(medium)
+  /// Scope of impact on users and services
+  impact       TicketImpact    @default(medium)
+  /// How quickly the change must be implemented
+  urgency      TicketUrgency   @default(medium)
+
+  // ── Categorization (hierarchical service taxonomy) ────────────────────────
+  /// Top-level category (e.g. "IT Services", "Infrastructure")
+  categorizationTier1 String? @map("categorization_tier1")
+  /// Mid-level category (e.g. "Network", "Storage", "Application")
+  categorizationTier2 String? @map("categorization_tier2")
+  /// Leaf-level category (e.g. "Firewall Rules", "Database Schema")
+  categorizationTier3 String? @map("categorization_tier3")
+
+  /// Secondary service path tier 2 — for cross-service changes
+  serviceCategoryTier2 String? @map("service_category_tier2")
+  /// Secondary service path tier 3
+  serviceCategoryTier3 String? @map("service_category_tier3")
+
+  // ── Affected service / CI ─────────────────────────────────────────────────
+  /// FK to the primary CatalogItem representing the affected service
+  serviceId    Int?        @map("service_id")
+  service      CatalogItem? @relation("ChangeService", fields: [serviceId], references: [id], onDelete: SetNull)
+  /// Denormalized service name — retained if the catalog item is later deleted
+  serviceName  String?     @map("service_name")
+
+  /// Primary configuration item being changed
+  configurationItemId Int?        @map("configuration_item_id")
+  configurationItem   ConfigItem? @relation("ChangePrimaryCI", fields: [configurationItemId], references: [id], onDelete: SetNull)
+
+  // ── Staffing ─────────────────────────────────────────────────────────────
+  /// Team responsible for change coordination (CAB facilitator)
+  coordinatorGroupId Int?  @map("coordinator_group_id")
+  coordinatorGroup   Team? @relation("ChangeCoordinatorGroup", fields: [coordinatorGroupId], references: [id], onDelete: SetNull)
+
+  /// Individual assigned to implement the change
+  assignedToId String? @map("assigned_to_id")
+  assignedTo   User?   @relation("ChangeAssignee", fields: [assignedToId], references: [id])
+
+  /// Change requester (person who raised the change)
+  createdById String? @map("created_by_id")
+  createdBy   User?   @relation("ChangeCreatedBy", fields: [createdById], references: [id])
+
+  // ── Linked records ────────────────────────────────────────────────────────
+  /// Problem this change is intended to permanently resolve
+  linkedProblemId Int?     @map("linked_problem_id")
+  linkedProblem   Problem? @relation("ChangeProblem", fields: [linkedProblemId], references: [id], onDelete: SetNull)
+
+  // ── Planning window ───────────────────────────────────────────────────────
+  plannedStart DateTime? @map("planned_start")
+  plannedEnd   DateTime? @map("planned_end")
+  actualStart  DateTime? @map("actual_start")
+  actualEnd    DateTime? @map("actual_end")
+
+  // ── Lifecycle timestamps ──────────────────────────────────────────────────
+  submittedAt  DateTime? @map("submitted_at")
+  approvedAt   DateTime? @map("approved_at")
+  closedAt     DateTime? @map("closed_at")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // ── Rich-text content fields ──────────────────────────────────────────────
+  /// Business justification for the change (Markdown / HTML)
+  justification               String?
+  justificationHtml           String? @map("justification_html")
+  /// Step-by-step implementation instructions for the implementer
+  workInstructions            String? @map("work_instructions")
+  workInstructionsHtml        String? @map("work_instructions_html")
+  /// Analysis of service disruption during the change window
+  serviceImpactAssessment     String? @map("service_impact_assessment")
+  serviceImpactAssessmentHtml String? @map("service_impact_assessment_html")
+  /// Steps to restore the previous state if the change fails
+  rollbackPlan                String? @map("rollback_plan")
+  rollbackPlanHtml            String? @map("rollback_plan_html")
+  /// Risk identification and mitigation strategies assessed by CAB
+  riskAssessmentAndMitigation     String? @map("risk_assessment_and_mitigation")
+  riskAssessmentAndMitigationHtml String? @map("risk_assessment_and_mitigation_html")
+  /// Pre-implementation checklist / validation steps (Markdown)
+  prechecks     String?
+  prechecksHtml String? @map("prechecks_html")
+  /// Post-implementation checklist / validation steps (Markdown)
+  postchecks    String?
+  postchecksHtml String? @map("postchecks_html")
+
+  // ── Closure & Post-Implementation Review ──────────────────────────────────
+  /// Overall outcome of the change — set when closing or marking as failed/cancelled.
+  implementationOutcome ImplementationOutcome? @map("implementation_outcome")
+  /// Whether the rollback plan was executed during this change.
+  rollbackUsed    Boolean? @map("rollback_used")
+  /// Free-text closure notes — what happened, how it was resolved.
+  closureNotes    String?  @map("closure_notes")
+  /// Post-implementation review summary (what went well, what didn't).
+  reviewSummary   String?  @map("review_summary")
+  /// Lessons learned and recommended process improvements.
+  lessonsLearned  String?  @map("lessons_learned")
+
+  // ── Relations ─────────────────────────────────────────────────────────────
+  tasks       ChangeTask[]
+  events      ChangeEvent[]
+  ciLinks     ChangeCiLink[]
+  attachments ChangeAttachment[]
+
+  @@index([state])
+  @@index([changeType])
+  @@index([risk])
+  @@index([priority])
+  @@index([assignedToId])
+  @@index([coordinatorGroupId])
+  @@index([linkedProblemId])
+  @@index([configurationItemId])
+  @@index([serviceId])
+  @@index([plannedStart, plannedEnd])
+  @@map("change_request")
+}
+
+/**
+ * ChangeTask — a structured pre/implementation/post check or action.
+ *
+ * Tasks are ordered steps within a phase. Each task must be completed (or
+ * explicitly skipped) before the change can advance to the next phase.
+ * Supports both automated (futureAutomationRef) and manual execution.
+ *
+ *   phase: determines WHEN the task runs relative to the change window.
+ *   position: display order within the phase (0-based).
+ *   assignedToId: optionally delegates a specific task to a team member.
+ */
+model ChangeTask {
+  id          Int               @id @default(autoincrement())
+  changeId    Int               @map("change_id")
+  change      Change            @relation(fields: [changeId], references: [id], onDelete: Cascade)
+
+  phase       ChangeTaskPhase   @default(implementation)
+  /// Display order within the phase
+  position    Int               @default(0)
+  title       String
+  description String?
+  status      ChangeTaskStatus  @default(pending)
+
+  /// Agent assigned to this specific task (inherits change assignee if null)
+  assignedToId String? @map("assigned_to_id")
+  assignedTo   User?   @relation("ChangeTaskAssignee", fields: [assignedToId], references: [id])
+
+  /// Who marked the task completed/skipped
+  completedById String?   @map("completed_by_id")
+  completedBy   User?     @relation("ChangeTaskCompletedBy", fields: [completedById], references: [id])
+  completedAt   DateTime? @map("completed_at")
+
+  /// Optional free-text note recorded when completing or skipping
+  completionNote String? @map("completion_note")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([changeId, phase, position])
+  @@map("change_task")
+}
+
+/**
+ * ChangeEvent — append-only audit trail for every state transition and action.
+ *
+ * Mirrors ProblemEvent / IncidentEvent in structure.
+ * action naming: "change.<verb_past>" — e.g. "change.created", "change.submitted",
+ *   "change.approved", "change.scheduled", "change.implemented", "change.closed",
+ *   "change.cancelled", "change.failed", "change.task_completed".
+ * actorId is nullable: system-generated events (automated transitions) have no actor.
+ */
+model ChangeEvent {
+  id       Int     @id @default(autoincrement())
+  changeId Int     @map("change_id")
+  change   Change  @relation(fields: [changeId], references: [id], onDelete: Cascade)
+  /// Null for automated / system-generated events
+  actorId  String? @map("actor_id")
+  actor    User?   @relation("ChangeEventActor", fields: [actorId], references: [id])
+  /// Dot-namespaced verb, e.g. "change.approved", "change.task_completed"
+  action   String
+  /// Arbitrary metadata: previous state, new state, changed fields, etc.
+  meta     Json    @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@index([changeId, createdAt])
+  @@map("change_event")
+}
+
+/**
+ * ChangeCiLink — many-to-many junction between a Change and affected CIs.
+ *
+ * The primary CI is stored directly on Change.configurationItemId.
+ * Additional affected CIs (e.g. downstream servers, dependent services) are
+ * listed here so the full blast radius can be assessed during CAB review.
+ */
+model ChangeCiLink {
+  id       Int        @id @default(autoincrement())
+  changeId Int        @map("change_id")
+  change   Change     @relation(fields: [changeId], references: [id], onDelete: Cascade)
+  ciId     Int        @map("ci_id")
+  ci       ConfigItem @relation("ChangeCiLinks", fields: [ciId], references: [id], onDelete: Cascade)
+  linkedAt DateTime   @default(now()) @map("linked_at")
+
+  linkedById String? @map("linked_by_id")
+  linkedBy   User?   @relation("ChangeCiLinkLinkedBy", fields: [linkedById], references: [id])
+
+  @@unique([changeId, ciId])
+  @@index([changeId])
+  @@index([ciId])
+  @@map("change_ci_link")
+}
+
+/**
+ * ChangeAttachment — a file uploaded to a change request.
+ *
+ * Mirrors the Attachment model but belongs to Change instead of Ticket.
+ * Kept separate so the ticket attachment access-control rules (including
+ * portal-customer download endpoints) are not affected.
+ *
+ * All uploads go through the same storage layer (saveFile / loadFile / removeFile)
+ * and the same virus-scan hook as ticket attachments.
+ */
+model ChangeAttachment {
+  id              Int             @id @default(autoincrement())
+  filename        String
+  mimeType        String          @map("mime_type")
+  size            Int
+  storageKey      String          @unique @map("storage_key")
+  storageProvider String          @default("local") @map("storage_provider")
+  checksum        String?
+  virusScanStatus VirusScanStatus @default(skipped) @map("virus_scan_status")
+
+  changeId     Int    @map("change_id")
+  change       Change @relation(fields: [changeId], references: [id], onDelete: Cascade)
+
+  uploadedById String? @map("uploaded_by_id")
+  uploadedBy   User?   @relation("ChangeAttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([changeId])
+  @@index([virusScanStatus])
+  @@map("change_attachment")
+}
+
 // ── Service Catalog ────────────────────────────────────────────────────────────
 
 /**
@@ -1605,6 +2144,8 @@ model CatalogItem {
   updatedAt   DateTime @updatedAt
 
   requests ServiceRequest[]
+  /// Change requests that list this catalog item as the primary affected service
+  changes  Change[]         @relation("ChangeService")
 
   @@index([categoryId])
   @@index([isActive])
@@ -1731,6 +2272,8 @@ model ConfigItem {
   ticketLinks   TicketCiLink[]
   incidentLinks IncidentCiLink[]
   problemLinks  ProblemCiLink[]
+  changeLinks   ChangeCiLink[]   @relation("ChangeCiLinks")
+  primaryChanges Change[]        @relation("ChangePrimaryCI")
 
   events CiEvent[]
 

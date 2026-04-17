@@ -75,17 +75,12 @@ export default function NotificationsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
-            <Bell className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold">Notifications</h1>
-            <p className="text-sm text-muted-foreground">
-              {isLoading ? "Loading…" : `${notifications.length} notification${notifications.length !== 1 ? "s" : ""}`}
-            </p>
-          </div>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {isLoading ? "Loading…" : `${notifications.length} notification${notifications.length !== 1 ? "s" : ""}`}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {unreadCount > 0 && (

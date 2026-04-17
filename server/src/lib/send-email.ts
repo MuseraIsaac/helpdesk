@@ -1,6 +1,7 @@
 import sgMail from "@sendgrid/mail";
 import type { PgBoss } from "pg-boss";
 import Sentry from "./sentry";
+import { getSection } from "./settings";
 
 const QUEUE_NAME = "send-email";
 
@@ -33,7 +34,15 @@ export async function registerSendEmailWorker(boss: PgBoss): Promise<void> {
       jobs[0]!.data;
 
     try {
-      sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
+      // Read credentials from settings DB at send time; fall back to env vars
+      const integrations = await getSection("integrations");
+      const apiKey  = integrations.sendgridApiKey  || process.env.SENDGRID_API_KEY  || "";
+      const fromAddr = integrations.fromEmail       || process.env.SENDGRID_FROM_EMAIL || "";
+
+      if (!apiKey)  throw new Error("SendGrid API key not configured");
+      if (!fromAddr) throw new Error("From email address not configured");
+
+      sgMail.setApiKey(apiKey);
 
       // Resolve attachment files from disk just before sending
       type SgAttachment = {
@@ -79,7 +88,7 @@ export async function registerSendEmailWorker(boss: PgBoss): Promise<void> {
 
       await sgMail.send({
         to,
-        from: process.env.SENDGRID_FROM_EMAIL!,
+        from: fromAddr,
         subject,
         text: body,
         ...(bodyHtml && { html: bodyHtml }),

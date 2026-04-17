@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, Link } from "react-router";
+import BackLink from "@/components/BackLink";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import type {
@@ -40,7 +41,6 @@ import {
 import ErrorAlert from "@/components/ErrorAlert";
 import { RequestStatusBadge, RequestPriorityBadge, ApprovalStatusPill } from "./RequestsPage";
 import {
-  ChevronLeft,
   Plus,
   Check,
   X,
@@ -52,6 +52,7 @@ import {
   PackageCheck,
   ClipboardList,
   Activity,
+  Link2,
 } from "lucide-react";
 
 // ── Event label map ───────────────────────────────────────────────────────────
@@ -300,12 +301,12 @@ function TaskList({
                     {task.title}
                   </span>
                   {task.status === "in_progress" && (
-                    <Badge variant="outline" className="text-[10px] text-indigo-600 border-indigo-200">
+                    <Badge variant="outline" className="text-[11px] text-indigo-600 border-indigo-200">
                       In progress
                     </Badge>
                   )}
                   {task.status === "cancelled" && (
-                    <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                    <Badge variant="outline" className="text-[11px] text-muted-foreground">
                       Cancelled
                     </Badge>
                   )}
@@ -486,7 +487,7 @@ function ItemsList({ items }: { items: ServiceRequest["items"] }) {
               </span>
               <Badge
                 variant="outline"
-                className={`text-[10px] ${
+                className={`text-[11px] ${
                   item.status === "fulfilled"
                     ? "text-green-600"
                     : item.status === "cancelled"
@@ -569,13 +570,7 @@ export default function RequestDetailPage() {
     <div className="space-y-6">
       {/* Back link + header */}
       <div>
-        <Link
-          to="/requests"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3 transition-colors"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          Back to Requests
-        </Link>
+        <BackLink to="/requests">Back to Requests</BackLink>
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -809,6 +804,38 @@ export default function RequestDetailPage() {
               <p className="text-sm">{formatDatetime(request.createdAt)}</p>
             </div>
           </div>
+
+          {/* Source Ticket panel */}
+          {request.sourceTicket && (
+            <div className="rounded-md border p-4 space-y-2">
+              <h3 className="font-medium text-sm flex items-center gap-1.5">
+                <Link2 className="h-3.5 w-3.5" />
+                Source Ticket
+              </h3>
+              <Link
+                to={`/tickets/${request.sourceTicket.id}`}
+                className="font-medium text-primary hover:underline block text-sm"
+              >
+                {request.sourceTicket.ticketNumber}
+              </Link>
+              <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
+                {request.sourceTicket.subject}
+              </p>
+              <div className="flex flex-wrap gap-1">
+                <Badge variant="outline" className="text-[11px]">
+                  {request.sourceTicket.status}
+                </Badge>
+                {request.sourceTicket.priority && (
+                  <Badge variant="outline" className="text-[11px]">
+                    {request.sourceTicket.priority}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                From: {request.sourceTicket.senderName}
+              </p>
+            </div>
+          )}
 
           {/* Approval info card */}
           {request.approvalStatus !== "not_required" && (

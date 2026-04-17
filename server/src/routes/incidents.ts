@@ -19,6 +19,7 @@ import {
 import { logIncidentEvent } from "../lib/incident-events";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { notify } from "../lib/notify";
+import { syncIncidentToTicket } from "../lib/ticket-sync";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -86,6 +87,18 @@ const DETAIL_SELECT = {
     select: {
       ci: { select: CI_SUMMARY_SELECT },
       linkedAt: true,
+    },
+  },
+  sourceTicket: {
+    select: {
+      id: true,
+      ticketNumber: true,
+      subject: true,
+      status: true,
+      priority: true,
+      senderName: true,
+      senderEmail: true,
+      createdAt: true,
     },
   },
 } as const;
@@ -406,6 +419,15 @@ router.patch(
     }
 
     await Promise.all(auditTasks);
+
+    // Back-sync relevant changes to the linked source ticket (fire-and-forget)
+    const backSyncChanges: { status?: string; assignedToId?: string | null; teamId?: number | null } = {};
+    if (data.status && data.status !== current.status) backSyncChanges.status = data.status;
+    if ("assignedToId" in data) backSyncChanges.assignedToId = data.assignedToId ?? null;
+    if ("teamId" in data) backSyncChanges.teamId = data.teamId ?? null;
+    if (Object.keys(backSyncChanges).length > 0) {
+      void syncIncidentToTicket(id, backSyncChanges);
+    }
 
     res.json(withIncidentSlaInfo(updated));
   }

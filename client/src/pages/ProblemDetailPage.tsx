@@ -284,7 +284,7 @@ function LinkedIncidentsPanel({
                 </Link>
                 <Badge
                   variant="outline"
-                  className="text-[10px] shrink-0 capitalize"
+                  className="text-[11px] shrink-0 capitalize"
                 >
                   {inc.status.replace("_", " ")}
                 </Badge>
@@ -422,7 +422,7 @@ function NotesPanel({
                 </div>
                 <div className="flex-1 pb-3 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${cls}`}>
+                    <Badge variant="outline" className={`text-[11px] px-1.5 py-0 ${cls}`}>
                       {NOTE_TYPE_LABEL[note.noteType] ?? note.noteType}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
@@ -617,7 +617,7 @@ export default function ProblemDetailPage() {
     <div className="space-y-6">
       {/* Back + Header */}
       <div>
-        <BackLink to="/problems" label="Back to Problems" />
+        <BackLink to="/problems">Back to Problems</BackLink>
         <div className="flex items-start justify-between gap-4 mt-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -702,7 +702,7 @@ export default function ProblemDetailPage() {
                 <Link2 className="h-3.5 w-3.5 mr-1.5" />
                 Incidents
                 {(problem.linkedIncidents?.length ?? 0) > 0 && (
-                  <span className="ml-1 text-[10px] bg-muted rounded-full px-1">
+                  <span className="ml-1 text-[11px] bg-muted rounded-full px-1">
                     {problem.linkedIncidents?.length}
                   </span>
                 )}

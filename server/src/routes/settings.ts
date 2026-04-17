@@ -90,9 +90,11 @@ router.put("/:section", async (req, res) => {
   // Strip redacted placeholders so stored secrets are not overwritten
   if (section === "integrations") {
     const REDACTED = "••••••••";
-    if (incoming.sendgridApiKey === REDACTED) delete incoming.sendgridApiKey;
-    if (incoming.smtpPassword   === REDACTED) delete incoming.smtpPassword;
+    if (incoming.sendgridApiKey  === REDACTED) delete incoming.sendgridApiKey;
+    if (incoming.smtpPassword    === REDACTED) delete incoming.smtpPassword;
     if (incoming.slackWebhookUrl === REDACTED) delete incoming.slackWebhookUrl;
+    if (incoming.webhookSecret   === REDACTED) delete incoming.webhookSecret;
+    if (incoming.openaiApiKey    === REDACTED) delete incoming.openaiApiKey;
   }
 
   // Validate incoming data against the section schema

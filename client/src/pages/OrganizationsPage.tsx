@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/table";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
-import { Building2, ChevronRight, Plus, Search, Users } from "lucide-react";
+import { ChevronRight, Plus, Search, Users } from "lucide-react";
 
 interface OrgRow {
   id: number;
@@ -129,10 +129,7 @@ export default function OrganizationsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Building2 className="h-6 w-6 text-muted-foreground" />
-            Organizations
-          </h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Organizations</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {total} organization{total !== 1 ? "s" : ""}
           </p>

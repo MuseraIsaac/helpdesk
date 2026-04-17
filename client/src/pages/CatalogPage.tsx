@@ -24,7 +24,7 @@ function CatalogItemCard({ item }: { item: CatalogWithItems["items"][number] }) 
         <div className="flex items-center gap-2">
           <span className="font-medium text-sm truncate">{item.name}</span>
           {item.requiresApproval && (
-            <Badge variant="outline" className="text-[10px] shrink-0 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200">
+            <Badge variant="outline" className="text-[11px] shrink-0 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200">
               Approval required
             </Badge>
           )}
@@ -69,18 +69,13 @@ export default function CatalogPage() {
   const totalItems = catalog.reduce((sum, g) => sum + g.items.length, 0);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
-            <ShoppingBag className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold">Service Catalog</h1>
-            <p className="text-sm text-muted-foreground">
-              {isLoading ? "Loading…" : `${totalItems} available service${totalItems !== 1 ? "s" : ""}`}
-            </p>
-          </div>
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Service Catalog</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {isLoading ? "Loading…" : `${totalItems} available service${totalItems !== 1 ? "s" : ""}`}
+          </p>
         </div>
         {isAdmin && (
           <Button variant="outline" size="sm" asChild>
@@ -93,10 +88,10 @@ export default function CatalogPage() {
       </div>
 
       <div className="relative max-w-sm">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
         <Input
           placeholder="Search services…"
-          className="pl-8"
+          className="pl-8 h-8 text-sm"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -120,9 +115,12 @@ export default function CatalogPage() {
       {!isLoading && filtered.length === 0 && (
         <div className="text-center py-16 text-muted-foreground">
           <ShoppingBag className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          <p className="font-medium">
+          <p className="text-sm font-medium">
             {search ? "No services match your search" : "No services available"}
           </p>
+          {search && (
+            <p className="text-xs mt-1">Try adjusting your search term</p>
+          )}
         </div>
       )}
 

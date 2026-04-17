@@ -87,9 +87,11 @@ export function redactSensitive(
   if (section === "integrations") {
     return {
       ...data,
-      sendgridApiKey: data.sendgridApiKey ? "••••••••" : "",
-      smtpPassword:   data.smtpPassword   ? "••••••••" : "",
+      sendgridApiKey:  data.sendgridApiKey  ? "••••••••" : "",
+      smtpPassword:    data.smtpPassword    ? "••••••••" : "",
       slackWebhookUrl: data.slackWebhookUrl ? "••••••••" : "",
+      webhookSecret:   data.webhookSecret   ? "••••••••" : "",
+      openaiApiKey:    data.openaiApiKey    ? "••••••••" : "",
     };
   }
   return data;

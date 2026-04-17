@@ -1,0 +1,42 @@
+/* ── react-grid-layout overrides ───────────────────────────────────────────── */
+
+/* Drag placeholder — shown where the widget will land */
+.react-grid-placeholder {
+  background: hsl(var(--primary) / 0.08);
+  border: 2px dashed hsl(var(--primary) / 0.4);
+  border-radius: 12px;
+  transition: all 150ms ease;
+}
+
+/* Resize handle — bottom-right corner grip */
+.react-resizable-handle {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.rgl-edit-mode .react-resizable-handle {
+  opacity: 1;
+}
+
+.react-resizable-handle::after {
+  border-color: hsl(var(--primary)) !important;
+  border-width: 0 2px 2px 0 !important;
+  width: 8px !important;
+  height: 8px !important;
+  right: 6px !important;
+  bottom: 6px !important;
+  border-radius: 1px;
+}
+
+/* Grid item being dragged */
+.react-grid-item.react-draggable-dragging {
+  z-index: 50;
+  opacity: 0.92;
+  box-shadow: 0 20px 60px -10px hsl(var(--primary) / 0.25);
+}
+
+/* Grid item being resized */
+.react-grid-item.resizing {
+  z-index: 50;
+  opacity: 0.92;
+}

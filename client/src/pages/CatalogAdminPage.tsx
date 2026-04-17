@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
+import BackLink from "@/components/BackLink";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -58,7 +59,6 @@ import {
   Trash2,
   Eye,
   Tag,
-  ArrowLeft,
   Settings,
 } from "lucide-react";
 
@@ -464,19 +464,12 @@ export default function CatalogAdminPage() {
   });
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link to="/catalog" className="text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-          <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
-            <Settings className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold">Manage Service Catalog</h1>
-            <p className="text-sm text-muted-foreground">Create and edit categories and service items</p>
-          </div>
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <BackLink to="/catalog">Back to Catalog</BackLink>
+          <h1 className="text-2xl font-semibold tracking-tight mt-3">Manage Service Catalog</h1>
+          <p className="text-sm text-muted-foreground mt-1">Create and edit categories and service items</p>
         </div>
         <Button variant="outline" size="sm" asChild>
           <Link to="/catalog">

@@ -94,4 +94,15 @@ export interface ServiceRequest {
   items?: RequestItemRecord[];
   tasks?: FulfillmentTask[];
   events?: RequestEvent[];
+  /** Linked source ticket — present in detail response when SR was created from a ticket */
+  sourceTicket?: {
+    id: number;
+    ticketNumber: string;
+    subject: string;
+    status: string;
+    priority: string | null;
+    senderName: string;
+    senderEmail: string;
+    createdAt: string;
+  } | null;
 }

@@ -2,11 +2,12 @@ import fs from "fs";
 import path from "path";
 import type { PgBoss } from "pg-boss";
 import { generateText } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { createOpenAI } from "@ai-sdk/openai";
 import Sentry from "./sentry";
 import prisma from "../db";
 import { sendEmailJob } from "./send-email";
 import { logAudit } from "./audit";
+import { getSection } from "./settings";
 
 const QUEUE_NAME = "auto-resolve-ticket";
 
@@ -41,8 +42,13 @@ export async function registerAutoResolveWorker(boss: PgBoss): Promise<void> {
 
     let response: string;
     try {
+      const integrations = await getSection("integrations");
+      const apiKey = integrations.openaiApiKey || process.env.OPENAI_API_KEY || "";
+      const modelId = integrations.openaiModel || "gpt-4o-mini";
+      const openai = createOpenAI({ apiKey });
+
       const { text } = await generateText({
-        model: openai("gpt-5-nano"),
+        model: openai(modelId),
         system:
           "You are a friendly and professional support agent for Code with Mosh. " +
           "Use ONLY the following knowledge base to answer the customer's question.\n\n" +

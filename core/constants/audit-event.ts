@@ -25,6 +25,8 @@ export const auditActions = [
   // Workflow engine
   "workflow.executed",
   "workflow.failed",
+  // Scenario automations (manually invoked by agents)
+  "scenario.run",
 ] as const;
 
 export type AuditAction = (typeof auditActions)[number];

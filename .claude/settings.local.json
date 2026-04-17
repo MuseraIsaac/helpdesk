@@ -60,7 +60,20 @@
       "Bash(bun prisma *)",
       "Bash(grep -n \"portal\\\\|customer\\\\|Portal\" \"C:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/client/src/pages/\"*)",
       "Bash(node -e ' *)",
-      "Bash(bun -e ' *)"
+      "Bash(bun -e ' *)",
+      "Bash(find \"C:\\\\\\\\Users\\\\\\\\IMusera\\\\\\\\OneDrive - CopyCat Group\\\\\\\\Desktop\\\\\\\\ITSM\\\\\\\\helpdesk\\\\\\\\server\" -type f -name \"*.ts\" -path \"*/routes/*\")",
+      "Bash(find C:\\\\\\\\Users\\\\\\\\IMusera\\\\\\\\OneDrive - CopyCat Group\\\\\\\\Desktop\\\\\\\\ITSM\\\\\\\\helpdesk *)",
+      "Bash(find C:\\\\\\\\Users\\\\\\\\IMusera\\\\\\\\OneDrive - CopyCat Group\\\\\\\\Desktop\\\\\\\\ITSM\\\\\\\\helpdesk\\\\\\\\client *)",
+      "Bash(ls -la \"C:\\\\\\\\Users\\\\\\\\IMusera\\\\\\\\OneDrive - CopyCat Group\\\\\\\\Desktop\\\\\\\\ITSM\\\\\\\\helpdesk\\\\\\\\core\\\\\\\\constants\\\\\\\\\")",
+      "Bash(grep -n \"ticketId.*Incident\\\\|incidentId.*Ticket\\\\|requestId.*Ticket\\\\|ticketId.*ServiceRequest\" \"C:\\\\\\\\Users\\\\\\\\IMusera\\\\\\\\OneDrive - CopyCat Group\\\\\\\\Desktop\\\\\\\\ITSM\\\\\\\\helpdesk\\\\\\\\server\\\\\\\\prisma\\\\\\\\schema.prisma\")",
+      "Bash(bun tsc *)",
+      "Bash(bunx --bun shadcn@latest add popover)",
+      "Bash(echo \"PID=$!\")",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(node *)",
+      "Bash(grep -E \"index|\\\\.mjs$\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
+      "Bash(taskkill //F //IM bun.exe)"
     ]
   }
 }

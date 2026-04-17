@@ -29,7 +29,7 @@ import BackLink from "@/components/BackLink";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
 import {
-  Database, Pencil, Save, X, Plus, Trash2, ArrowRight, ArrowLeft, Activity
+  Pencil, Save, X, Plus, Trash2, ArrowRight, ArrowLeft, Activity
 } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -303,10 +303,7 @@ export default function CmdbDetailPage() {
             <p className="font-mono text-[11px] font-semibold text-muted-foreground">{ci.ciNumber}</p>
             <div className="flex items-start gap-3 flex-wrap">
               <div className="flex-1 min-w-0">
-                <h1 className="text-xl font-semibold flex items-center gap-2">
-                  <Database className="h-5 w-5 shrink-0" />
-                  {ci.name}
-                </h1>
+                <h1 className="text-2xl font-semibold tracking-tight">{ci.name}</h1>
                 <p className="text-sm text-muted-foreground mt-0.5">
                   {CI_TYPE_LABEL[ci.type]} · {CI_ENVIRONMENT_LABEL[ci.environment]}
                 </p>

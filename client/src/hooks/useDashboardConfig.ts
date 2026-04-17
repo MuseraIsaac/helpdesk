@@ -2,10 +2,10 @@
  * useDashboardConfig
  *
  * Loads the user's saved dashboards and exposes the active config.
- * Provides mutations for saving, setting default, and deleting dashboards.
+ * Provides mutations for saving, setting default, deleting, and cloning dashboards.
  *
  * Active config resolution order:
- *   1. Dashboard pointed to by defaultDashboardId (personal or shared)
+ *   1. Dashboard pointed to by defaultDashboardId (personal, team-visible, or shared)
  *   2. SYSTEM_DEFAULT_CONFIG (built-in baseline, never stored in DB)
  */
 import { useMemo } from "react";
@@ -20,15 +20,20 @@ export interface StoredDashboard {
   id: number;
   userId: string | null;
   name: string;
+  description: string | null;
   isShared: boolean;
+  visibilityTeamId: number | null;
+  sourceId: number | null;
   config: DashboardConfigData;
   createdAt: string;
   updatedAt: string;
+  visibilityTeam: { id: number; name: string; color: string } | null;
 }
 
 export interface DashboardsResponse {
   personal: StoredDashboard[];
   shared: StoredDashboard[];
+  teamVisible: StoredDashboard[];
   defaultDashboardId: number | null;
 }
 
@@ -44,7 +49,9 @@ export function useDashboardConfig() {
 
   const allDashboards = useMemo<StoredDashboard[]>(() => {
     if (!data) return [];
-    return [...data.personal, ...data.shared];
+    // Deduplicate: a user's own personal dashboard that also has visibilityTeamId
+    // appears in `personal` only; teamVisible excludes the user's own records.
+    return [...data.personal, ...data.teamVisible, ...data.shared];
   }, [data]);
 
   const activeDashboard = useMemo<StoredDashboard | null>(() => {
@@ -64,34 +71,39 @@ export function useDashboardConfig() {
     mutationFn: async ({
       dashboardId,
       name,
+      description,
       config,
+      isShared,
+      visibilityTeamId,
     }: {
       dashboardId: number | null;
       name: string;
+      description?: string | null;
       config: DashboardConfigData;
+      isShared?: boolean;
+      visibilityTeamId?: number | null;
     }): Promise<StoredDashboard> => {
       if (dashboardId) {
         const { data } = await axios.put<{ dashboard: StoredDashboard }>(
           `/api/dashboards/${dashboardId}`,
-          { name, config },
+          { name, description, config, isShared, visibilityTeamId },
         );
         return data.dashboard;
       }
       // Creating new — always set as default so the user immediately sees it
       const { data } = await axios.post<{ dashboard: StoredDashboard }>(
         "/api/dashboards",
-        { name, config, setAsDefault: true },
+        { name, description, config, setAsDefault: true, isShared: isShared ?? false, visibilityTeamId },
       );
       return data.dashboard;
     },
     onSuccess: invalidate,
   });
 
-  /** Set any accessible dashboard (personal or shared) as the user's active default. */
+  /** Set any accessible dashboard (personal, team, or shared) as the user's active default. */
   const setDefaultDashboard = useMutation({
     mutationFn: async (dashboardId: number | null) => {
       if (dashboardId === null) {
-        // Revert to built-in system default
         await axios.patch("/api/me/preferences", { defaultDashboard: "overview" });
       } else {
         await axios.post(`/api/dashboards/${dashboardId}/set-default`);
@@ -100,7 +112,7 @@ export function useDashboardConfig() {
     onSuccess: invalidate,
   });
 
-  /** Delete a personal dashboard. */
+  /** Delete a personal dashboard (admins can delete any). */
   const deleteDashboard = useMutation({
     mutationFn: async (dashboardId: number) => {
       await axios.delete(`/api/dashboards/${dashboardId}`);
@@ -108,10 +120,30 @@ export function useDashboardConfig() {
     onSuccess: invalidate,
   });
 
+  /** Clone any accessible dashboard into a new personal copy. */
+  const cloneDashboard = useMutation({
+    mutationFn: async ({
+      dashboardId,
+      name,
+      setAsDefault = false,
+    }: {
+      dashboardId: number;
+      name?: string;
+      setAsDefault?: boolean;
+    }): Promise<StoredDashboard> => {
+      const { data } = await axios.post<{ dashboard: StoredDashboard }>(
+        `/api/dashboards/${dashboardId}/clone`,
+        { name, setAsDefault },
+      );
+      return data.dashboard;
+    },
+    onSuccess: invalidate,
+  });
+
   return {
-    /** Full response (personal + shared lists + defaultDashboardId) */
+    /** Full response (personal + teamVisible + shared lists + defaultDashboardId) */
     dashboardList: data ?? null,
-    /** All dashboards the user can access (personal + shared) */
+    /** All dashboards the user can access (personal + team-visible + shared) */
     allDashboards,
     /** The dashboard currently set as their default, or null for system default */
     activeDashboard,
@@ -121,5 +153,6 @@ export function useDashboardConfig() {
     saveDashboard,
     setDefaultDashboard,
     deleteDashboard,
+    cloneDashboard,
   };
 }

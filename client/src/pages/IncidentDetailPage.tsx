@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router";
+import { useParams, Link } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -55,6 +55,7 @@ import {
   Save,
   X,
   GitMerge,
+  Link2,
 } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -151,7 +152,7 @@ function UpdateTimeline({ updates = [], incidentId, status }: UpdateTimelineProp
                 </div>
                 <div className="flex-1 pb-3 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${cls}`}>
+                    <Badge variant="outline" className={`text-[11px] px-1.5 py-0 ${cls}`}>
                       {incidentUpdateTypeLabel[u.updateType] ?? u.updateType}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
@@ -796,6 +797,42 @@ export default function IncidentDetailPage() {
               />
             </CardContent>
           </Card>
+
+          {/* Source Ticket panel */}
+          {incident.sourceTicket && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-[13px] font-medium text-muted-foreground flex items-center gap-1.5">
+                  <Link2 className="h-3.5 w-3.5" />
+                  Source Ticket
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <Link
+                  to={`/tickets/${incident.sourceTicket.id}`}
+                  className="font-medium text-primary hover:underline block"
+                >
+                  {incident.sourceTicket.ticketNumber}
+                </Link>
+                <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
+                  {incident.sourceTicket.subject}
+                </p>
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  <Badge variant="outline" className="text-[11px]">
+                    {incident.sourceTicket.status}
+                  </Badge>
+                  {incident.sourceTicket.priority && (
+                    <Badge variant="outline" className="text-[11px]">
+                      {incident.sourceTicket.priority}
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  From: {incident.sourceTicket.senderName}
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Created info */}
           <div className="text-xs text-muted-foreground space-y-1 px-1">

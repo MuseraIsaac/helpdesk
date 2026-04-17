@@ -14,9 +14,12 @@ import NoteForm from "@/components/NoteForm";
 import TicketSummary from "@/components/TicketSummary";
 import AuditTimeline from "@/components/AuditTimeline";
 import CustomerHistory from "@/components/CustomerHistory";
+import RunScenarioButton from "@/components/RunScenarioButton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { MessageSquare, Lock, ChevronDown, ChevronRight, Star } from "lucide-react";
+import { Link } from "react-router";
+import { Badge } from "@/components/ui/badge";
+import { MessageSquare, Lock, ChevronDown, ChevronRight, Star, Link2 } from "lucide-react";
 
 const CSAT_LABELS: Record<number, string> = {
   1: "Very unhappy",
@@ -136,6 +139,75 @@ export default function TicketDetailPage() {
 
           <div className="space-y-4">
             <UpdateTicket ticket={ticket} />
+
+            {/* Scenario automations — intentionally invoked by agent */}
+            <RunScenarioButton ticketId={ticket.id} />
+
+            {/* Linked Incident panel */}
+            {ticket.linkedIncident && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-[13px] font-medium text-muted-foreground flex items-center gap-1.5">
+                    <Link2 className="h-3.5 w-3.5" />
+                    Linked Incident
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <Link
+                    to={`/incidents/${ticket.linkedIncident.id}`}
+                    className="font-medium text-primary hover:underline block"
+                  >
+                    {ticket.linkedIncident.incidentNumber}
+                  </Link>
+                  <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
+                    {ticket.linkedIncident.title}
+                  </p>
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    <Badge variant="outline" className="text-[11px]">
+                      {ticket.linkedIncident.status.replace(/_/g, " ")}
+                    </Badge>
+                    <Badge variant="outline" className="text-[11px]">
+                      {ticket.linkedIncident.priority.toUpperCase()}
+                    </Badge>
+                    {ticket.linkedIncident.isMajor && (
+                      <Badge variant="destructive" className="text-[11px]">Major</Badge>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Linked Service Request panel */}
+            {ticket.linkedServiceRequest && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-[13px] font-medium text-muted-foreground flex items-center gap-1.5">
+                    <Link2 className="h-3.5 w-3.5" />
+                    Linked Request
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <Link
+                    to={`/requests/${ticket.linkedServiceRequest.id}`}
+                    className="font-medium text-primary hover:underline block"
+                  >
+                    {ticket.linkedServiceRequest.requestNumber}
+                  </Link>
+                  <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
+                    {ticket.linkedServiceRequest.title}
+                  </p>
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    <Badge variant="outline" className="text-[11px]">
+                      {ticket.linkedServiceRequest.status.replace(/_/g, " ")}
+                    </Badge>
+                    <Badge variant="outline" className="text-[11px]">
+                      {ticket.linkedServiceRequest.priority}
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {ticket.csatRating && (
               <Card>
                 <CardHeader className="pb-2">

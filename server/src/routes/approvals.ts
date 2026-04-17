@@ -13,6 +13,7 @@ import {
   decide,
   cancelApproval,
 } from "../lib/approval-engine";
+import { fireApprovalHook } from "../lib/approval-hooks";
 import prisma from "../db";
 
 const router = Router();
@@ -199,11 +200,31 @@ router.post(
     const input = validate(approvalDecisionSchema, req.body, res);
     if (!input) return;
 
+    // Load the subjectType/subjectId before mutating so we can fire the hook
+    const approvalMeta = await prisma.approvalRequest.findUnique({
+      where: { id },
+      select: { subjectType: true, subjectId: true },
+    });
+
     const result = await decide(id, req.user.id, input.decision, input.comment);
 
     if (result.outcome === "error") {
       res.status(422).json({ error: result.message });
       return;
+    }
+
+    // Fire subject-specific hook when the request reaches a final state
+    const finalStatuses = ["approved", "rejected"] as const;
+    if (
+      approvalMeta &&
+      finalStatuses.includes(result.requestStatus as (typeof finalStatuses)[number])
+    ) {
+      void fireApprovalHook(
+        approvalMeta.subjectType,
+        id,
+        approvalMeta.subjectId,
+        result.requestStatus as "approved" | "rejected"
+      );
     }
 
     const updated = await prisma.approvalRequest.findUnique({
@@ -243,10 +264,20 @@ router.post(
       return;
     }
 
+    // Load subjectType/subjectId before mutating for the hook
+    const cancelMeta = await prisma.approvalRequest.findUnique({
+      where: { id },
+      select: { subjectType: true, subjectId: true },
+    });
+
     const result = await cancelApproval(id, req.user.id);
     if (!result.ok) {
       res.status(422).json({ error: result.message });
       return;
+    }
+
+    if (cancelMeta) {
+      void fireApprovalHook(cancelMeta.subjectType, id, cancelMeta.subjectId, "cancelled");
     }
 
     res.json({ ok: true });

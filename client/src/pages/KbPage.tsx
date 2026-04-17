@@ -232,9 +232,9 @@ export default function KbPage() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Knowledge Base</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Knowledge Base</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage help articles and categories</p>
         </div>
         <Button asChild>

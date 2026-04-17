@@ -203,7 +203,9 @@ export type SeriesConfig = z.infer<typeof seriesConfigSchema>;
 export const ticketNumberingSettingsSchema = z.object({
   incident:        seriesConfigSchema.default({ prefix: "INC", paddingLength: 4, startAt: 1,    includeDateSegment: "none", resetPeriod: "never" }),
   service_request: seriesConfigSchema.default({ prefix: "SR",  paddingLength: 4, startAt: 1,    includeDateSegment: "none", resetPeriod: "never" }),
-  change_request:  seriesConfigSchema.default({ prefix: "CHG", paddingLength: 4, startAt: 1,    includeDateSegment: "none", resetPeriod: "never" }),
+  // CRQ prefix + 7-digit padding yields CRQ0000001 … CRQ9999999 (enterprise style).
+  // Admins can override via Settings → Ticket Numbering (e.g. CHG, RFC, CR).
+  change_request:  seriesConfigSchema.default({ prefix: "CRQ", paddingLength: 7, startAt: 1,    includeDateSegment: "none", resetPeriod: "never" }),
   problem:         seriesConfigSchema.default({ prefix: "PRB", paddingLength: 4, startAt: 1,    includeDateSegment: "none", resetPeriod: "never" }),
   generic:         seriesConfigSchema.default({ prefix: "TKT", paddingLength: 6, startAt: 1000, includeDateSegment: "none", resetPeriod: "never" }),
 });
@@ -274,6 +276,7 @@ export const appearanceSettingsSchema = z.object({
 export const integrationsSettingsSchema = z.object({
   emailEnabled:       z.boolean().default(false),
   emailProvider:      z.enum(["sendgrid", "smtp", "ses"]).default("sendgrid"),
+  fromEmail:          z.string().default(""),   // From address for all outbound emails
   sendgridApiKey:     z.string().default(""),   // stored server-side; never exposed to client
   smtpHost:           z.string().default(""),
   smtpPort:           z.number().int().default(587),
@@ -281,7 +284,11 @@ export const integrationsSettingsSchema = z.object({
   smtpPassword:       z.string().default(""),   // stored server-side; never exposed to client
   slackEnabled:       z.boolean().default(false),
   slackWebhookUrl:    z.string().default(""),
-  // Future: Jira, PagerDuty, Zapier webhook
+  // Inbound email webhook
+  webhookSecret:      z.string().default(""),   // stored server-side; never exposed to client
+  // AI / OpenAI
+  openaiApiKey:       z.string().default(""),   // stored server-side; never exposed to client
+  openaiModel:        z.string().default("gpt-4o-mini"),
 });
 
 export const advancedSettingsSchema = z.object({
@@ -354,6 +361,32 @@ export const changesSettingsSchema = z.object({
   requireTestPlanAboveRisk:    z.enum(["low", "medium", "high"]).default("medium"),
   requireRollbackPlan:         z.boolean().default(true),
   autoApproveStandardChanges:  z.boolean().default(true),
+
+  // ── Default field values ─────────────────────────────────────────────────────
+  // Pre-populate new change forms so teams don't have to set the same values each time.
+  defaultChangeType:           z.enum(["standard", "normal", "emergency"]).default("normal"),
+  defaultRisk:                 z.enum(["low", "medium", "high", "critical"]).default("low"),
+  defaultPriority:             z.enum(["low", "medium", "high", "urgent"]).default("medium"),
+
+  // ── Scheduling rules ─────────────────────────────────────────────────────────
+  // Minimum lead time between submission and planned start (0 = no minimum).
+  leadTimeDaysNormal:               z.number().int().min(0).default(3),
+  leadTimeDaysEmergency:            z.number().int().min(0).default(0),
+  // Warn when the planned implementation window exceeds this many hours.
+  maxImplementationWindowHours:     z.number().int().positive().default(8),
+  // Require a planned start/end window before a normal change can advance past draft.
+  requireScheduledWindowForNormal:  z.boolean().default(false),
+
+  // ── Post-implementation review (PIR) ────────────────────────────────────────
+  postImplementationReviewEnabled:  z.boolean().default(true),
+  // Risk level at or above which a PIR is mandatory (none = never required).
+  pirRequiredAboveRisk:             z.enum(["low", "medium", "high", "none"]).default("high"),
+  // Days after implementation close within which the PIR must be completed.
+  pirWindowDays:                    z.number().int().min(1).default(5),
+
+  // ── Notifications ────────────────────────────────────────────────────────────
+  notifyCoordinatorOnStateChange:   z.boolean().default(true),
+  notifyAssigneeOnStateChange:      z.boolean().default(true),
 });
 
 export const approvalsSettingsSchema = z.object({

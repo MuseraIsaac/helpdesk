@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/table";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
-import { Contact, Crown, Building2, ChevronRight, Search, Plus } from "lucide-react";
+import { Crown, Building2, ChevronRight, Search, Plus } from "lucide-react";
 
 interface CustomerRow {
   id: number;
@@ -127,10 +127,7 @@ export default function CustomersPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Contact className="h-6 w-6 text-muted-foreground" />
-            Customers
-          </h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Customers</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {total} contact{total !== 1 ? "s" : ""}
           </p>

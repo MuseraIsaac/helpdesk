@@ -31,61 +31,95 @@
  *  Portal routes use `requireCustomer` instead. For this reason, customers
  *  have an empty permission set here and are not listed in the matrix.
  *
- * ┌────────────────────────────┬───────┬────────────┬───────┬──────────┐
- * │ Permission                 │ admin │ supervisor │ agent │ readonly │
- * ├────────────────────────────┼───────┼────────────┼───────┼──────────┤
- * │ ── Service Desk ─────────────────────────────────────────────────── │
- * │ tickets.view               │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ tickets.create             │   ✓   │     ✓      │   ✓   │          │
- * │ tickets.update             │   ✓   │     ✓      │   ✓   │          │
- * │ notes.view                 │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ notes.create               │   ✓   │     ✓      │   ✓   │          │
- * │ notes.manage_any           │   ✓   │     ✓      │       │          │
- * │ attachments.delete_any     │   ✓   │     ✓      │       │          │
- * │ replies.create             │   ✓   │     ✓      │   ✓   │          │
- * │ macros.view                │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ macros.manage              │   ✓   │            │       │          │
- * │ ── ITSM Modules ─────────────────────────────────────────────────── │
- * │ incidents.view             │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ incidents.manage           │   ✓   │     ✓      │   ✓   │          │
- * │ requests.view              │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ requests.manage            │   ✓   │     ✓      │   ✓   │          │
- * │ problems.view              │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ problems.manage            │   ✓   │     ✓      │       │          │
- * │ changes.view               │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ changes.manage             │   ✓   │     ✓      │       │          │
- * │ changes.approve            │   ✓   │     ✓      │       │          │
- * │ tasks.view                 │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ tasks.manage               │   ✓   │     ✓      │   ✓   │          │
- * │ ── Asset & Configuration ────────────────────────────────────────── │
- * │ cmdb.view                  │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ cmdb.manage                │   ✓   │     ✓      │       │          │
- * │ assets.view                │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ assets.manage              │   ✓   │     ✓      │       │          │
- * │ services.view              │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ services.manage            │   ✓   │     ✓      │       │          │
- * │ ── Catalog & Workflow ───────────────────────────────────────────── │
- * │ catalog.view               │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ catalog.manage             │   ✓   │     ✓      │       │          │
- * │ catalog.request            │   ✓   │     ✓      │   ✓   │          │
- * │ approvals.view             │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ approvals.respond          │   ✓   │     ✓      │   ✓   │          │
- * │ workflows.view             │   ✓   │     ✓      │       │          │
- * │ workflows.manage           │   ✓   │            │       │          │
- * │ ── Platform Administration ──────────────────────────────────────── │
- * │ users.manage               │   ✓   │            │       │          │
- * │ teams.manage               │   ✓   │            │       │          │
- * │ kb.manage                  │   ✓   │     ✓      │       │          │
- * │ integrations.manage        │   ✓   │            │       │          │
- * │ audit.view                 │   ✓   │     ✓      │       │    ✓     │
- * │ reports.view               │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ reports.advanced_view      │   ✓   │     ✓      │       │          │
- * └────────────────────────────┴───────┴────────────┴───────┴──────────┘
+ * ┌──────────────────────────────┬───────┬────────────┬───────┬──────────┐
+ * │ Permission                   │ admin │ supervisor │ agent │ readonly │
+ * ├──────────────────────────────┼───────┼────────────┼───────┼──────────┤
+ * │ ── Dashboards ─────────────────────────────────────────────────────── │
+ * │ dashboard.manage_own         │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ dashboard.manage_shared      │   ✓   │     ✓      │       │          │
+ * │ dashboard.share_to_team      │   ✓   │     ✓      │   ✓   │          │
+ * │ ── Service Desk ───────────────────────────────────────────────────── │
+ * │ tickets.view                 │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ tickets.create               │   ✓   │     ✓      │   ✓   │          │
+ * │ tickets.update               │   ✓   │     ✓      │   ✓   │          │
+ * │ notes.view                   │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ notes.create                 │   ✓   │     ✓      │   ✓   │          │
+ * │ notes.manage_any             │   ✓   │     ✓      │       │          │
+ * │ attachments.delete_any       │   ✓   │     ✓      │       │          │
+ * │ replies.create               │   ✓   │     ✓      │   ✓   │          │
+ * │ macros.view                  │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ macros.manage                │   ✓   │            │       │          │
+ * │ ── ITSM Modules ───────────────────────────────────────────────────── │
+ * │ incidents.view               │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ incidents.manage             │   ✓   │     ✓      │   ✓   │          │
+ * │ requests.view                │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ requests.manage              │   ✓   │     ✓      │   ✓   │          │
+ * │ problems.view                │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ problems.manage              │   ✓   │     ✓      │       │          │
+ * │ ── Change Management ──────────────────────────────────────────────── │
+ * │ changes.view                 │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ changes.create               │   ✓   │     ✓      │   ✓   │          │
+ * │ changes.update               │   ✓   │     ✓      │   ✓   │          │
+ * │ changes.schedule             │   ✓   │     ✓      │       │          │
+ * │ changes.implement            │   ✓   │     ✓      │   ✓   │          │
+ * │ changes.review               │   ✓   │     ✓      │   ✓   │          │
+ * │ changes.close                │   ✓   │     ✓      │       │          │
+ * │ changes.cancel               │   ✓   │     ✓      │       │          │
+ * │ changes.approve              │   ✓   │     ✓      │       │          │
+ * │ changes.manage_conflicts     │   ✓   │     ✓      │       │          │
+ * │ changes.manage               │   ✓   │     ✓      │       │          │
+ * │ tasks.view                   │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ tasks.manage                 │   ✓   │     ✓      │   ✓   │          │
+ * │ ── Asset & Configuration ──────────────────────────────────────────── │
+ * │ cmdb.view                    │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ cmdb.manage                  │   ✓   │     ✓      │       │          │
+ * │ assets.view                  │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ assets.manage                │   ✓   │     ✓      │       │          │
+ * │ services.view                │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ services.manage              │   ✓   │     ✓      │       │          │
+ * │ ── Catalog & Workflow ─────────────────────────────────────────────── │
+ * │ catalog.view                 │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ catalog.manage               │   ✓   │     ✓      │       │          │
+ * │ catalog.request              │   ✓   │     ✓      │   ✓   │          │
+ * │ approvals.view               │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ approvals.respond            │   ✓   │     ✓      │   ✓   │          │
+ * │ workflows.view               │   ✓   │     ✓      │       │          │
+ * │ workflows.manage             │   ✓   │            │       │          │
+ * │ scenarios.run                │   ✓   │     ✓      │   ✓   │          │
+ * │ scenarios.manage             │   ✓   │     ✓      │       │          │
+ * │ ── Platform Administration ────────────────────────────────────────── │
+ * │ users.manage                 │   ✓   │            │       │          │
+ * │ teams.manage                 │   ✓   │            │       │          │
+ * │ kb.manage                    │   ✓   │     ✓      │       │          │
+ * │ integrations.manage          │   ✓   │            │       │          │
+ * │ audit.view                   │   ✓   │     ✓      │       │    ✓     │
+ * │ reports.view                 │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ reports.advanced_view        │   ✓   │     ✓      │       │          │
+ * └──────────────────────────────┴───────┴────────────┴───────┴──────────┘
+ *
+ * Change Management permission semantics
+ * ───────────────────────────────────────
+ *  changes.view              — Read any change record, history, and tasks.
+ *  changes.create            — Draft and submit new change requests.
+ *  changes.update            — Edit fields on a change (draft/assess/authorize phases).
+ *  changes.schedule          — Move an authorized change onto the change calendar.
+ *  changes.implement         — Mark a change as in implementation; update task progress.
+ *  changes.review            — Record PIR outcomes and close review tasks.
+ *  changes.close             — Formally close a change after review.
+ *  changes.cancel            — Cancel a change (any state before implement).
+ *  changes.approve           — CAB / ECAB approval authority (authorize phase).
+ *  changes.manage_conflicts  — Detect and resolve schedule conflicts on the change calendar.
+ *  changes.manage            — Full CRUD authority over any change (admin/supervisor override).
  */
 
 // ── Permission union ───────────────────────────────────────────────────────────
 
 export type Permission =
+  // ── Dashboards ────────────────────────────────────────────────────────────
+  | "dashboard.manage_own"    // Create, edit, delete personal dashboards; set own default
+  | "dashboard.manage_shared" // Publish org-wide shared dashboards (admin / supervisor)
+  | "dashboard.share_to_team" // Share a dashboard to a team the user belongs to
+
   // ── Service Desk ──────────────────────────────────────────────────────────
   | "tickets.view"
   | "tickets.create"
@@ -105,9 +139,22 @@ export type Permission =
   | "requests.manage"
   | "problems.view"
   | "problems.manage"
-  | "changes.view"
-  | "changes.manage"
-  | "changes.approve"
+
+  // ── Change Management ─────────────────────────────────────────────────────
+  // Granular lifecycle permissions allow routes and middleware to enforce
+  // phase-appropriate access without a blanket manage gate.
+  | "changes.view"             // Read any change, tasks, and history
+  | "changes.create"           // Draft and submit new change requests
+  | "changes.update"           // Edit fields during draft/assess/authorize
+  | "changes.schedule"         // Place an authorized change on the change calendar
+  | "changes.implement"        // Advance to implementation; update task progress
+  | "changes.review"           // Record PIR outcomes; close review tasks
+  | "changes.close"            // Formally close after review
+  | "changes.cancel"           // Cancel before implementation begins
+  | "changes.approve"          // CAB / ECAB formal approval authority
+  | "changes.manage_conflicts" // Detect and resolve change-calendar conflicts
+  | "changes.manage"           // Full CRUD override (admin/supervisor; implies all above)
+
   | "tasks.view"
   | "tasks.manage"
 
@@ -131,6 +178,8 @@ export type Permission =
   | "approvals.respond"
   | "workflows.view"
   | "workflows.manage"
+  | "scenarios.run"
+  | "scenarios.manage"
 
   // ── Platform Administration ────────────────────────────────────────────────
   | "users.manage"
@@ -147,6 +196,10 @@ export type Permission =
 // When a new permission is added, decide which roles should have it here.
 
 const ADMIN_PERMISSIONS: Permission[] = [
+  // Dashboards
+  "dashboard.manage_own",
+  "dashboard.manage_shared",
+  "dashboard.share_to_team",
   // Service Desk
   "tickets.view",
   "tickets.create",
@@ -165,9 +218,18 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "requests.manage",
   "problems.view",
   "problems.manage",
+  // Change Management — full lifecycle authority for admin
   "changes.view",
-  "changes.manage",
+  "changes.create",
+  "changes.update",
+  "changes.schedule",
+  "changes.implement",
+  "changes.review",
+  "changes.close",
+  "changes.cancel",
   "changes.approve",
+  "changes.manage_conflicts",
+  "changes.manage",
   "tasks.view",
   "tasks.manage",
   // Asset & Configuration Management
@@ -188,6 +250,8 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "approvals.respond",
   "workflows.view",
   "workflows.manage",
+  "scenarios.run",
+  "scenarios.manage",
   // Platform Administration
   "users.manage",
   "teams.manage",
@@ -204,6 +268,10 @@ const ADMIN_PERMISSIONS: Permission[] = [
  * Cannot manage platform-level configuration (integrations, user accounts, workflows).
  */
 const SUPERVISOR_PERMISSIONS: Permission[] = [
+  // Dashboards
+  "dashboard.manage_own",
+  "dashboard.manage_shared",
+  "dashboard.share_to_team",
   // Service Desk
   "tickets.view",
   "tickets.create",
@@ -221,9 +289,18 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "requests.manage",
   "problems.view",
   "problems.manage",
+  // Change Management — supervisor has full lifecycle + CAB approval authority
   "changes.view",
+  "changes.create",
+  "changes.update",
+  "changes.schedule",         // Supervisor governs the change calendar
+  "changes.implement",
+  "changes.review",
+  "changes.close",
+  "changes.cancel",
+  "changes.approve",          // CAB / change approval authority
+  "changes.manage_conflicts", // Conflict detection across the change calendar
   "changes.manage",
-  "changes.approve",   // CAB / change approval authority
   "tasks.view",
   "tasks.manage",
   // Asset & Configuration Management
@@ -243,6 +320,8 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "approvals.view",
   "approvals.respond",
   "workflows.view",    // Read-only workflow visibility; cannot edit definitions
+  "scenarios.run",
+  "scenarios.manage",
   // Platform Administration
   "kb.manage",
   "audit.view",        // Compliance and audit access
@@ -252,11 +331,19 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
 
 /**
  * Agent — frontline ITSM operator.
- * Can work incidents, service requests, and tasks. View-only access to
- * problems, changes, CMDB, and assets (reference data; agents don't own these).
- * Can respond to approvals directed at them and request from the catalog.
+ * Can work incidents, service requests, and tasks.
+ *
+ * Change Management for agents:
+ *  - Can draft and submit change requests (changes.create / changes.update).
+ *  - Can participate in implementation (changes.implement) and PIR (changes.review)
+ *    when assigned as the implementor or reviewer.
+ *  - Cannot schedule, close, cancel, approve, or manage conflicts — those
+ *    actions require a supervisor or above to preserve governance integrity.
  */
 const AGENT_PERMISSIONS: Permission[] = [
+  // Dashboards
+  "dashboard.manage_own",
+  "dashboard.share_to_team",
   // Service Desk
   "tickets.view",
   "tickets.create",
@@ -271,7 +358,12 @@ const AGENT_PERMISSIONS: Permission[] = [
   "requests.view",
   "requests.manage",   // Agents fulfill service requests
   "problems.view",     // Reference only — problem management is supervisor+
-  "changes.view",      // Reference only — change approval is supervisor+
+  // Change Management — agents can create/implement but not approve/govern
+  "changes.view",
+  "changes.create",    // Draft and submit change requests on behalf of teams
+  "changes.update",    // Edit own drafts during authoring phase
+  "changes.implement", // Update implementation progress when assigned as implementor
+  "changes.review",    // Participate in post-implementation review when assigned
   "tasks.view",
   "tasks.manage",      // Agents own and complete tasks
   // Asset & Configuration Management
@@ -286,6 +378,7 @@ const AGENT_PERMISSIONS: Permission[] = [
   "catalog.request",   // Submit requests on behalf of users
   "approvals.view",
   "approvals.respond", // Respond to approvals directed at the agent
+  "scenarios.run",     // Invoke scenarios on tickets
   // Platform Administration
   "reports.view",
 ];
@@ -296,6 +389,8 @@ const AGENT_PERMISSIONS: Permission[] = [
  * Cannot create, update, manage, approve, or respond to anything.
  */
 const READONLY_PERMISSIONS: Permission[] = [
+  // Dashboards — readonly users can personalise their own view
+  "dashboard.manage_own",
   // Service Desk
   "tickets.view",
   "notes.view",

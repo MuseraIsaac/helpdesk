@@ -53,4 +53,15 @@ export interface Incident extends IncidentSlaInfo {
   updates?: IncidentUpdate[];
   events?: IncidentEvent[];
   ciLinks?: Array<{ ci: CiSummary; linkedAt: string }>;
+  /** Linked source ticket — present in detail response when incident was created from a ticket */
+  sourceTicket?: {
+    id: number;
+    ticketNumber: string;
+    subject: string;
+    status: string;
+    priority: string | null;
+    senderName: string;
+    senderEmail: string;
+    createdAt: string;
+  } | null;
 }

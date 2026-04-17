@@ -16,6 +16,12 @@ import { upsertCustomer } from "../lib/upsert-customer";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { htmlToText } from "../lib/html-to-text";
 import { notify } from "../lib/notify";
+import {
+  createLinkedIncident,
+  createLinkedServiceRequest,
+  syncTicketToIncident,
+  syncTicketToServiceRequest,
+} from "../lib/ticket-sync";
 
 interface TicketStatsRow {
   totalTickets: bigint;
@@ -155,6 +161,13 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
   });
 
   await logAudit(ticket.id, req.user.id, "ticket.created", { via: "agent" });
+
+  // Auto-create linked ITIL record based on ticket type
+  if (ticket.ticketType === "incident") {
+    void createLinkedIncident(ticket.id, req.user.id);
+  } else if (ticket.ticketType === "service_request") {
+    void createLinkedServiceRequest(ticket.id, req.user.id);
+  }
 
   // Run automation rules — may modify category, priority, or assignee
   await runRules(
@@ -340,6 +353,35 @@ router.get("/:id", requireAuth, async (req, res) => {
       csatRating: {
         select: { rating: true, comment: true, submittedAt: true },
       },
+      linkedIncident: {
+        select: {
+          id: true,
+          incidentNumber: true,
+          title: true,
+          status: true,
+          priority: true,
+          isMajor: true,
+          affectedSystem: true,
+          assignedTo: { select: { id: true, name: true } },
+          team: { select: { id: true, name: true, color: true } },
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+      linkedServiceRequest: {
+        select: {
+          id: true,
+          requestNumber: true,
+          title: true,
+          status: true,
+          priority: true,
+          approvalStatus: true,
+          assignedTo: { select: { id: true, name: true } },
+          team: { select: { id: true, name: true, color: true } },
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
     },
   });
 
@@ -384,7 +426,30 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
 
   const ticket = await prisma.ticket.findUnique({
     where: { id },
-    include: { assignedTo: { select: { id: true, name: true } } },
+    select: {
+      id: true,
+      subject: true,
+      body: true,
+      status: true,
+      priority: true,
+      severity: true,
+      impact: true,
+      urgency: true,
+      category: true,
+      ticketType: true,
+      affectedSystem: true,
+      senderName: true,
+      senderEmail: true,
+      customerId: true,
+      assignedToId: true,
+      teamId: true,
+      createdAt: true,
+      resolutionDueAt: true,
+      firstResponseDueAt: true,
+      linkedIncidentId: true,
+      linkedServiceRequestId: true,
+      assignedTo: { select: { id: true, name: true } },
+    },
   });
   if (!ticket) {
     res.status(404).json({ error: "Ticket not found" });
@@ -549,6 +614,37 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
     },
     { trigger: "ticket.updated" }
   );
+
+  // Sync changes to linked ITIL records (fire-and-forget)
+  const syncChanges = {
+    ...("status" in data && { status: data.status }),
+    ...("priority" in data && { priority: data.priority }),
+    ...("severity" in data && { severity: data.severity }),
+    ...("affectedSystem" in data && { affectedSystem: data.affectedSystem }),
+    ...("assignedToId" in data && { assignedToId: data.assignedToId }),
+    ...("teamId" in data && { teamId: data.teamId }),
+  };
+
+  // If ticket type was just set (no existing link), create the linked record
+  if ("ticketType" in data) {
+    const newType = data.ticketType;
+    if (newType === "incident" && !ticket.linkedIncidentId) {
+      void createLinkedIncident(id, req.user.id);
+    } else if (newType === "service_request" && !ticket.linkedServiceRequestId) {
+      void createLinkedServiceRequest(id, req.user.id);
+    } else if (newType === "incident" && ticket.linkedIncidentId) {
+      void syncTicketToIncident(ticket.linkedIncidentId, syncChanges);
+    } else if (newType === "service_request" && ticket.linkedServiceRequestId) {
+      void syncTicketToServiceRequest(ticket.linkedServiceRequestId, syncChanges);
+    }
+  } else {
+    if (ticket.linkedIncidentId && Object.keys(syncChanges).length > 0) {
+      void syncTicketToIncident(ticket.linkedIncidentId, syncChanges);
+    }
+    if (ticket.linkedServiceRequestId && Object.keys(syncChanges).length > 0) {
+      void syncTicketToServiceRequest(ticket.linkedServiceRequestId, syncChanges);
+    }
+  }
 
   // Re-fetch to get fresh escalation + rule-applied state
   const fresh = await prisma.ticket.findUnique({

@@ -70,4 +70,31 @@ export interface Ticket {
     comment: string | null;
     submittedAt: string;
   } | null;
+  /** Linked Incident — present only in GET /api/tickets/:id responses when ticketType is "incident" */
+  linkedIncident?: {
+    id: number;
+    incidentNumber: string;
+    title: string;
+    status: string;
+    priority: string;
+    isMajor: boolean;
+    affectedSystem: string | null;
+    assignedTo: { id: string; name: string } | null;
+    team: { id: number; name: string; color: string } | null;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
+  /** Linked ServiceRequest — present only in GET /api/tickets/:id responses when ticketType is "service_request" */
+  linkedServiceRequest?: {
+    id: number;
+    requestNumber: string;
+    title: string;
+    status: string;
+    priority: string;
+    approvalStatus: string;
+    assignedTo: { id: string; name: string } | null;
+    team: { id: number; name: string; color: string } | null;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
 }
