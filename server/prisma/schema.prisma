@@ -110,6 +110,30 @@ model User {
   preference          UserPreference?
   dashboards          DashboardConfig[]
   savedTicketViews    SavedTicketView[]
+  // Incident management relations
+  incidentsCommanded    Incident[]          @relation("IncidentCommander")
+  incidentsAssigned     Incident[]          @relation("IncidentAssignee")
+  incidentsCreated      Incident[]          @relation("IncidentCreatedBy")
+  incidentUpdates       IncidentUpdate[]    @relation("IncidentUpdateAuthor")
+  incidentEvents        IncidentEvent[]     @relation("IncidentEventActor")
+  // Approval engine relations
+  approvalRequestsMade  ApprovalRequest[]   @relation("ApprovalRequestedBy")
+  approvalStepsAssigned ApprovalStep[]      @relation("ApprovalStepApprover")
+  approvalDecisions     ApprovalDecision[]  @relation("ApprovalDecisionBy")
+  approvalEvents        ApprovalEvent[]     @relation("ApprovalEventActor")
+  // Service Request relations
+  requestsSubmitted     ServiceRequest[]    @relation("RequestSubmittedBy")
+  requestsAssigned      ServiceRequest[]    @relation("RequestAssignee")
+  requestsCreated       ServiceRequest[]    @relation("RequestCreatedBy")
+  fulfillmentTasksAssigned FulfillmentTask[] @relation("FulfillmentTaskAssignee")
+  fulfillmentTasksCreated  FulfillmentTask[] @relation("FulfillmentTaskCreatedBy")
+  requestEvents         RequestEvent[]      @relation("RequestEventActor")
+  // Problem management relations
+  problemsOwned         Problem[]           @relation("ProblemOwner")
+  problemsAssigned      Problem[]           @relation("ProblemAssignee")
+  problemNotes          ProblemNote[]       @relation("ProblemNoteAuthor")
+  problemIncidentLinks  ProblemIncidentLink[] @relation("ProblemLinkLinkedBy")
+  problemEvents         ProblemEvent[]      @relation("ProblemEventActor")
 
   @@map("user")
 }
@@ -188,9 +212,10 @@ model Customer {
   organizationId Int?
   organization   Organization? @relation(fields: [organizationId], references: [id])
   notes          String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  tickets        Ticket[]
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  tickets          Ticket[]
+  serviceRequests  ServiceRequest[]
 
   @@map("customer")
 }
@@ -337,8 +362,9 @@ model Note {
   isPinned         Boolean  @default(false)
   ticketId         Int
   ticket           Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  authorId         String
-  author           User     @relation(fields: [authorId], references: [id])
+  // authorId is nullable to allow system/workflow-generated notes (no human actor)
+  authorId         String?
+  author           User?    @relation(fields: [authorId], references: [id])
   // Future: store @mentioned agent IDs for notification routing
   mentionedUserIds String[] @default([])
   createdAt        DateTime @default(now())
@@ -486,8 +512,12 @@ model Team {
   color       String       @default("#6366f1")
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
-  tickets     Ticket[]
-  members     TeamMember[]
+  tickets          Ticket[]
+  incidents        Incident[]
+  serviceRequests  ServiceRequest[]
+  fulfillmentTasks FulfillmentTask[]
+  problems         Problem[]
+  members          TeamMember[]
 
   @@map("queue")
 }
@@ -583,4 +613,757 @@ model SavedTicketView {
   @@index([userId], map: "saved_ticket_view_user_id_idx")
   @@index([isShared], map: "saved_ticket_view_is_shared_idx")
   @@map("saved_ticket_view")
+}
+
+// ── Incident Management ───────────────────────────────────────────────────────
+
+/**
+ * ITIL priority classification P1 (critical) → P4 (low).
+ * Drives SLA targets and escalation thresholds.
+ */
+enum IncidentPriority {
+  p1
+  p2
+  p3
+  p4
+}
+
+/**
+ * ITIL-aligned incident lifecycle.
+ *
+ * new           → acknowledged  (commander picks it up)
+ * acknowledged  → in_progress   (active investigation underway)
+ * in_progress   → resolved      (root cause mitigated, monitoring phase)
+ * resolved      → closed        (post-incident review complete, ticket closed)
+ *
+ * Any non-closed status can be force-closed by admin.
+ */
+enum IncidentStatus {
+  new
+  acknowledged
+  in_progress
+  resolved
+  closed
+}
+
+enum IncidentUpdateType {
+  /// General status broadcast to stakeholders
+  update
+  /// Temporary fix that reduces impact while root cause is investigated
+  workaround
+  /// Permanent fix applied — precedes resolution status change
+  resolution
+  /// Severity increased; war-room participation required
+  escalation
+  /// Impact cleared; monitoring period begun
+  all_clear
+}
+
+/**
+ * Incident — a first-class ITIL record separate from the ticket system.
+ *
+ * Design principles:
+ *  - No senderName/senderEmail — incidents are internal records, not customer support items.
+ *  - commanderId: the named person responsible for driving resolution (IC role).
+ *  - isMajor: triggers war-room mode; affects stakeholder notifications.
+ *  - affectedUserCount: used for impact scoring and escalation thresholds.
+ *  - SLA: responseDeadline / resolutionDeadline computed from priority at creation,
+ *    using ITIL P1-P4 targets (not the ticket SLA policy).
+ *  - incidentNumber: generated via the ticket_counter table with series "incident"
+ *    so it shares the INC-NNNN namespace with ticket-type=incident.
+ */
+model Incident {
+  id                Int             @id @default(autoincrement())
+  incidentNumber    String          @unique @map("incident_number")
+  title             String
+  description       String?
+  status            IncidentStatus  @default(new)
+  priority          IncidentPriority
+  isMajor           Boolean         @default(false) @map("is_major")
+  affectedSystem    String?         @map("affected_system")
+  affectedUserCount Int?            @map("affected_user_count")
+
+  // Commander — the individual accountable for driving the incident to resolution
+  commanderId  String?  @map("commander_id")
+  commander    User?    @relation("IncidentCommander", fields: [commanderId], references: [id])
+
+  // Primary assignee — the agent actively working the incident
+  assignedToId String?  @map("assigned_to_id")
+  assignedTo   User?    @relation("IncidentAssignee", fields: [assignedToId], references: [id])
+
+  // Routing — which team is handling this incident
+  teamId  Int?   @map("team_id")
+  team    Team?  @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  // SLA tracking
+  responseDeadline  DateTime? @map("response_deadline")
+  resolutionDeadline DateTime? @map("resolution_deadline")
+  acknowledgedAt    DateTime? @map("acknowledged_at")
+  respondedAt       DateTime? @map("responded_at")
+  resolvedAt        DateTime? @map("resolved_at")
+  closedAt          DateTime? @map("closed_at")
+  slaBreached       Boolean   @default(false) @map("sla_breached")
+
+  createdById  String?  @map("created_by_id")
+  createdBy    User?    @relation("IncidentCreatedBy", fields: [createdById], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  updates          IncidentUpdate[]
+  events           IncidentEvent[]
+  problemLinks     ProblemIncidentLink[]
+
+  @@index([status])
+  @@index([priority])
+  @@index([isMajor])
+  @@index([commanderId])
+  @@index([assignedToId])
+  @@map("incident")
+}
+
+/**
+ * IncidentUpdate — a timestamped entry on the incident timeline.
+ *
+ * Used by the incident team to broadcast progress, workarounds, and
+ * resolutions to stakeholders. Rendered in the incident detail timeline.
+ * Intentionally simple — no threading, no replies.
+ */
+model IncidentUpdate {
+  id         Int                @id @default(autoincrement())
+  incidentId Int                @map("incident_id")
+  incident   Incident           @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  updateType IncidentUpdateType @default(update) @map("update_type")
+  body       String
+  authorId   String?            @map("author_id")
+  author     User?              @relation("IncidentUpdateAuthor", fields: [authorId], references: [id])
+  createdAt  DateTime           @default(now())
+
+  @@index([incidentId, createdAt])
+  @@map("incident_update")
+}
+
+/**
+ * IncidentEvent — append-only audit trail for every state transition.
+ *
+ * Separate from ticket AuditEvent (which is ticket-scoped).
+ * action naming: "incident.<verb>" e.g. incident.created, incident.acknowledged.
+ */
+model IncidentEvent {
+  id         Int      @id @default(autoincrement())
+  incidentId Int      @map("incident_id")
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  actorId    String?  @map("actor_id")
+  actor      User?    @relation("IncidentEventActor", fields: [actorId], references: [id])
+  action     String
+  meta       Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([incidentId, createdAt])
+  @@map("incident_event")
+}
+
+// ── Approval Engine ───────────────────────────────────────────────────────────
+
+/**
+ * Overall lifecycle state of an ApprovalRequest.
+ *
+ * pending    — awaiting one or more decisions
+ * approved   — all required approvals received
+ * rejected   — at least one step was rejected (and mode requires all)
+ * cancelled  — explicitly cancelled before completion
+ * expired    — passed expiresAt without a final decision
+ */
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+  cancelled
+  expired
+}
+
+/**
+ * Per-step decision state (mirrors ApprovalStatus minus cancelled/expired).
+ * skipped = step was bypassed (e.g. request cancelled before this step activated)
+ */
+enum ApprovalStepStatus {
+  pending
+  approved
+  rejected
+  skipped
+}
+
+/**
+ * ApprovalRequest — the top-level governed action awaiting sign-off.
+ *
+ * Design principles:
+ *  - subjectType + subjectId make this generic: any future module (changes,
+ *    service requests, access requests, policy exceptions) attaches by setting
+ *    these two fields — no schema change needed.
+ *  - approvalMode controls how steps are evaluated:
+ *      "any"  — first approval from any step resolves the request as approved
+ *      "all"  — every step must approve, in stepOrder sequence
+ *  - requiredCount is used with "any" mode to require N of M approvals.
+ *  - expiresAt is optional; a background job can flip status to "expired".
+ *  - requestedById null = system-initiated approval (e.g. auto-triggered by workflow).
+ */
+model ApprovalRequest {
+  id             Int            @id @default(autoincrement())
+  /// Human-readable subject type: "change_request" | "service_request" | "access_request" | "policy_exception"
+  subjectType    String         @map("subject_type")
+  /// ID of the governed entity in the source table (stored as string for flexibility)
+  subjectId      String         @map("subject_id")
+  title          String
+  description    String?
+  status         ApprovalStatus @default(pending)
+  /// "any" = any one approval suffices | "all" = all steps must approve in order
+  approvalMode   String         @default("all") @map("approval_mode")
+  /// For "any" mode: how many approvals are needed (default 1)
+  requiredCount  Int            @default(1) @map("required_count")
+  requestedById  String?        @map("requested_by_id")
+  requestedBy    User?          @relation("ApprovalRequestedBy", fields: [requestedById], references: [id])
+  expiresAt      DateTime?
+  resolvedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  steps   ApprovalStep[]
+  events  ApprovalEvent[]
+
+  @@index([subjectType, subjectId])
+  @@index([status])
+  @@map("approval_request")
+}
+
+/**
+ * ApprovalStep — one approver assignment within a request.
+ *
+ * Multiple steps at the same stepOrder run in parallel.
+ * Steps at higher stepOrder only activate once all lower-order steps complete.
+ *
+ * approverId must be a valid User.id. Future: extend to team/role via
+ * approverType field ("user" | "team" | "role").
+ */
+model ApprovalStep {
+  id                Int                @id @default(autoincrement())
+  approvalRequestId Int                @map("approval_request_id")
+  approvalRequest   ApprovalRequest    @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
+  stepOrder         Int                @default(1) @map("step_order")
+  approverId        String             @map("approver_id")
+  approver          User               @relation("ApprovalStepApprover", fields: [approverId], references: [id])
+  status            ApprovalStepStatus @default(pending)
+  /// true when this step is currently awaiting the approver's decision
+  isActive          Boolean            @default(false) @map("is_active")
+  dueAt             DateTime?
+  createdAt         DateTime           @default(now())
+
+  decisions ApprovalDecision[]
+
+  @@index([approvalRequestId, stepOrder])
+  @@index([approverId, status])
+  @@map("approval_step")
+}
+
+/**
+ * ApprovalDecision — the recorded vote for a step.
+ *
+ * One decision per step. The decidedById must match the step's approverId
+ * (enforced in the approval engine, not at DB level for flexibility).
+ */
+model ApprovalDecision {
+  id             Int          @id @default(autoincrement())
+  stepId         Int          @unique @map("step_id")
+  step           ApprovalStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  decidedById    String       @map("decided_by_id")
+  decidedBy      User         @relation("ApprovalDecisionBy", fields: [decidedById], references: [id])
+  /// "approved" | "rejected"
+  decision       String
+  comment        String?
+  decidedAt      DateTime     @default(now())
+
+  @@map("approval_decision")
+}
+
+/**
+ * ApprovalEvent — append-only audit trail for every approval action.
+ *
+ * Intentionally separate from AuditEvent (which is ticket-scoped).
+ * action naming: "approval.<verb>" — e.g. approval.created, approval.approved.
+ */
+model ApprovalEvent {
+  id                Int             @id @default(autoincrement())
+  approvalRequestId Int             @map("approval_request_id")
+  approvalRequest   ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
+  actorId           String?         @map("actor_id")
+  actor             User?           @relation("ApprovalEventActor", fields: [actorId], references: [id])
+  action            String
+  meta              Json            @default("{}")
+  createdAt         DateTime        @default(now())
+
+  @@index([approvalRequestId, createdAt])
+  @@map("approval_event")
+}
+
+// ── Workflow Engine ────────────────────────────────────────────────────────────
+
+enum WorkflowExecutionStatus {
+  running
+  completed
+  failed
+  skipped
+}
+
+/**
+ * WorkflowDefinition — a DB-stored automation rule.
+ *
+ * Design principles:
+ *  - triggers / conditions / actions are JSON blobs — same shapes as the
+ *    existing file-based AutomationRule in server/src/lib/automation/types.ts.
+ *    This makes migration from RULES[] straightforward: dump each rule into a row.
+ *  - isEnabled is a soft on/off switch (no delete needed to pause a workflow).
+ *  - migratedFromRuleId links a row to its legacy RULES[] counterpart so the
+ *    bridge period is tracked and the old rule can be removed once confirmed stable.
+ *  - version is a monotonic integer bumped on every edit (optimistic locking hint).
+ *  - createdById / updatedById are nullable — null means seeded or system-generated.
+ */
+model WorkflowDefinition {
+  id                 Int      @id @default(autoincrement())
+  name               String
+  description        String?
+  isEnabled          Boolean  @default(true)  @map("is_enabled")
+  /// JSON array of trigger strings — e.g. ["ticket.created", "ticket.updated"]
+  triggers           Json
+  /// JSON tree of conditions (same Condition union as automation/types.ts)
+  conditions         Json     @default("{}")
+  /// JSON array of actions (WorkflowAction union — superset of Action)
+  actions            Json
+  /// Tracks which legacy RULES[] id was migrated into this row (if any)
+  migratedFromRuleId String?  @map("migrated_from_rule_id")
+  version            Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  createdById        String?
+  updatedById        String?
+
+  executions WorkflowExecution[]
+
+  @@index([isEnabled])
+  @@map("workflow_definition")
+}
+
+/**
+ * WorkflowExecution — one record per workflow run against a specific ticket.
+ *
+ * status:
+ *   running   — execution started but not yet complete (should be short-lived)
+ *   completed — all actions evaluated (some may have been skipped)
+ *   failed    — unhandled error during execution
+ *   skipped   — conditions did not match; no actions were attempted
+ */
+model WorkflowExecution {
+  id                   Int                     @id @default(autoincrement())
+  workflowDefinitionId Int
+  workflowDefinition   WorkflowDefinition      @relation(fields: [workflowDefinitionId], references: [id], onDelete: Cascade)
+  ticketId             Int
+  trigger              String
+  status               WorkflowExecutionStatus @default(running)
+  errorMessage         String?
+  startedAt            DateTime                @default(now())
+  completedAt          DateTime?
+
+  steps WorkflowExecutionStep[]
+
+  @@index([workflowDefinitionId])
+  @@index([ticketId])
+  @@map("workflow_execution")
+}
+
+/**
+ * WorkflowExecutionStep — one record per action within a workflow execution.
+ *
+ * applied:      true when the action made a real DB change.
+ * skippedReason: non-null when applied=false and the action was intentionally no-op'd
+ *                (e.g. "already_assigned", "field_unchanged").
+ * errorMessage: non-null when the action threw an unexpected error.
+ */
+model WorkflowExecutionStep {
+  id                  Int               @id @default(autoincrement())
+  workflowExecutionId Int
+  workflowExecution   WorkflowExecution @relation(fields: [workflowExecutionId], references: [id], onDelete: Cascade)
+  actionType          String
+  applied             Boolean           @default(false)
+  skippedReason       String?
+  errorMessage        String?
+  createdAt           DateTime          @default(now())
+
+  @@index([workflowExecutionId])
+  @@map("workflow_execution_step")
+}
+
+// ── Service Request Management ─────────────────────────────────────────────────
+
+/**
+ * RequestStatus enum — mirrors core/constants/request-status.ts.
+ *
+ * draft            — saved but not yet submitted
+ * submitted        — requester submitted; awaiting triage
+ * pending_approval — approval workflow in progress
+ * approved         — approval passed or not required; ready to fulfill
+ * in_fulfillment   — fulfillment tasks are being worked
+ * fulfilled        — all tasks complete; awaiting formal close
+ * closed           — terminal: post-fulfillment sign-off done
+ * rejected         — terminal: approval rejected or admin declined
+ * cancelled        — terminal: withdrawn before completion
+ */
+enum RequestStatus {
+  draft
+  submitted
+  pending_approval
+  approved
+  in_fulfillment
+  fulfilled
+  closed
+  rejected
+  cancelled
+}
+
+/**
+ * FulfillmentTaskStatus enum — mirrors core/constants/fulfillment-task-status.ts.
+ */
+enum FulfillmentTaskStatus {
+  pending
+  in_progress
+  completed
+  cancelled
+}
+
+/**
+ * ServiceRequest — a first-class ITSM service request record.
+ *
+ * Design principles:
+ *  - Separate from Ticket: no senderName/senderEmail email-threading;
+ *    requests are always created deliberately (agent or portal).
+ *  - Dual requester model: requesterId (agent/staff) XOR requesterCustomerId (portal customer).
+ *    requesterName / requesterEmail are denormalized for fast list rendering.
+ *  - formData stores submitted variables as a JSON bag so catalog items can
+ *    inject their own fields without schema changes.
+ *  - catalogItemId is a nullable FK placeholder — wired to CatalogItem once that module
+ *    is built. catalogItemName is a snapshot so the display survives catalog edits.
+ *  - approvalRequestId links to the ApprovalRequest created when requiresApproval=true.
+ *  - slaDueAt / slaBreached are SLA placeholders — a real OLA/SLA policy engine
+ *    will populate these; they are stored now so the column exists when needed.
+ *  - requestNumber is generated via ticket_counter series "request" → REQ-NNNN format.
+ */
+model ServiceRequest {
+  id            Int           @id @default(autoincrement())
+  requestNumber String        @unique @map("request_number")
+  title         String
+  description   String?
+  status        RequestStatus @default(submitted)
+  priority      TicketPriority @default(medium)
+
+  // Approval integration
+  approvalStatus    String    @default("not_required") @map("approval_status")
+  approvalRequestId Int?      @map("approval_request_id")
+
+  // Requester — exactly one of these is set (agent or customer)
+  requesterId         String?   @map("requester_id")
+  requester           User?     @relation("RequestSubmittedBy", fields: [requesterId], references: [id])
+  requesterCustomerId Int?      @map("requester_customer_id")
+  requesterCustomer   Customer? @relation(fields: [requesterCustomerId], references: [id])
+  /// Denormalized for fast list rendering — always set at creation.
+  requesterName  String        @map("requester_name")
+  requesterEmail String        @map("requester_email")
+
+  // Fulfillment assignment
+  assignedToId String? @map("assigned_to_id")
+  assignedTo   User?   @relation("RequestAssignee", fields: [assignedToId], references: [id])
+  teamId       Int?    @map("team_id")
+  team         Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  // Catalog item snapshot (FK placeholder — CatalogItem table to be added later)
+  catalogItemId   Int?    @map("catalog_item_id")
+  catalogItemName String? @map("catalog_item_name")
+
+  // Submitted form variables
+  formData Json @default("{}") @map("form_data")
+
+  // SLA placeholder — populated by OLA/SLA engine when configured
+  dueDate    DateTime? @map("due_date")
+  slaDueAt   DateTime? @map("sla_due_at")
+  slaBreached Boolean  @default(false) @map("sla_breached")
+
+  // Lifecycle timestamps
+  resolvedAt  DateTime? @map("resolved_at")
+  closedAt    DateTime? @map("closed_at")
+  cancelledAt DateTime? @map("cancelled_at")
+
+  createdById String?   @map("created_by_id")
+  createdBy   User?     @relation("RequestCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  items  RequestItem[]
+  tasks  FulfillmentTask[]
+  events RequestEvent[]
+
+  @@index([status])
+  @@index([priority])
+  @@index([requesterId])
+  @@index([requesterCustomerId])
+  @@index([assignedToId])
+  @@index([teamId])
+  @@map("service_request")
+}
+
+/**
+ * RequestItem — one line-item within a ServiceRequest.
+ *
+ * A request may contain multiple items (e.g. "2× MacBook Pro" + "Docking Station").
+ * Each item can track its own fulfillment status independently.
+ * catalogItemId is a nullable FK placeholder for the future catalog module.
+ */
+model RequestItem {
+  id            Int            @id @default(autoincrement())
+  requestId     Int            @map("request_id")
+  request       ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  name          String
+  description   String?
+  quantity      Int            @default(1)
+  unit          String?
+  /// Per-item form data (catalog-item-specific fields)
+  formData      Json           @default("{}") @map("form_data")
+  /// FK placeholder — wired to CatalogItem table once that module is built
+  catalogItemId Int?           @map("catalog_item_id")
+  status        FulfillmentTaskStatus @default(pending)
+  fulfilledAt   DateTime?      @map("fulfilled_at")
+  createdAt     DateTime       @default(now())
+
+  @@index([requestId])
+  @@map("request_item")
+}
+
+/**
+ * FulfillmentTask — an actionable work item scoped to a ServiceRequest.
+ *
+ * Tasks represent discrete steps required to fulfill the request
+ * (e.g. "Provision laptop", "Create AD account", "Ship hardware").
+ * They are ordered by `position` for display in the task checklist.
+ */
+model FulfillmentTask {
+  id          Int                   @id @default(autoincrement())
+  requestId   Int                   @map("request_id")
+  request     ServiceRequest        @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  status      FulfillmentTaskStatus @default(pending)
+  position    Int                   @default(0)
+
+  assignedToId String? @map("assigned_to_id")
+  assignedTo   User?   @relation("FulfillmentTaskAssignee", fields: [assignedToId], references: [id])
+  teamId       Int?    @map("team_id")
+  team         Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  dueAt       DateTime? @map("due_at")
+  completedAt DateTime? @map("completed_at")
+
+  createdById String?   @map("created_by_id")
+  createdBy   User?     @relation("FulfillmentTaskCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([requestId, position])
+  @@index([assignedToId, status])
+  @@map("fulfillment_task")
+}
+
+/**
+ * RequestEvent — append-only audit trail for every state transition and action
+ * on a ServiceRequest.
+ *
+ * Separate from AuditEvent (which is ticket-scoped).
+ * action naming convention: "request.<verb>" — e.g. "request.created", "request.approved".
+ */
+model RequestEvent {
+  id        Int            @id @default(autoincrement())
+  requestId Int            @map("request_id")
+  request   ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actorId   String?        @map("actor_id")
+  actor     User?          @relation("RequestEventActor", fields: [actorId], references: [id])
+  action    String
+  meta      Json           @default("{}")
+  createdAt DateTime       @default(now())
+
+  @@index([requestId, createdAt])
+  @@map("request_event")
+}
+
+// ── Problem Management ─────────────────────────────────────────────────────────
+
+/**
+ * ProblemStatus enum — mirrors core/constants/problem-status.ts.
+ *
+ * ITIL-aligned lifecycle:
+ *   new → under_investigation → root_cause_identified → known_error → change_required → resolved → closed
+ */
+enum ProblemStatus {
+  new
+  under_investigation
+  root_cause_identified
+  known_error
+  change_required
+  resolved
+  closed
+}
+
+/**
+ * ProblemNoteType — classifies investigation notes for KEDB filtering.
+ *
+ *   investigation — general investigation notes and hypotheses
+ *   rca           — formal root cause analysis writeup
+ *   workaround    — documented workaround steps
+ *   general       — miscellaneous note
+ */
+enum ProblemNoteType {
+  investigation
+  rca
+  workaround
+  general
+}
+
+/**
+ * Problem — a first-class ITIL record representing recurring or systemic issues.
+ *
+ * Design principles:
+ *  - Separate from Ticket and Incident: problems are investigative records, not
+ *    reactive support items. They track root cause analysis over days/weeks.
+ *  - isKnownError: set true when status reaches known_error or later, signalling
+ *    the problem is entered in the Known Error Database (KEDB).
+ *  - rootCause / workaround: long-form Markdown text fields.
+ *  - affectedService: free-text placeholder. Future: FK to a CMDB ServiceCI table.
+ *  - linkedChangeRef: change request number / URL. Future: FK to Change model.
+ *  - ownerId: the problem manager accountable for driving the investigation.
+ *  - assignedToId: the analyst actively doing the investigation.
+ *  - problemNumber: generated via ticket_counter series "problem" → PRB-NNNN format.
+ *
+ * Recurring incident clustering (future-ready):
+ *  - Linked incidents are stored in ProblemIncidentLink.
+ *  - A background job can compute cluster metadata (common affected system,
+ *    recurrence count, MTTR) and store it on the Problem record in the future.
+ *  - The API computes a lightweight clusterHint at query time from linked incidents.
+ */
+model Problem {
+  id            Int           @id @default(autoincrement())
+  problemNumber String        @unique @map("problem_number")
+  title         String
+  description   String?
+  status        ProblemStatus @default(new)
+  priority      TicketPriority @default(medium)
+
+  /// True when root cause is identified and entered into KEDB (known_error status or later)
+  isKnownError  Boolean @default(false) @map("is_known_error")
+
+  /// Root cause analysis narrative (Markdown)
+  rootCause     String? @map("root_cause")
+  /// Documented workaround for impacted services and linked incidents (Markdown)
+  workaround    String?
+
+  /// Affected service or CI name. Free-text; FK to CMDB ServiceCI in a future phase.
+  affectedService String? @map("affected_service")
+
+  /// Reference to the change request that will permanently fix this problem.
+  /// Stored as a string (e.g. "CHG-0042") until the Change module has a FK.
+  linkedChangeRef String? @map("linked_change_ref")
+
+  /// Problem Manager — accountable for the investigation lifecycle
+  ownerId  String? @map("owner_id")
+  owner    User?   @relation("ProblemOwner", fields: [ownerId], references: [id])
+
+  /// Primary analyst actively investigating
+  assignedToId String? @map("assigned_to_id")
+  assignedTo   User?   @relation("ProblemAssignee", fields: [assignedToId], references: [id])
+
+  /// Responsible team
+  teamId Int?  @map("team_id")
+  team   Team? @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  resolvedAt DateTime? @map("resolved_at")
+  closedAt   DateTime? @map("closed_at")
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  linkedIncidents ProblemIncidentLink[]
+  notes           ProblemNote[]
+  events          ProblemEvent[]
+
+  @@index([status])
+  @@index([priority])
+  @@index([isKnownError])
+  @@index([ownerId])
+  @@index([assignedToId])
+  @@map("problem")
+}
+
+/**
+ * ProblemIncidentLink — junction table linking problems to related incidents.
+ *
+ * An incident can be linked to multiple problems (rare but valid in ITIL).
+ * A problem aggregates one or more incidents that share a root cause.
+ * linkedAt / linkedById provide an audit trail for the association.
+ */
+model ProblemIncidentLink {
+  id         Int      @id @default(autoincrement())
+  problemId  Int      @map("problem_id")
+  problem    Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  incidentId Int      @map("incident_id")
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  linkedAt   DateTime @default(now()) @map("linked_at")
+  linkedById String?  @map("linked_by_id")
+  linkedBy   User?    @relation("ProblemLinkLinkedBy", fields: [linkedById], references: [id])
+
+  @@unique([problemId, incidentId])
+  @@index([problemId])
+  @@index([incidentId])
+  @@map("problem_incident_link")
+}
+
+/**
+ * ProblemNote — a typed investigation note on a Problem.
+ *
+ * Separate from the main description so that RCA writeups, workarounds,
+ * and investigation logs can be tracked and filtered independently.
+ * Supports the Known Error Database (KEDB) export pattern.
+ */
+model ProblemNote {
+  id        Int             @id @default(autoincrement())
+  problemId Int             @map("problem_id")
+  problem   Problem         @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  noteType  ProblemNoteType @default(general) @map("note_type")
+  body      String
+  authorId  String?         @map("author_id")
+  author    User?           @relation("ProblemNoteAuthor", fields: [authorId], references: [id])
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([problemId, noteType])
+  @@map("problem_note")
+}
+
+/**
+ * ProblemEvent — append-only audit trail for every state transition and action.
+ *
+ * Intentionally separate from AuditEvent (ticket-scoped) and IncidentEvent.
+ * action naming: "problem.<verb>" — e.g. "problem.created", "problem.status_changed".
+ */
+model ProblemEvent {
+  id        Int      @id @default(autoincrement())
+  problemId Int      @map("problem_id")
+  problem   Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  actorId   String?  @map("actor_id")
+  actor     User?    @relation("ProblemEventActor", fields: [actorId], references: [id])
+  action    String
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([problemId, createdAt])
+  @@map("problem_event")
 }

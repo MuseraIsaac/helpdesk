@@ -1,22 +1,17 @@
-import { useMemo } from "react";
-import { marked } from "marked";
-import DOMPurify from "dompurify";
+/**
+ * MarkdownRenderer — thin wrapper around RichTextRenderer.
+ *
+ * Kept for backward compatibility with any existing callers.
+ * RichTextRenderer auto-detects HTML vs Markdown, so both old articles
+ * (stored as Markdown) and new articles (stored as HTML) render correctly.
+ */
+import RichTextRenderer from "@/components/RichTextRenderer";
 
 interface Props {
   content: string;
   className?: string;
 }
 
-export default function MarkdownRenderer({ content, className = "" }: Props) {
-  const html = useMemo(() => {
-    const raw = marked.parse(content, { async: false }) as string;
-    return DOMPurify.sanitize(raw);
-  }, [content]);
-
-  return (
-    <div
-      className={`prose prose-sm max-w-none text-foreground ${className}`}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
+export default function MarkdownRenderer({ content, className }: Props) {
+  return <RichTextRenderer content={content} className={className} />;
 }

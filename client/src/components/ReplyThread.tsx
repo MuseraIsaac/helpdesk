@@ -1,5 +1,5 @@
-import DOMPurify from "dompurify";
 import { useQuery } from "@tanstack/react-query";
+import RichTextRenderer from "@/components/RichTextRenderer";
 import axios from "axios";
 import { type Ticket } from "core/constants/ticket.ts";
 import { type SenderType, senderTypeLabel } from "core/constants/sender-type.ts";
@@ -90,17 +90,7 @@ export default function ReplyThread({ ticket }: ReplyThreadProps) {
               </div>
             </CardHeader>
             <CardContent>
-              {reply.bodyHtml ? (
-                <div
-                  dangerouslySetInnerHTML={{
-                    __html: DOMPurify.sanitize(reply.bodyHtml),
-                  }}
-                />
-              ) : (
-                <p className="whitespace-pre-line leading-relaxed">
-                  {reply.body}
-                </p>
-              )}
+              <RichTextRenderer content={reply.bodyHtml ?? reply.body} />
             </CardContent>
           </Card>
         );

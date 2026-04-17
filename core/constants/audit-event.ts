@@ -22,6 +22,9 @@ export const auditActions = [
   "note.created",
   // Automation
   "rule.applied",
+  // Workflow engine
+  "workflow.executed",
+  "workflow.failed",
 ] as const;
 
 export type AuditAction = (typeof auditActions)[number];

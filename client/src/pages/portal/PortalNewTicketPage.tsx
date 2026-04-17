@@ -1,3 +1,4 @@
+import { useState, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,15 +18,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
 import BackLink from "@/components/BackLink";
 import ArticleSuggestions from "@/components/ArticleSuggestions";
+import RichTextEditor from "@/components/RichTextEditor";
 
 export default function PortalNewTicketPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  const [bodyHtml, setBodyHtml] = useState("");
+  const [bodyText, setBodyText] = useState("");
 
   const {
     register,
@@ -34,17 +38,22 @@ export default function PortalNewTicketPage() {
     formState: { errors },
   } = useForm<PortalCreateTicketInput>({
     resolver: zodResolver(portalCreateTicketSchema),
+    defaultValues: { body: " " }, // satisfy schema min(1) — actual value comes from editor
   });
 
+  const handleBodyChange = useCallback((html: string, text: string) => {
+    setBodyHtml(html);
+    setBodyText(text);
+  }, []);
+
   const subject = watch("subject") ?? "";
-  const body = watch("body") ?? "";
-  const suggestionQuery = `${subject} ${body}`.trim();
+  const suggestionQuery = `${subject} ${bodyText}`.trim();
 
   const mutation = useMutation({
     mutationFn: async (data: PortalCreateTicketInput) => {
       const { data: res } = await axios.post<{ ticket: { id: number } }>(
         "/api/portal/tickets",
-        data
+        { ...data, body: bodyText, bodyHtml }
       );
       return res.ticket;
     },
@@ -53,6 +62,8 @@ export default function PortalNewTicketPage() {
       navigate(`/portal/tickets/${ticket.id}`, { replace: true });
     },
   });
+
+  const canSubmit = bodyText.trim().length > 0 && !mutation.isPending;
 
   return (
     <div className="space-y-6 max-w-[640px]">
@@ -91,17 +102,19 @@ export default function PortalNewTicketPage() {
               )}
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="body">Description</Label>
-              <Textarea
-                id="body"
-                placeholder="Please describe your issue in as much detail as possible..."
-                rows={6}
-                {...register("body")}
+              <Label>Description</Label>
+              <RichTextEditor
+                content={bodyHtml}
+                onChange={handleBodyChange}
+                placeholder="Please describe your issue in as much detail as possible…"
+                minHeight="140px"
               />
-              {errors.body && <ErrorMessage message={errors.body.message} />}
+              {!bodyText.trim() && mutation.isError && (
+                <p className="text-sm text-destructive">Description is required</p>
+              )}
             </div>
-            <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? "Submitting..." : "Submit ticket"}
+            <Button type="submit" disabled={!canSubmit}>
+              {mutation.isPending ? "Submitting…" : "Submit ticket"}
             </Button>
           </form>
         </CardContent>

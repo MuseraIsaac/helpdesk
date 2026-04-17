@@ -1,29 +1,18 @@
 import { useState } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router";
-import { Role } from "core/constants/role.ts";
-import { can } from "core/constants/permission.ts";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import {
+  NAV_SECTIONS,
+  isNavItemVisible,
+  isNavSectionVisible,
+  resolveModuleBreadcrumb,
+  type NavItem,
+  type NavSection,
+} from "../lib/nav-config";
 import { signOut, useSession } from "../lib/auth-client";
 import ProfileMenu from "./ProfileMenu";
-import {
-  LayoutDashboard,
-  Ticket,
-  Users,
-  BookOpen,
-  Inbox,
-  ChevronLeft,
-  ChevronRight,
-  Settings,
-  BarChart2,
-  Zap,
-  FileText,
-  AlertCircle,
-  ArrowUpDown,
-  Wrench,
-  Menu,
-  X,
-} from "lucide-react";
+import { Settings, ChevronLeft, ChevronRight, Menu, X } from "lucide-react";
 
-// ── Sidebar collapse state persisted to localStorage ──────────────────────────
+// ── Sidebar collapse — persisted to localStorage ───────────────────────────────
 
 function useSidebarCollapsed() {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -34,7 +23,7 @@ function useSidebarCollapsed() {
     }
   });
 
-  const toggle = () => {
+  const toggle = () =>
     setCollapsed((prev) => {
       const next = !prev;
       try {
@@ -42,30 +31,61 @@ function useSidebarCollapsed() {
       } catch {}
       return next;
     });
-  };
 
   return { collapsed, toggle };
 }
 
-// ── Reusable nav item ──────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
-interface NavItemProps {
-  to: string;
-  end?: boolean;
-  icon: React.ReactNode;
-  label: string;
-  collapsed: boolean;
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((n) => n[0].toUpperCase())
+    .join("");
 }
 
-function NavItem({ to, end, icon, label, collapsed }: NavItemProps) {
+function roleLabel(role: string): string {
+  if (!role) return "";
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+// ── Nav badge pill ─────────────────────────────────────────────────────────────
+
+function NavBadgePill({ badge }: { badge: NonNullable<NavItem["badge"]> }) {
+  const cls =
+    badge === "beta"
+      ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
+      : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
+  return (
+    <span
+      className={`ml-auto text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded ${cls}`}
+    >
+      {badge}
+    </span>
+  );
+}
+
+// ── Nav item ───────────────────────────────────────────────────────────────────
+
+interface NavItemProps {
+  item: NavItem;
+  collapsed: boolean;
+  onClick?: () => void;
+}
+
+function SidebarNavItem({ item, collapsed, onClick }: NavItemProps) {
+  const Icon = item.icon;
   return (
     <NavLink
-      to={to}
-      end={end}
-      title={collapsed ? label : undefined}
+      to={item.to}
+      end={item.end}
+      onClick={onClick}
+      title={collapsed ? item.label : undefined}
       className={({ isActive }) =>
         [
-          "flex items-center rounded-lg text-[13px] font-medium transition-colors duration-150",
+          "flex items-center rounded-md text-[13px] font-medium transition-colors duration-150",
           collapsed ? "justify-center p-2" : "gap-3 px-3 py-2",
           isActive
             ? "bg-primary text-primary-foreground"
@@ -73,13 +93,20 @@ function NavItem({ to, end, icon, label, collapsed }: NavItemProps) {
         ].join(" ")
       }
     >
-      <span className="shrink-0 h-4 w-4 flex items-center justify-center">{icon}</span>
-      {!collapsed && <span className="truncate">{label}</span>}
+      <span className="shrink-0 flex items-center justify-center h-4 w-4">
+        <Icon className="h-4 w-4" />
+      </span>
+      {!collapsed && (
+        <>
+          <span className="truncate flex-1">{item.label}</span>
+          {item.badge && <NavBadgePill badge={item.badge} />}
+        </>
+      )}
     </NavLink>
   );
 }
 
-// ── Section header ─────────────────────────────────────────────────────────────
+// ── Section label ──────────────────────────────────────────────────────────────
 
 function SectionLabel({ label }: { label: string }) {
   return (
@@ -89,28 +116,30 @@ function SectionLabel({ label }: { label: string }) {
   );
 }
 
-// ── Sidebar content (shared between desktop + mobile drawer) ──────────────────
+// ── Sidebar content (shared between desktop + mobile drawer) ───────────────────
 
 interface SidebarContentProps {
   collapsed: boolean;
+  role: string;
+  name: string;
+  email: string;
   onToggleCollapse?: () => void;
   onClose?: () => void;
-  role: string;
 }
 
 function SidebarContent({
   collapsed,
+  role,
+  name,
+  email,
   onToggleCollapse,
   onClose,
-  role,
 }: SidebarContentProps) {
-  const isAdmin = role === Role.admin;
-  const canManageKb = can(role, "kb.manage");
-  const iconCls = "h-4 w-4";
+  const initials = getInitials(name);
 
   return (
     <div className="flex flex-col h-full select-none">
-      {/* Logo row */}
+      {/* ── Platform wordmark ── */}
       <div
         className={[
           "h-14 flex items-center border-b shrink-0",
@@ -122,15 +151,22 @@ function SidebarContent({
           onClick={onClose}
           className="flex items-center gap-2.5 min-w-0 group"
         >
+          {/* Logo mark: two-letter monogram on primary background */}
           <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center shrink-0">
-            <span className="text-primary-foreground font-bold text-sm">H</span>
+            <span className="text-primary-foreground font-bold text-[11px] tracking-tight">
+              IT
+            </span>
           </div>
           {!collapsed && (
-            <span className="text-[15px] font-semibold tracking-tight truncate group-hover:text-foreground transition-colors">
-              Helpdesk
-            </span>
+            <div className="min-w-0">
+              <span className="text-[14px] font-semibold tracking-tight truncate block group-hover:text-foreground transition-colors">
+                ITSM Platform
+              </span>
+            </div>
           )}
         </Link>
+
+        {/* Mobile close button */}
         {!collapsed && onClose && (
           <button
             onClick={onClose}
@@ -142,81 +178,110 @@ function SidebarContent({
         )}
       </div>
 
-      {/* Nav links */}
+      {/* ── Navigation sections ── */}
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-4 min-h-0">
-        {/* Main */}
-        <div className="space-y-0.5">
-          {!collapsed && <SectionLabel label="Main" />}
-          <NavItem to="/" end icon={<LayoutDashboard className={iconCls} />} label="Dashboard" collapsed={collapsed} />
-          <NavItem to="/tickets" icon={<Ticket className={iconCls} />} label="Tickets" collapsed={collapsed} />
-        </div>
-
-        {/* ITSM */}
-        <div className="space-y-0.5">
-          {!collapsed && <SectionLabel label="ITSM" />}
-          {collapsed && <div className="h-px bg-border mx-1 my-1" />}
-          <NavItem to="/requests" icon={<Inbox className={iconCls} />} label="Requests" collapsed={collapsed} />
-          <NavItem to="/problems" icon={<AlertCircle className={iconCls} />} label="Problems" collapsed={collapsed} />
-          <NavItem to="/changes" icon={<ArrowUpDown className={iconCls} />} label="Changes" collapsed={collapsed} />
-        </div>
-
-        {/* Knowledge */}
-        {(canManageKb || isAdmin) && (
-          <div className="space-y-0.5">
-            {!collapsed && <SectionLabel label="Knowledge" />}
-            {collapsed && <div className="h-px bg-border mx-1 my-1" />}
-            {canManageKb && (
-              <NavItem to="/kb" icon={<BookOpen className={iconCls} />} label="Knowledge Base" collapsed={collapsed} />
-            )}
-            {isAdmin && (
-              <NavItem to="/templates" icon={<FileText className={iconCls} />} label="Templates" collapsed={collapsed} />
-            )}
-          </div>
-        )}
-
-        {/* Automation */}
-        {isAdmin && (
-          <div className="space-y-0.5">
-            {!collapsed && <SectionLabel label="Automation" />}
-            {collapsed && <div className="h-px bg-border mx-1 my-1" />}
-            <NavItem to="/automations" icon={<Zap className={iconCls} />} label="Automations" collapsed={collapsed} />
-            <NavItem to="/reports" icon={<BarChart2 className={iconCls} />} label="Reports" collapsed={collapsed} />
-          </div>
-        )}
-
-        {/* Management */}
-        {isAdmin && (
-          <div className="space-y-0.5">
-            {!collapsed && <SectionLabel label="Management" />}
-            {collapsed && <div className="h-px bg-border mx-1 my-1" />}
-            <NavItem to="/teams" icon={<Users className={iconCls} />} label="Teams" collapsed={collapsed} />
-            <NavItem to="/users" icon={<Users className={iconCls} />} label="Users" collapsed={collapsed} />
-            <NavItem to="/macros" icon={<Wrench className={iconCls} />} label="Macros" collapsed={collapsed} />
-          </div>
+        {NAV_SECTIONS.filter((s) => isNavSectionVisible(s, role)).map(
+          (section: NavSection) => {
+            const visibleItems = section.items.filter((item) =>
+              isNavItemVisible(item, role)
+            );
+            return (
+              <div key={section.id} className="space-y-0.5">
+                {!collapsed && <SectionLabel label={section.label} />}
+                {collapsed && (
+                  <div className="h-px bg-border mx-1 my-1" aria-hidden />
+                )}
+                {visibleItems.map((item) => (
+                  <SidebarNavItem
+                    key={item.id}
+                    item={item}
+                    collapsed={collapsed}
+                    onClick={onClose}
+                  />
+                ))}
+              </div>
+            );
+          }
         )}
       </nav>
 
-      {/* Bottom: settings + collapse toggle */}
-      <div className="border-t px-2 py-2 shrink-0 space-y-0.5">
-        <NavItem to="/settings" icon={<Settings className={iconCls} />} label="Settings" collapsed={collapsed} />
-        {onToggleCollapse && (
-          <button
-            onClick={onToggleCollapse}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className={[
-              "flex items-center w-full rounded-lg text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150",
-              collapsed ? "justify-center p-2" : "gap-3 px-3 py-2",
-            ].join(" ")}
+      {/* ── Footer ── */}
+      <div className="border-t shrink-0">
+        {/* Settings link */}
+        <div className="px-2 pt-2 pb-1 space-y-0.5">
+          <NavLink
+            to="/settings"
+            onClick={onClose}
+            title={collapsed ? "Settings" : undefined}
+            className={({ isActive }) =>
+              [
+                "flex items-center rounded-md text-[13px] font-medium transition-colors duration-150",
+                collapsed ? "justify-center p-2" : "gap-3 px-3 py-2",
+                isActive
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent",
+              ].join(" ")
+            }
           >
-            <span className="shrink-0 h-4 w-4 flex items-center justify-center">
-              {collapsed ? (
-                <ChevronRight className="h-4 w-4" />
-              ) : (
-                <ChevronLeft className="h-4 w-4" />
-              )}
+            <span className="shrink-0 flex items-center justify-center h-4 w-4">
+              <Settings className="h-4 w-4" />
             </span>
-            {!collapsed && <span>Collapse</span>}
-          </button>
+            {!collapsed && <span className="truncate">Settings</span>}
+          </NavLink>
+        </div>
+
+        {/* User identity block */}
+        {collapsed ? (
+          <div className="flex justify-center pb-2 px-2">
+            <div
+              title={`${name} · ${roleLabel(role)}`}
+              className="h-7 w-7 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[11px] font-semibold"
+            >
+              {initials || "?"}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2.5 px-3 pb-3 pt-1">
+            <div className="h-7 w-7 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[11px] font-semibold shrink-0">
+              {initials || "?"}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-medium leading-none truncate">
+                {name}
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-none mt-0.5 truncate">
+                {email}
+              </p>
+            </div>
+            {role && (
+              <span className="shrink-0 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                {roleLabel(role)}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Collapse toggle */}
+        {onToggleCollapse && (
+          <div className="px-2 pb-2">
+            <button
+              onClick={onToggleCollapse}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className={[
+                "flex items-center w-full rounded-md text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150",
+                collapsed ? "justify-center p-2" : "gap-3 px-3 py-2",
+              ].join(" ")}
+            >
+              <span className="shrink-0 flex items-center justify-center h-4 w-4">
+                {collapsed ? (
+                  <ChevronRight className="h-4 w-4" />
+                ) : (
+                  <ChevronLeft className="h-4 w-4" />
+                )}
+              </span>
+              {!collapsed && <span>Collapse</span>}
+            </button>
+          </div>
         )}
       </div>
     </div>
@@ -228,33 +293,36 @@ function SidebarContent({
 export default function Layout() {
   const { data: session } = useSession();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const { collapsed, toggle } = useSidebarCollapsed();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const role = session?.user?.role ?? "";
+  const name = session?.user?.name ?? "";
+  const email = session?.user?.email ?? "";
+
+  const breadcrumb = resolveModuleBreadcrumb(pathname, role);
 
   const handleSignOut = async () => {
     await signOut();
     navigate("/login", { replace: true });
   };
 
+  const sidebarProps: SidebarContentProps = { collapsed, role, name, email };
+
   return (
     <div className="min-h-screen flex bg-background">
-      {/* ── Desktop sidebar ─────────────────────────────────────────────────── */}
+      {/* ── Desktop sidebar ────────────────────────────────────────────────── */}
       <aside
         className={[
           "hidden lg:flex flex-col border-r bg-background shrink-0 sticky top-0 h-screen overflow-hidden transition-[width] duration-200",
           collapsed ? "w-14" : "w-60",
         ].join(" ")}
       >
-        <SidebarContent
-          collapsed={collapsed}
-          onToggleCollapse={toggle}
-          role={role}
-        />
+        <SidebarContent {...sidebarProps} onToggleCollapse={toggle} />
       </aside>
 
-      {/* ── Mobile sidebar overlay ──────────────────────────────────────────── */}
+      {/* ── Mobile sidebar overlay ─────────────────────────────────────────── */}
       {mobileOpen && (
         <div
           className="lg:hidden fixed inset-0 z-40 bg-black/50"
@@ -268,13 +336,13 @@ export default function Layout() {
         ].join(" ")}
       >
         <SidebarContent
+          {...sidebarProps}
           collapsed={false}
           onClose={() => setMobileOpen(false)}
-          role={role}
         />
       </aside>
 
-      {/* ── Main content area ────────────────────────────────────────────────── */}
+      {/* ── Main content area ──────────────────────────────────────────────── */}
       <div className="flex flex-col flex-1 min-w-0">
         {/* Top header */}
         <header className="sticky top-0 z-30 h-14 border-b bg-background flex items-center px-4 gap-3 shrink-0">
@@ -287,7 +355,11 @@ export default function Layout() {
             <Menu className="h-5 w-5" />
           </button>
 
-          {/* Spacer */}
+          {/* Module breadcrumb */}
+          <p className="hidden sm:block text-sm text-muted-foreground font-medium tracking-wide">
+            {breadcrumb}
+          </p>
+
           <div className="flex-1" />
 
           {/* Profile menu */}

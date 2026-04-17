@@ -1,4 +1,4 @@
-import DOMPurify from "dompurify";
+import RichTextRenderer from "@/components/RichTextRenderer";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { type Ticket } from "core/constants/ticket.ts";
@@ -177,15 +177,7 @@ export default function ConversationTimeline({ ticket }: ConversationTimelinePro
                 </div>
               </CardHeader>
               <CardContent>
-                {reply.bodyHtml ? (
-                  <div
-                    dangerouslySetInnerHTML={{
-                      __html: DOMPurify.sanitize(reply.bodyHtml),
-                    }}
-                  />
-                ) : (
-                  <p className="whitespace-pre-line leading-relaxed">{reply.body}</p>
-                )}
+                <RichTextRenderer content={reply.bodyHtml ?? reply.body} />
                 <AttachmentList ticketId={ticketId} attachments={reply.attachments} />
               </CardContent>
             </Card>
@@ -264,7 +256,7 @@ export default function ConversationTimeline({ ticket }: ConversationTimelinePro
               </div>
             </div>
 
-            <p className="whitespace-pre-line leading-relaxed text-sm">{note.body}</p>
+            <RichTextRenderer content={note.bodyHtml ?? note.body} />
           </div>
         );
       })}

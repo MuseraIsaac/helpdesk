@@ -2,7 +2,7 @@ import { useForm, Controller, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { createTicketSchema, type CreateTicketInput } from "core/schemas/tickets.ts";
 import { ticketTypes, ticketTypeLabel } from "core/constants/ticket-type.ts";
 import { ticketCategories, categoryLabel } from "core/constants/ticket-category.ts";
@@ -21,7 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import RichTextEditor from "@/components/RichTextEditor";
 import {
   Select,
   SelectContent,
@@ -79,6 +79,8 @@ function FieldSelect<T extends string>({
 
 export default function NewTicketDialog() {
   const [open, setOpen] = useState(false);
+  const [bodyHtml, setBodyHtml] = useState("");
+  const [bodyText, setBodyText] = useState("");
   const queryClient = useQueryClient();
 
   const { data: agentsData } = useQuery({
@@ -95,28 +97,46 @@ export default function NewTicketDialog() {
     handleSubmit,
     reset,
     control,
+    setValue,
     formState: { errors },
   } = useForm<CreateTicketInput>({
     resolver: zodResolver(createTicketSchema),
+    defaultValues: { body: "" },
   });
+
+  const handleBodyChange = useCallback((html: string, text: string) => {
+    setBodyHtml(html);
+    setBodyText(text);
+    setValue("body", text, { shouldValidate: false });
+  }, [setValue]);
 
   const selectedType = useWatch({ control, name: "ticketType" });
 
   const createMutation = useMutation({
     mutationFn: async (data: CreateTicketInput) => {
-      const { data: ticket } = await axios.post("/api/tickets", data);
+      const { data: ticket } = await axios.post("/api/tickets", {
+        ...data,
+        body: bodyText,
+        bodyHtml,
+      });
       return ticket;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tickets"] });
       setOpen(false);
       reset();
+      setBodyHtml("");
+      setBodyText("");
     },
   });
 
   function handleOpenChange(value: boolean) {
     setOpen(value);
-    if (!value) reset();
+    if (!value) {
+      reset();
+      setBodyHtml("");
+      setBodyText("");
+    }
   }
 
   return (
@@ -316,16 +336,18 @@ export default function NewTicketDialog() {
 
           {/* Description */}
           <div className="space-y-1.5">
-            <Label htmlFor="body">
+            <Label>
               Description <span className="text-destructive">*</span>
             </Label>
-            <Textarea
-              id="body"
-              placeholder="Describe the issue in detail..."
-              rows={5}
-              {...register("body")}
+            <RichTextEditor
+              content={bodyHtml}
+              onChange={handleBodyChange}
+              placeholder="Describe the issue in detail…"
+              minHeight="130px"
             />
-            {errors.body && <ErrorMessage message={errors.body.message} />}
+            {createMutation.isError && !bodyText.trim() && (
+              <p className="text-sm text-destructive">Description is required</p>
+            )}
           </div>
         </form>
 
@@ -336,7 +358,7 @@ export default function NewTicketDialog() {
           <Button
             type="submit"
             form="new-ticket-form"
-            disabled={createMutation.isPending}
+            disabled={createMutation.isPending || !bodyText.trim()}
           >
             {createMutation.isPending ? "Creating..." : "Create Ticket"}
           </Button>

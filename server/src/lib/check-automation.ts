@@ -13,6 +13,7 @@ import type { PgBoss } from "pg-boss";
 import prisma from "../db";
 import Sentry from "./sentry";
 import { runRules } from "./automation";
+import { workflowEngine } from "./workflow";
 
 const QUEUE_NAME = "check-automation";
 const CRON_SCHEDULE = "*/5 * * * *";
@@ -36,23 +37,23 @@ export async function registerAutomationCheckerWorker(boss: PgBoss): Promise<voi
           category: true,
           priority: true,
           severity: true,
+          ticketType: true,
           senderEmail: true,
           assignedToId: true,
+          teamId: true,
           createdAt: true,
         },
       });
 
       if (tickets.length === 0) return;
 
-      let rulesFired = 0;
       for (const ticket of tickets) {
-        const before = rulesFired;
         await runRules(ticket, { trigger: "ticket.age" });
-        if (rulesFired > before) rulesFired++;
+        await workflowEngine.run(ticket, { trigger: "ticket.age" });
       }
 
       console.log(
-        `[check-automation] Evaluated ${tickets.length} ticket(s) against ticket.age rules`
+        `[check-automation] Evaluated ${tickets.length} ticket(s) against ticket.age rules + workflows`
       );
     } catch (error) {
       Sentry.captureException(error, { tags: { queue: QUEUE_NAME } });

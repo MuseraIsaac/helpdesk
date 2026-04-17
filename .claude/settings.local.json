@@ -43,7 +43,21 @@
       "Bash(bun -e ':*)",
       "Bash(DATABASE_URL='postgresql://postgres:postgres@204.168.179.132:5432/helpdesk?schema=public' bun x prisma migrate deploy)",
       "Bash(DATABASE_URL='postgresql://postgres:postgres@204.168.179.132:5432/helpdesk?schema=public' bunx prisma migrate deploy)",
-      "Bash(node -e ':*)"
+      "Bash(node -e ':*)",
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=4096\" bun run build)",
+      "Bash(npx vite:*)",
+      "Bash(bunx vite:*)",
+      "Bash(grep -v \"^$\")",
+      "Bash(echo \"Exit code: $?\")",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(node_modules/.bin/prisma migrate:*)",
+      "Bash(\"/c/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/node_modules/.bin/prisma.exe\" migrate status)",
+      "Bash(bun run *)",
+      "Bash(echo \"Client PID: $!\")",
+      "Bash(grep -E '\\\\.\\(tsx|ts\\)$')",
+      "Bash(grep -v '^ui$')",
+      "Bash(xargs grep *)",
+      "Bash(bun prisma *)"
     ]
   }
 }

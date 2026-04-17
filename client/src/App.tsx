@@ -16,6 +16,11 @@ import SupervisorRoute from "./components/SupervisorRoute";
 import TicketsPage from "./pages/TicketsPage";
 import TicketDetailPage from "./pages/TicketDetailPage";
 import PlaceholderPage from "./pages/PlaceholderPage";
+import ApprovalsPage from "./pages/ApprovalsPage";
+import IncidentsPage from "./pages/IncidentsPage";
+import IncidentDetailPage from "./pages/IncidentDetailPage";
+import RequestsPage from "./pages/RequestsPage";
+import RequestDetailPage from "./pages/RequestDetailPage";
 import ProfilePage from "./pages/ProfilePage";
 import SettingsPage from "./pages/SettingsPage";
 import PortalLoginPage from "./pages/portal/PortalLoginPage";
@@ -37,10 +42,15 @@ function App() {
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/tickets" element={<TicketsPage />} />
           <Route path="/tickets/:id" element={<TicketDetailPage />} />
-          {/* ITSM placeholders (all authenticated users) */}
-          <Route path="/requests" element={<PlaceholderPage title="Service Requests" description="Dedicated service request management is coming soon." />} />
+          {/* ITSM modules */}
+          <Route path="/requests" element={<RequestsPage />} />
+          <Route path="/requests/:id" element={<RequestDetailPage />} />
+          <Route path="/incidents" element={<IncidentsPage />} />
+          <Route path="/incidents/:id" element={<IncidentDetailPage />} />
           <Route path="/problems" element={<PlaceholderPage title="Problems" description="Problem management and root cause analysis is coming soon." />} />
           <Route path="/changes" element={<PlaceholderPage title="Change Requests" description="Change advisory board and change management is coming soon." />} />
+          <Route path="/assets" element={<PlaceholderPage title="Assets" description="IT asset management and CMDB integration is coming soon." />} />
+          <Route path="/approvals" element={<ApprovalsPage />} />
           {/* /settings redirects non-admins to home; admin sub-routes below */}
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
 

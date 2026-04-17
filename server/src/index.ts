@@ -26,6 +26,11 @@ import settingsRouter from "./routes/settings";
 import themeRouter from "./routes/theme";
 import dashboardsRouter from "./routes/dashboards";
 import ticketViewsRouter from "./routes/ticket-views";
+import workflowsRouter from "./routes/workflows";
+import approvalsRouter from "./routes/approvals";
+import incidentsRouter from "./routes/incidents";
+import requestsRouter from "./routes/requests";
+import problemsRouter from "./routes/problems";
 import { startQueue, stopQueue } from "./lib/queue";
 
 if (!process.env.BETTER_AUTH_SECRET) {
@@ -87,6 +92,11 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/me", meRouter);
 app.use("/api/dashboards", dashboardsRouter);
 app.use("/api/ticket-views", ticketViewsRouter);
+app.use("/api/workflows", workflowsRouter);
+app.use("/api/approvals", approvalsRouter);
+app.use("/api/incidents", incidentsRouter);
+app.use("/api/requests", requestsRouter);
+app.use("/api/problems", problemsRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/theme", themeRouter);
 app.use("/api/users", usersRouter);

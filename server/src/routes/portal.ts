@@ -19,6 +19,11 @@ import {
   portalReplySchema,
 } from "core/schemas/portal.ts";
 import { submitCsatSchema } from "core/schemas/csat.ts";
+import { portalCreateRequestSchema } from "core/schemas/requests.ts";
+import { generateTicketNumber as generateRequestNumber } from "../lib/ticket-number";
+import { computeRequestSlaDueAt } from "../lib/request-sla";
+import { logRequestEvent } from "../lib/request-events";
+import type { Prisma as PrismaTypes } from "../generated/prisma/client";
 
 const router = Router();
 
@@ -102,11 +107,14 @@ router.post("/tickets", requireCustomer, async (req, res) => {
   const customerId = await upsertCustomer(req.user.email, req.user.name);
   const ticketNumber = await generateTicketNumber(null, now);
 
+  const plainBody = data.bodyHtml ? htmlToText(data.bodyHtml) : data.body;
+
   const ticket = await prisma.ticket.create({
     data: {
       ticketNumber,
       subject: data.subject,
-      body: data.body,
+      body: plainBody,
+      bodyHtml: data.bodyHtml ?? null,
       senderName: req.user.name,
       senderEmail: req.user.email,
       customerId,
@@ -246,9 +254,12 @@ router.post("/tickets/:id/replies", requireCustomer, async (req, res) => {
     return;
   }
 
+  const replyPlainBody = data.bodyHtml ? htmlToText(data.bodyHtml) : data.body;
+
   const reply = await prisma.reply.create({
     data: {
-      body: data.body,
+      body: replyPlainBody,
+      bodyHtml: data.bodyHtml ?? null,
       senderType: "customer",
       ticketId: id,
       userId: null,
@@ -347,6 +358,148 @@ router.get("/attachments/:id/download", requireCustomer, async (req, res) => {
   res.setHeader("Content-Length", buffer.length);
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.send(buffer);
+});
+
+// ── Portal: Service Requests ───────────────────────────────────────────────────
+
+const PORTAL_REQUEST_SELECT = {
+  id: true,
+  requestNumber: true,
+  title: true,
+  description: true,
+  status: true,
+  priority: true,
+  approvalStatus: true,
+  catalogItemName: true,
+  requesterName: true,
+  requesterEmail: true,
+  dueDate: true,
+  slaDueAt: true,
+  resolvedAt: true,
+  closedAt: true,
+  cancelledAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+const PORTAL_REQUEST_DETAIL_SELECT = {
+  ...PORTAL_REQUEST_SELECT,
+  formData: true,
+  assignedTo: { select: { id: true, name: true } },
+  team: { select: { id: true, name: true, color: true } },
+  items: {
+    orderBy: { createdAt: "asc" as const },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      quantity: true,
+      unit: true,
+      status: true,
+      fulfilledAt: true,
+    },
+  },
+  tasks: {
+    orderBy: { position: "asc" as const },
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      status: true,
+      position: true,
+      dueAt: true,
+      completedAt: true,
+    },
+  },
+  events: {
+    orderBy: { createdAt: "asc" as const },
+    select: {
+      id: true,
+      action: true,
+      meta: true,
+      createdAt: true,
+      // actor is intentionally omitted — customers should not see agent names in audit trail
+    },
+  },
+} as const;
+
+/** GET /api/portal/requests — list the authenticated customer's own requests */
+router.get("/requests", requireCustomer, async (req, res) => {
+  const requests = await prisma.serviceRequest.findMany({
+    where: { requesterEmail: req.user.email },
+    orderBy: { createdAt: "desc" },
+    select: PORTAL_REQUEST_SELECT,
+  });
+
+  res.json({ requests });
+});
+
+/** GET /api/portal/requests/:id — get a single request the customer owns */
+router.get("/requests/:id", requireCustomer, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  const request = await prisma.serviceRequest.findUnique({
+    where: { id },
+    select: { ...PORTAL_REQUEST_DETAIL_SELECT, requesterEmail: true },
+  });
+
+  if (!request || request.requesterEmail !== req.user.email) {
+    res.status(404).json({ error: "Request not found" });
+    return;
+  }
+
+  const { requesterEmail: _email, ...safeRequest } = request;
+  res.json({ request: safeRequest });
+});
+
+/** POST /api/portal/requests — submit a new service request */
+router.post("/requests", requireCustomer, async (req, res) => {
+  const data = validate(portalCreateRequestSchema, req.body, res);
+  if (!data) return;
+
+  const now = new Date();
+  const requestNumber = await generateRequestNumber("service_request", now);
+  const customerId = await upsertCustomer(req.user.email, req.user.name);
+  const slaDueAt = computeRequestSlaDueAt("medium", now); // portal requests default medium priority
+
+  const request = await prisma.serviceRequest.create({
+    data: {
+      requestNumber,
+      title: data.title,
+      description: data.description ?? null,
+      priority: "medium",
+      status: "submitted",
+      approvalStatus: "not_required",
+      requesterCustomerId: customerId,
+      requesterName: req.user.name,
+      requesterEmail: req.user.email,
+      catalogItemId: data.catalogItemId ?? null,
+      catalogItemName: data.catalogItemName ?? null,
+      formData: data.formData as PrismaTypes.InputJsonValue,
+      slaDueAt,
+      items: data.items.length > 0
+        ? {
+            create: data.items.map((item) => ({
+              name: item.name,
+              description: item.description ?? null,
+              quantity: item.quantity,
+              unit: item.unit ?? null,
+              catalogItemId: item.catalogItemId ?? null,
+              formData: item.formData as PrismaTypes.InputJsonValue,
+            })),
+          }
+        : undefined,
+    },
+    select: PORTAL_REQUEST_SELECT,
+  });
+
+  void logRequestEvent(request.id, null, "request.created", {
+    via: "portal",
+    requesterEmail: req.user.email,
+  });
+
+  res.status(201).json({ request });
 });
 
 export default router;

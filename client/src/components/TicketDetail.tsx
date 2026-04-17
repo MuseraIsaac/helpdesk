@@ -1,5 +1,5 @@
-import DOMPurify from "dompurify";
 import { type Ticket } from "core/constants/ticket.ts";
+import RichTextRenderer from "@/components/RichTextRenderer";
 import { Card, CardContent } from "@/components/ui/card";
 import StatusBadge from "@/components/StatusBadge";
 import TicketTypeBadge from "@/components/TicketTypeBadge";
@@ -134,15 +134,7 @@ export default function TicketDetail({ ticket }: TicketDetailProps) {
 
       <Card>
         <CardContent className="pt-6">
-          {ticket.bodyHtml ? (
-            <div
-              dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(ticket.bodyHtml),
-              }}
-            />
-          ) : (
-            <p className="whitespace-pre-wrap leading-relaxed">{ticket.body}</p>
-          )}
+          <RichTextRenderer content={ticket.bodyHtml ?? ticket.body} />
         </CardContent>
       </Card>
     </>

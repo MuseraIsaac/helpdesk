@@ -11,6 +11,7 @@ import { computeSlaDeadlines, withSlaInfo } from "../lib/sla";
 import { checkAndEscalate, deescalateTicket, escalateTicket } from "../lib/escalation";
 import { logAudit } from "../lib/audit";
 import { runRules } from "../lib/automation";
+import { workflowEngine } from "../lib/workflow";
 import { upsertCustomer } from "../lib/upsert-customer";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { htmlToText } from "../lib/html-to-text";
@@ -166,6 +167,25 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
       severity: ticket.severity,
       senderEmail: ticket.senderEmail,
       assignedToId: ticket.assignedToId,
+      createdAt: ticket.createdAt,
+    },
+    { trigger: "ticket.created" }
+  );
+
+  // Run DB-driven workflow engine alongside the legacy rule system
+  await workflowEngine.run(
+    {
+      id: ticket.id,
+      subject: ticket.subject,
+      body: ticket.body,
+      status: ticket.status,
+      category: ticket.category,
+      priority: ticket.priority,
+      severity: ticket.severity,
+      ticketType: ticket.ticketType,
+      senderEmail: ticket.senderEmail,
+      assignedToId: ticket.assignedToId,
+      teamId: ticket.teamId,
       createdAt: ticket.createdAt,
     },
     { trigger: "ticket.created" }
@@ -493,6 +513,25 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
       severity: updated.severity,
       senderEmail: updated.senderEmail,
       assignedToId: updated.assignedToId,
+      createdAt: updated.createdAt,
+    },
+    { trigger: "ticket.updated" }
+  );
+
+  // Run DB-driven workflow engine alongside the legacy rule system
+  await workflowEngine.run(
+    {
+      id: updated.id,
+      subject: updated.subject,
+      body: updated.body,
+      status: updated.status,
+      category: updated.category,
+      priority: updated.priority,
+      severity: updated.severity,
+      ticketType: updated.ticketType,
+      senderEmail: updated.senderEmail,
+      assignedToId: updated.assignedToId,
+      teamId: updated.teamId,
       createdAt: updated.createdAt,
     },
     { trigger: "ticket.updated" }

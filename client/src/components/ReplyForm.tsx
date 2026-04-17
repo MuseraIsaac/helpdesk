@@ -1,15 +1,11 @@
-import { useRef, useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useRef, useState, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { type Ticket } from "core/constants/ticket.ts";
-import { createReplySchema, type CreateReplyInput } from "core/schemas/replies.ts";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import ErrorAlert from "@/components/ErrorAlert";
-import ErrorMessage from "@/components/ErrorMessage";
 import MacroPicker from "@/components/MacroPicker";
+import RichTextEditor from "@/components/RichTextEditor";
 import { useSession } from "@/lib/auth-client";
 import { BookOpen, Paperclip, X } from "lucide-react";
 
@@ -39,26 +35,28 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: session } = useSession();
 
-  const {
-    register,
-    handleSubmit,
-    reset,
-    getValues,
-    setValue,
-    watch,
-    formState: { errors },
-  } = useForm<CreateReplyInput>({
-    resolver: zodResolver(createReplySchema),
-  });
+  // Rich-text state — html for storage, text for validation
+  const [bodyHtml, setBodyHtml] = useState("");
+  const [bodyText, setBodyText] = useState("");
 
-  const bodyValue = watch("body");
+  // External content injection (macros, AI polish) — drives editor sync
+  const [editorContent, setEditorContent] = useState("");
+
+  const handleEditorChange = useCallback((html: string, text: string) => {
+    setBodyHtml(html);
+    setBodyText(text);
+    // Keep editorContent in sync so the clear signal (setEditorContent(""))
+    // after submit is actually a state change, not a no-op.
+    setEditorContent(html);
+  }, []);
 
   const replyMutation = useMutation({
-    mutationFn: async (data: CreateReplyInput) => {
+    mutationFn: async () => {
       const { data: reply } = await axios.post(
         `/api/tickets/${ticketId}/replies`,
         {
-          body: data.body,
+          body: bodyText,
+          bodyHtml,
           attachmentIds: stagedFiles.map((f) => f.id),
         }
       );
@@ -66,7 +64,10 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["replies", ticketId] });
-      reset();
+      queryClient.invalidateQueries({ queryKey: ["conversation", ticketId] });
+      setBodyHtml("");
+      setBodyText("");
+      setEditorContent("");
       setStagedFiles([]);
       setUploadError(null);
     },
@@ -75,12 +76,13 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
   const polishMutation = useMutation({
     mutationFn: async () => {
       const { data } = await axios.post(`/api/tickets/${ticketId}/replies/polish`, {
-        body: getValues("body"),
+        body: bodyText,
       });
       return data.body as string;
     },
     onSuccess: (polishedText) => {
-      setValue("body", polishedText, { shouldValidate: true });
+      // Wrap plain-text response in a paragraph so the editor accepts it
+      setEditorContent(`<p>${polishedText}</p>`);
     },
   });
 
@@ -88,7 +90,6 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
 
-    // Enforce client-side limit (server also enforces)
     if (stagedFiles.length + files.length > 5) {
       setUploadError("Maximum 5 attachments per reply.");
       e.target.value = "";
@@ -114,8 +115,6 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
         setUploadError(`${file.name}: ${msg}`);
       }
     }
-
-    // Reset file input so the same file can be re-selected if removed
     e.target.value = "";
   }
 
@@ -124,32 +123,35 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
   }
 
   function handleMacroInsert(resolvedBody: string) {
-    setValue("body", resolvedBody, { shouldValidate: true });
+    // Macros return plain text — wrap in <p> tags for the editor
+    const html = resolvedBody
+      .split("\n\n")
+      .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
+      .join("");
+    setEditorContent(html);
   }
 
   const isBusy = replyMutation.isPending || polishMutation.isPending;
+  const canSubmit = bodyText.trim().length > 0 && !isBusy;
 
   return (
     <>
-      <form onSubmit={handleSubmit((data) => replyMutation.mutate(data))} className="space-y-3">
+      <div className="space-y-3">
         {replyMutation.error && (
           <ErrorAlert error={replyMutation.error} fallback="Failed to send reply" />
         )}
         {polishMutation.error && (
           <ErrorAlert error={polishMutation.error} fallback="Failed to polish reply" />
         )}
-        {uploadError && (
-          <ErrorAlert message={uploadError} />
-        )}
+        {uploadError && <ErrorAlert message={uploadError} />}
 
-        <div className="space-y-1">
-          <Textarea
-            placeholder="Type your reply..."
-            {...register("body")}
-            rows={4}
-          />
-          {errors.body && <ErrorMessage message={errors.body.message} />}
-        </div>
+        <RichTextEditor
+          content={editorContent}
+          onChange={handleEditorChange}
+          placeholder="Type your reply…"
+          minHeight="120px"
+          disabled={isBusy}
+        />
 
         {/* Staged attachment chips */}
         {stagedFiles.length > 0 && (
@@ -176,7 +178,6 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
         )}
 
         <div className="flex gap-2 flex-wrap">
-          {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -187,7 +188,6 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
             disabled={isBusy || stagedFiles.length >= 5}
           />
 
-          {/* Attach file button */}
           <Button
             type="button"
             variant="outline"
@@ -198,10 +198,11 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
             title={stagedFiles.length >= 5 ? "Maximum 5 attachments reached" : "Attach a file"}
           >
             <Paperclip className="h-3.5 w-3.5" />
-            {stagedFiles.length > 0 ? `${stagedFiles.length} file${stagedFiles.length > 1 ? "s" : ""}` : "Attach"}
+            {stagedFiles.length > 0
+              ? `${stagedFiles.length} file${stagedFiles.length > 1 ? "s" : ""}`
+              : "Attach"}
           </Button>
 
-          {/* Macro picker — inserts a saved template */}
           <Button
             type="button"
             variant="outline"
@@ -214,24 +215,24 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
             Macros
           </Button>
 
-          {/* AI polish — refines existing draft */}
           <Button
             type="button"
             variant="outline"
-            disabled={!bodyValue?.trim() || isBusy}
+            disabled={!bodyText.trim() || isBusy}
             onClick={() => polishMutation.mutate()}
           >
-            {polishMutation.isPending ? "Polishing..." : "Polish"}
+            {polishMutation.isPending ? "Polishing…" : "Polish"}
           </Button>
 
           <Button
-            type="submit"
-            disabled={!bodyValue?.trim() || isBusy}
+            type="button"
+            disabled={!canSubmit}
+            onClick={() => replyMutation.mutate()}
           >
-            {replyMutation.isPending ? "Sending..." : "Send Reply"}
+            {replyMutation.isPending ? "Sending…" : "Send Reply"}
           </Button>
         </div>
-      </form>
+      </div>
 
       <MacroPicker
         open={macroPickerOpen}

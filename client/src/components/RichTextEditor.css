@@ -1,0 +1,167 @@
+/* ── Shared rich-text body styles ────────────────────────────────────────────
+   Applied to both the Tiptap editor (.rte-content .ProseMirror)
+   and the read-only renderer (.rte-body).
+   Tailwind v4 preflight resets browser defaults for strong/em/lists/etc.,
+   so we restore them explicitly here.
+──────────────────────────────────────────────────────────────────────────── */
+
+.rte-body,
+.rte-content .ProseMirror {
+  /* paragraph / element spacing */
+  line-height: 1.625;
+}
+
+.rte-body > * + *,
+.rte-content .ProseMirror > * + * {
+  margin-top: 0.5em;
+}
+
+/* inline marks — restored because Tailwind preflight strips browser defaults */
+.rte-body strong,
+.rte-body b,
+.rte-content .ProseMirror strong,
+.rte-content .ProseMirror b {
+  font-weight: 700;
+}
+
+.rte-body em,
+.rte-body i,
+.rte-content .ProseMirror em,
+.rte-content .ProseMirror i {
+  font-style: italic;
+}
+
+.rte-body u,
+.rte-content .ProseMirror u {
+  text-decoration: underline;
+}
+
+.rte-body s,
+.rte-body del,
+.rte-content .ProseMirror s,
+.rte-content .ProseMirror del {
+  text-decoration: line-through;
+}
+
+/* headings */
+.rte-body h1,
+.rte-content .ProseMirror h1 {
+  font-size: 1.5em;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.rte-body h2,
+.rte-content .ProseMirror h2 {
+  font-size: 1.25em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.rte-body h3,
+.rte-content .ProseMirror h3 {
+  font-size: 1.1em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* lists */
+.rte-body ul,
+.rte-content .ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 1.5em;
+}
+
+.rte-body ol,
+.rte-content .ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 1.5em;
+}
+
+.rte-body li > p,
+.rte-content .ProseMirror li > p {
+  margin: 0;
+}
+
+.rte-body li + li,
+.rte-content .ProseMirror li + li {
+  margin-top: 0.25em;
+}
+
+/* blockquote */
+.rte-body blockquote,
+.rte-content .ProseMirror blockquote {
+  border-left: 3px solid var(--border, #e5e7eb);
+  padding-left: 0.75em;
+  color: var(--muted-foreground, #6b7280);
+  font-style: italic;
+  margin: 0.5em 0;
+}
+
+/* inline code */
+.rte-body code,
+.rte-content .ProseMirror code {
+  background: var(--muted, #f3f4f6);
+  border-radius: 3px;
+  padding: 0.1em 0.3em;
+  font-size: 0.875em;
+  font-family: ui-monospace, monospace;
+}
+
+/* code block */
+.rte-body pre,
+.rte-content .ProseMirror pre {
+  background: var(--muted, #f3f4f6);
+  border-radius: 6px;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+}
+
+.rte-body pre code,
+.rte-content .ProseMirror pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.8125em;
+}
+
+/* hr */
+.rte-body hr,
+.rte-content .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--border, #e5e7eb);
+  margin: 0.75em 0;
+}
+
+/* links */
+.rte-body a,
+.rte-content .ProseMirror a {
+  color: var(--primary, #2563eb);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.rte-body a:hover,
+.rte-content .ProseMirror a:hover {
+  opacity: 0.8;
+}
+
+/* ── Editor-only styles ──────────────────────────────────────────────────── */
+
+.rte-content .ProseMirror {
+  outline: none;
+  min-height: inherit;
+}
+
+/* Placeholder */
+.rte-content .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground, #6b7280);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+/* Selected text / link active state */
+.rte-content .ProseMirror .is-active {
+  background: var(--accent, #f3f4f6);
+}

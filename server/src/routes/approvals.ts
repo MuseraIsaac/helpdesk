@@ -1,0 +1,256 @@
+import { Router } from "express";
+import { requireAuth } from "../middleware/require-auth";
+import { requirePermission } from "../middleware/require-permission";
+import { validate } from "../lib/validate";
+import { parseId } from "../lib/parse-id";
+import {
+  createApprovalSchema,
+  approvalDecisionSchema,
+  listApprovalsQuerySchema,
+} from "core/schemas/approvals.ts";
+import {
+  createApproval,
+  decide,
+  cancelApproval,
+} from "../lib/approval-engine";
+import prisma from "../db";
+
+const router = Router();
+
+// ── Shared select projection ───────────────────────────────────────────────────
+
+const STEP_SELECT = {
+  id: true,
+  stepOrder: true,
+  status: true,
+  isActive: true,
+  dueAt: true,
+  createdAt: true,
+  approver: { select: { id: true, name: true, email: true } },
+  decisions: {
+    select: {
+      id: true,
+      decision: true,
+      comment: true,
+      decidedAt: true,
+      decidedBy: { select: { id: true, name: true } },
+    },
+  },
+} as const;
+
+const REQUEST_SELECT = {
+  id: true,
+  subjectType: true,
+  subjectId: true,
+  title: true,
+  description: true,
+  status: true,
+  approvalMode: true,
+  requiredCount: true,
+  expiresAt: true,
+  resolvedAt: true,
+  createdAt: true,
+  updatedAt: true,
+  requestedBy: { select: { id: true, name: true, email: true } },
+  steps: {
+    orderBy: { stepOrder: "asc" as const },
+    select: STEP_SELECT,
+  },
+} as const;
+
+// ── POST /api/approvals — create a new approval request ──────────────────────
+
+router.post(
+  "/",
+  requireAuth,
+  requirePermission("approvals.view"),
+  async (req, res) => {
+    const input = validate(createApprovalSchema, req.body, res);
+    if (!input) return;
+
+    // Verify all approver IDs exist
+    const approvers = await prisma.user.findMany({
+      where: { id: { in: input.approverIds }, deletedAt: null },
+      select: { id: true },
+    });
+    if (approvers.length !== input.approverIds.length) {
+      res.status(400).json({ error: "One or more approver user IDs are invalid" });
+      return;
+    }
+
+    const result = await createApproval(input, req.user.id);
+    const full = await prisma.approvalRequest.findUnique({
+      where: { id: result.approvalRequest.id },
+      select: REQUEST_SELECT,
+    });
+    res.status(201).json({ approvalRequest: full });
+  }
+);
+
+// ── GET /api/approvals — list approvals ───────────────────────────────────────
+
+router.get(
+  "/",
+  requireAuth,
+  requirePermission("approvals.view"),
+  async (req, res) => {
+    const query = validate(listApprovalsQuerySchema, req.query, res);
+    if (!query) return;
+
+    const { status, subjectType, scope, page, limit } = query;
+    const isAdmin = req.user.role === "admin" || req.user.role === "supervisor";
+
+    // "all" scope requires elevated permission
+    if (scope === "all" && !isAdmin) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    const where: Record<string, unknown> = {};
+    if (status) where.status = status;
+    if (subjectType) where.subjectType = subjectType;
+
+    // "mine" = requests where I have an assigned step
+    if (scope === "mine") {
+      where.steps = { some: { approverId: req.user.id } };
+    }
+
+    const [total, requests] = await prisma.$transaction([
+      prisma.approvalRequest.count({ where }),
+      prisma.approvalRequest.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: REQUEST_SELECT,
+      }),
+    ]);
+
+    res.json({
+      approvalRequests: requests,
+      meta: { total, page, limit, pages: Math.ceil(total / limit) },
+    });
+  }
+);
+
+// ── GET /api/approvals/:id — fetch single approval with history ───────────────
+
+router.get(
+  "/:id",
+  requireAuth,
+  requirePermission("approvals.view"),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: "Invalid approval ID" });
+      return;
+    }
+
+    const request = await prisma.approvalRequest.findUnique({
+      where: { id },
+      select: {
+        ...REQUEST_SELECT,
+        events: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            action: true,
+            meta: true,
+            createdAt: true,
+            actor: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      res.status(404).json({ error: "Approval request not found" });
+      return;
+    }
+
+    // Non-admin can only view if they're an approver or the requester
+    const isAdmin = req.user.role === "admin" || req.user.role === "supervisor";
+    const isInvolved =
+      request.requestedBy?.id === req.user.id ||
+      request.steps.some((s) => s.approver.id === req.user.id);
+
+    if (!isAdmin && !isInvolved) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    res.json({ approvalRequest: request });
+  }
+);
+
+// ── POST /api/approvals/:id/decide — approve or reject ───────────────────────
+
+router.post(
+  "/:id/decide",
+  requireAuth,
+  requirePermission("approvals.respond"),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: "Invalid approval ID" });
+      return;
+    }
+
+    const input = validate(approvalDecisionSchema, req.body, res);
+    if (!input) return;
+
+    const result = await decide(id, req.user.id, input.decision, input.comment);
+
+    if (result.outcome === "error") {
+      res.status(422).json({ error: result.message });
+      return;
+    }
+
+    const updated = await prisma.approvalRequest.findUnique({
+      where: { id },
+      select: REQUEST_SELECT,
+    });
+    res.json({ approvalRequest: updated, requestStatus: result.requestStatus });
+  }
+);
+
+// ── POST /api/approvals/:id/cancel ────────────────────────────────────────────
+
+router.post(
+  "/:id/cancel",
+  requireAuth,
+  requirePermission("approvals.view"),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: "Invalid approval ID" });
+      return;
+    }
+
+    // Only the requester or admin/supervisor can cancel
+    const request = await prisma.approvalRequest.findUnique({
+      where: { id },
+      select: { requestedById: true, status: true },
+    });
+    if (!request) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+
+    const isAdmin = req.user.role === "admin" || req.user.role === "supervisor";
+    if (!isAdmin && request.requestedById !== req.user.id) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    const result = await cancelApproval(id, req.user.id);
+    if (!result.ok) {
+      res.status(422).json({ error: result.message });
+      return;
+    }
+
+    res.json({ ok: true });
+  }
+);
+
+export default router;

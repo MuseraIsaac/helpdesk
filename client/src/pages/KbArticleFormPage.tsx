@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import axios from "axios";
+import { marked } from "marked";
 import {
   createKbArticleSchema,
   type CreateKbArticleInput,
@@ -11,7 +12,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -21,10 +21,10 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import ErrorAlert from "@/components/ErrorAlert";
-import ErrorMessage from "@/components/ErrorMessage";
-import MarkdownRenderer from "@/components/MarkdownRenderer";
+import RichTextEditor from "@/components/RichTextEditor";
+import RichTextRenderer from "@/components/RichTextRenderer";
 import BackLink from "@/components/BackLink";
-import { Eye, Code } from "lucide-react";
+import { Eye, Edit2 } from "lucide-react";
 
 interface KbCategory {
   id: number;
@@ -42,12 +42,33 @@ interface KbArticle {
   category: KbCategory | null;
 }
 
+/**
+ * Convert an existing article body to HTML for the editor.
+ * New articles store HTML; legacy articles stored Markdown.
+ * Detection: if trimmed content starts with "<" it's already HTML.
+ */
+function toEditorHtml(body: string): string {
+  if (!body) return "";
+  const trimmed = body.trimStart();
+  if (trimmed.startsWith("<")) return body; // already HTML
+  return marked.parse(body, { async: false }) as string;
+}
+
 export default function KbArticleFormPage() {
   const { id } = useParams<{ id?: string }>();
   const isEdit = !!id;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [preview, setPreview] = useState(false);
+
+  // Body state — HTML string from the editor
+  const [bodyHtml, setBodyHtml] = useState("");
+  const [isDirtyBody, setIsDirtyBody] = useState(false);
+
+  const handleBodyChange = useCallback((html: string) => {
+    setBodyHtml(html);
+    setIsDirtyBody(true);
+  }, []);
 
   const { data: article, isLoading: articleLoading } = useQuery({
     queryKey: ["kb-article", id],
@@ -74,7 +95,6 @@ export default function KbArticleFormPage() {
     register,
     handleSubmit,
     control,
-    watch,
     reset,
     formState: { errors, isDirty },
   } = useForm<CreateKbArticleInput>({
@@ -82,31 +102,36 @@ export default function KbArticleFormPage() {
     defaultValues: { status: "draft", categoryId: null },
   });
 
+  // Seed form and editor when article loads
   useEffect(() => {
     if (article) {
       reset({
         title: article.title,
-        body: article.body,
+        body: article.body, // keep raw value for form validation
         status: article.status,
         categoryId: article.categoryId,
       });
+      setBodyHtml(toEditorHtml(article.body));
+      setIsDirtyBody(false);
     }
   }, [article, reset]);
 
-  const bodyValue = watch("body") ?? "";
+  // Preview value — always the latest editor HTML
+  const previewHtml = bodyHtml;
 
   const mutation = useMutation({
     mutationFn: async (data: CreateKbArticleInput) => {
+      const payload = { ...data, body: bodyHtml };
       if (isEdit) {
         const { data: res } = await axios.patch<{ article: KbArticle }>(
           `/api/kb/articles/${id}`,
-          data
+          payload
         );
         return res.article;
       }
       const { data: res } = await axios.post<{ article: KbArticle }>(
         "/api/kb/articles",
-        data
+        payload
       );
       return res.article;
     },
@@ -118,6 +143,9 @@ export default function KbArticleFormPage() {
       navigate("/kb");
     },
   });
+
+  const canSave = !mutation.isPending && bodyHtml.trim().length > 0 &&
+    (isEdit ? isDirty || isDirtyBody : true);
 
   if (isEdit && articleLoading) {
     return (
@@ -158,7 +186,9 @@ export default function KbArticleFormPage() {
             {...register("title")}
             placeholder="Article title"
           />
-          {errors.title && <ErrorMessage message={errors.title.message} />}
+          {errors.title && (
+            <p className="text-sm text-destructive">{errors.title.message}</p>
+          )}
         </div>
 
         {/* Category + Status row */}
@@ -170,7 +200,11 @@ export default function KbArticleFormPage() {
               control={control}
               render={({ field }) => (
                 <Select
-                  value={field.value !== null && field.value !== undefined ? String(field.value) : "none"}
+                  value={
+                    field.value !== null && field.value !== undefined
+                      ? String(field.value)
+                      : "none"
+                  }
                   onValueChange={(v) =>
                     field.onChange(v === "none" ? null : Number(v))
                   }
@@ -197,10 +231,7 @@ export default function KbArticleFormPage() {
               name="status"
               control={control}
               render={({ field }) => (
-                <Select
-                  value={field.value ?? "draft"}
-                  onValueChange={field.onChange}
-                >
+                <Select value={field.value ?? "draft"} onValueChange={field.onChange}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -214,10 +245,10 @@ export default function KbArticleFormPage() {
           </div>
         </div>
 
-        {/* Body with preview toggle */}
+        {/* Body — editor / preview toggle */}
         <div className="grid gap-2">
           <div className="flex items-center justify-between">
-            <Label htmlFor="body">Body (Markdown)</Label>
+            <Label>Body</Label>
             <button
               type="button"
               onClick={() => setPreview((p) => !p)}
@@ -225,7 +256,7 @@ export default function KbArticleFormPage() {
             >
               {preview ? (
                 <>
-                  <Code className="h-3.5 w-3.5" />
+                  <Edit2 className="h-3.5 w-3.5" />
                   Edit
                 </>
               ) : (
@@ -239,40 +270,34 @@ export default function KbArticleFormPage() {
 
           {preview ? (
             <div className="min-h-[300px] rounded-md border p-4 bg-muted/30">
-              {bodyValue ? (
-                <MarkdownRenderer content={bodyValue} />
+              {previewHtml ? (
+                <RichTextRenderer content={previewHtml} />
               ) : (
                 <p className="text-muted-foreground text-sm">Nothing to preview</p>
               )}
             </div>
           ) : (
-            <Textarea
-              id="body"
-              {...register("body")}
-              placeholder="Write your article in Markdown…"
-              rows={16}
-              className="font-mono text-sm"
+            <RichTextEditor
+              content={bodyHtml}
+              onChange={handleBodyChange}
+              placeholder="Write your article here…"
+              minHeight="300px"
             />
           )}
-          {errors.body && <ErrorMessage message={errors.body.message} />}
+          {errors.body && (
+            <p className="text-sm text-destructive">{errors.body.message}</p>
+          )}
         </div>
 
         <div className="flex items-center gap-3 pt-1">
-          <Button
-            type="submit"
-            disabled={mutation.isPending || (isEdit && !isDirty)}
-          >
+          <Button type="submit" disabled={!canSave}>
             {mutation.isPending
               ? "Saving…"
               : isEdit
               ? "Save changes"
               : "Create article"}
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => navigate("/kb")}
-          >
+          <Button type="button" variant="outline" onClick={() => navigate("/kb")}>
             Cancel
           </Button>
         </div>
