@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
+import RichTextEditor from "@/components/RichTextEditor";
 import { useMe, useUpdateProfile, useUpdatePreferences, useChangePassword } from "@/hooks/useMe";
 import { useTheme } from "@/lib/theme";
 import {
@@ -61,6 +62,14 @@ function ProfileTab() {
   const updateProfile = useUpdateProfile();
   const user = data?.user;
 
+  // Signature is a rich text field — managed outside react-hook-form
+  const [signatureHtml, setSignatureHtml] = useState("");
+  const [signatureLoaded, setSignatureLoaded] = useState(false);
+
+  const handleSignatureChange = useCallback((html: string) => {
+    setSignatureHtml(html);
+  }, []);
+
   const {
     register,
     handleSubmit,
@@ -68,17 +77,21 @@ function ProfileTab() {
     formState: { errors, isDirty },
   } = useForm<UpdateProfileInput>({
     resolver: zodResolver(updateProfileSchema),
-    defaultValues: { name: "", jobTitle: null, phone: null },
+    defaultValues: { name: "", jobTitle: null, phone: null, signature: null },
   });
 
   // Seed form when data loads
   useEffect(() => {
     if (user) {
+      const sig = user.preference?.signature ?? "";
       reset({
         name: user.name,
         jobTitle: user.preference?.jobTitle ?? null,
         phone: user.preference?.phone ?? null,
+        signature: sig,
       });
+      setSignatureHtml(sig);
+      setSignatureLoaded(true);
     }
   }, [user, reset]);
 
@@ -86,9 +99,13 @@ function ProfileTab() {
     return <div className="h-40 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>;
   }
 
+  function onSubmitProfile(d: UpdateProfileInput) {
+    updateProfile.mutate({ ...d, signature: signatureHtml || null });
+  }
+
   return (
     <form
-      onSubmit={handleSubmit((d) => updateProfile.mutate(d))}
+      onSubmit={handleSubmit(onSubmitProfile)}
       className="space-y-6"
     >
       {updateProfile.error && (
@@ -140,8 +157,25 @@ function ProfileTab() {
         </div>
       </div>
 
+      <div className="border-t" />
+
+      <div>
+        <SectionTitle>Reply Signature</SectionTitle>
+        <p className="text-xs text-muted-foreground mb-3">
+          This signature will be automatically appended when you reply to tickets.
+        </p>
+        {signatureLoaded && (
+          <RichTextEditor
+            content={signatureHtml}
+            onChange={handleSignatureChange}
+            placeholder="Add your signature… e.g. name, title, contact info"
+            minHeight="120px"
+          />
+        )}
+      </div>
+
       <div className="flex justify-end">
-        <Button type="submit" disabled={!isDirty || updateProfile.isPending}>
+        <Button type="submit" disabled={updateProfile.isPending}>
           {updateProfile.isPending ? "Saving…" : "Save profile"}
         </Button>
       </div>

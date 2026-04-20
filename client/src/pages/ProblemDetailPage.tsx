@@ -4,7 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import axios from "axios";
-import type { Problem, LinkedIncident, ProblemNote, ProblemEvent } from "core/constants/problem.ts";
+import type { Problem, LinkedIncident, LinkedTicket, ProblemNote, ProblemEvent } from "core/constants/problem.ts";
 import {
   problemStatusTransitions,
   problemStatusLabel,
@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import SearchableSelect from "@/components/SearchableSelect";
 import {
   Dialog,
   DialogContent,
@@ -55,6 +56,7 @@ import {
   Lightbulb,
   AlertTriangle,
   Database,
+  Ticket,
 } from "lucide-react";
 
 // ── Event label map ───────────────────────────────────────────────────────────
@@ -71,6 +73,8 @@ const EVENT_LABELS: Record<string, (meta: Record<string, unknown>) => string> = 
   "problem.incident_linked":    (m) => `Incident ${m.incidentNumber} linked`,
   "problem.incident_unlinked":  (m) => `Incident #${m.incidentId} unlinked`,
   "problem.incidents_linked":   (m) => `${Array.isArray(m.incidentIds) ? m.incidentIds.length : 1} incident(s) linked`,
+  "problem.ticket_linked":      (m) => `Ticket ${m.ticketNumber} linked`,
+  "problem.ticket_unlinked":    (m) => `Ticket #${m.ticketId} unlinked`,
   "problem.note_added":         (m) => `Note added (${m.noteType})`,
 };
 
@@ -213,8 +217,8 @@ function LinkedIncidentsPanel({
   const [linkError, setLinkError] = useState("");
 
   const linkMutation = useMutation({
-    mutationFn: async (incidentId: number) => {
-      await axios.post(`/api/problems/${problemId}/incidents`, { incidentId });
+    mutationFn: async (incidentNumber: string) => {
+      await axios.post(`/api/problems/${problemId}/incidents`, { incidentNumber });
     },
     onSuccess: () => {
       setLinkOpen(false);
@@ -317,13 +321,13 @@ function LinkedIncidentsPanel({
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Enter the numeric ID of the incident to link to this problem.
+              Enter an incident number (e.g. INC0004) or the ticket number it was raised from (e.g. TKT0001).
             </p>
             <div className="space-y-1.5">
-              <Label>Incident ID</Label>
+              <Label>Incident or Ticket Number</Label>
               <Input
-                type="number"
-                placeholder="e.g. 42"
+                type="text"
+                placeholder="e.g. INC0004 or TKT0001"
                 value={incidentInput}
                 onChange={(e) => { setIncidentInput(e.target.value); setLinkError(""); }}
                 autoFocus
@@ -339,11 +343,156 @@ function LinkedIncidentsPanel({
             </Button>
             <Button
               onClick={() => {
-                const id = parseInt(incidentInput, 10);
-                if (!id || id <= 0) { setLinkError("Enter a valid incident ID"); return; }
-                linkMutation.mutate(id);
+                const val = incidentInput.trim();
+                if (!val) { setLinkError("Enter a valid incident number"); return; }
+                linkMutation.mutate(val);
               }}
-              disabled={!incidentInput || linkMutation.isPending}
+              disabled={!incidentInput.trim() || linkMutation.isPending}
+            >
+              Link
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ── Linked tickets panel ──────────────────────────────────────────────────────
+
+function LinkedTicketsPanel({
+  tickets,
+  problemId,
+  isTerminal,
+  refetch,
+}: {
+  tickets: LinkedTicket[];
+  problemId: number;
+  isTerminal: boolean;
+  refetch: () => void;
+}) {
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [ticketInput, setTicketInput] = useState("");
+  const [linkError, setLinkError] = useState("");
+
+  const linkMutation = useMutation({
+    mutationFn: async (ticketNumber: string) => {
+      await axios.post(`/api/problems/${problemId}/tickets`, { ticketNumber });
+    },
+    onSuccess: () => {
+      setLinkOpen(false);
+      setTicketInput("");
+      setLinkError("");
+      refetch();
+    },
+    onError: (err: unknown) => {
+      const e = err as { response?: { data?: { error?: string } } };
+      setLinkError(e?.response?.data?.error ?? "Failed to link ticket");
+    },
+  });
+
+  const unlinkMutation = useMutation({
+    mutationFn: async (ticketId: number) => {
+      await axios.delete(`/api/problems/${problemId}/tickets/${ticketId}`);
+    },
+    onSuccess: () => refetch(),
+  });
+
+  function timeAgo(dateStr: string) {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium">
+          Linked Tickets
+          {tickets.length > 0 && (
+            <span className="ml-1.5 text-xs text-muted-foreground">({tickets.length})</span>
+          )}
+        </p>
+        {!isTerminal && (
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setLinkOpen(true)}>
+            <Plus className="h-3 w-3" />
+            Link ticket
+          </Button>
+        )}
+      </div>
+
+      {tickets.length === 0 ? (
+        <p className="text-sm text-muted-foreground italic">
+          No tickets linked yet. Link related tickets to track symptoms of this problem.
+        </p>
+      ) : (
+        <div className="space-y-1">
+          {tickets.map((t) => (
+            <div key={t.id} className="group flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-mono text-xs text-muted-foreground shrink-0">{t.ticketNumber}</span>
+                <Link to={`/tickets/${t.id}`} className="truncate hover:underline text-primary">
+                  {t.subject}
+                </Link>
+                <span className="text-xs capitalize text-muted-foreground shrink-0">
+                  {t.status.replace(/_/g, " ")}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+                  linked {timeAgo(t.linkedAt)}
+                </span>
+                {!isTerminal && (
+                  <button
+                    onClick={() => unlinkMutation.mutate(t.id)}
+                    disabled={unlinkMutation.isPending}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted-foreground hover:text-destructive transition-opacity"
+                    title="Unlink ticket"
+                  >
+                    <Unlink className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={linkOpen} onOpenChange={(v) => { setLinkOpen(v); if (!v) { setTicketInput(""); setLinkError(""); } }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Link Ticket</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Enter the ticket number to link to this problem (e.g. TKT0042).
+            </p>
+            <div className="space-y-1.5">
+              <Label>Ticket Number</Label>
+              <Input
+                type="text"
+                placeholder="e.g. TKT0042"
+                value={ticketInput}
+                onChange={(e) => { setTicketInput(e.target.value); setLinkError(""); }}
+                autoFocus
+              />
+              {linkError && <p className="text-xs text-destructive">{linkError}</p>}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLinkOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                const val = ticketInput.trim();
+                if (!val) { setLinkError("Enter a valid ticket number"); return; }
+                linkMutation.mutate(val);
+              }}
+              disabled={!ticketInput.trim() || linkMutation.isPending}
             >
               Link
             </Button>
@@ -478,9 +627,10 @@ function NotesPanel({
           <RichTextEditor
             content={bodyHtml}
             onChange={handleEditorChange}
-            placeholder="Add investigation notes, RCA findings, or workaround steps…"
+            placeholder="Add investigation notes… Use @ to mention a team member"
             minHeight="100px"
             disabled={addNote.isPending}
+            enableMentions
           />
           {addNote.error && (
             <ErrorAlert error={addNote.error} fallback="Failed to add note" />
@@ -707,6 +857,15 @@ export default function ProblemDetailPage() {
                   </span>
                 )}
               </TabsTrigger>
+              <TabsTrigger value="tickets" className="text-xs">
+                <Ticket className="h-3.5 w-3.5 mr-1.5" />
+                Tickets
+                {(problem.linkedTickets?.length ?? 0) > 0 && (
+                  <span className="ml-1 text-[11px] bg-muted rounded-full px-1">
+                    {problem.linkedTickets?.length}
+                  </span>
+                )}
+              </TabsTrigger>
               <TabsTrigger value="history" className="text-xs">
                 <Activity className="h-3.5 w-3.5 mr-1.5" />
                 Audit Trail
@@ -758,6 +917,15 @@ export default function ProblemDetailPage() {
               />
             </TabsContent>
 
+            <TabsContent value="tickets" className="mt-4 rounded-md border p-4">
+              <LinkedTicketsPanel
+                tickets={problem.linkedTickets ?? []}
+                problemId={Number(id)}
+                isTerminal={isTerminal}
+                refetch={refetch}
+              />
+            </TabsContent>
+
             <TabsContent value="history" className="mt-4 rounded-md border p-4">
               <EventTrail events={problem.events ?? []} />
             </TabsContent>
@@ -774,75 +942,48 @@ export default function ProblemDetailPage() {
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Problem Manager
               </span>
-              <Select
+              <SearchableSelect
                 value={problem.owner?.id ?? "none"}
-                onValueChange={(v) =>
-                  patchMutation.mutate({ ownerId: v === "none" ? null : v })
-                }
+                onChange={(v) => patchMutation.mutate({ ownerId: v === "none" ? null : v })}
                 disabled={isTerminal}
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="Unowned" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Unowned</SelectItem>
-                  {agentsData?.agents.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="Unowned"
+                options={[
+                  { value: "none", label: "Unowned" },
+                  ...(agentsData?.agents ?? []).map((a) => ({ value: a.id, label: a.name })),
+                ]}
+              />
             </div>
 
             <div className="space-y-1">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Analyst
               </span>
-              <Select
+              <SearchableSelect
                 value={problem.assignedTo?.id ?? "none"}
-                onValueChange={(v) =>
-                  patchMutation.mutate({ assignedToId: v === "none" ? null : v })
-                }
+                onChange={(v) => patchMutation.mutate({ assignedToId: v === "none" ? null : v })}
                 disabled={isTerminal}
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="Unassigned" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Unassigned</SelectItem>
-                  {agentsData?.agents.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="Unassigned"
+                options={[
+                  { value: "none", label: "Unassigned" },
+                  ...(agentsData?.agents ?? []).map((a) => ({ value: a.id, label: a.name })),
+                ]}
+              />
             </div>
 
             <div className="space-y-1">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Team
               </span>
-              <Select
+              <SearchableSelect
                 value={problem.team?.id != null ? String(problem.team.id) : "none"}
-                onValueChange={(v) =>
-                  patchMutation.mutate({ teamId: v === "none" ? null : Number(v) })
-                }
+                onChange={(v) => patchMutation.mutate({ teamId: v === "none" ? null : Number(v) })}
                 disabled={isTerminal}
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="No team" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No team</SelectItem>
-                  {teamsData?.teams.map((t) => (
-                    <SelectItem key={t.id} value={String(t.id)}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="No team"
+                options={[
+                  { value: "none", label: "No team" },
+                  ...(teamsData?.teams ?? []).map((t) => ({ value: String(t.id), label: t.name })),
+                ]}
+              />
             </div>
           </div>
 

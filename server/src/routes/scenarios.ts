@@ -1,18 +1,21 @@
 /**
  * /api/scenarios — Scenario Automation endpoints.
  *
- * Scenarios are admin-configured, named sets of actions that agents can
- * manually invoke on a ticket. Unlike WorkflowDefinitions (which fire
- * automatically on trigger events), scenarios have no triggers or conditions
- * — they exist purely to be explicitly invoked by a human operator.
+ * Any agent can create scenarios (scenarios.run). Agents own and manage their
+ * own scenarios; admins/supervisors (scenarios.manage) can manage all scenarios.
+ *
+ * Visibility:
+ *   public  — visible to every agent with scenarios.run
+ *   team    — visible only to members of the chosen team
+ *   private — visible only to the creator
  *
  * Endpoints:
- *   GET    /api/scenarios            — list all enabled scenarios (agents see this)
- *   POST   /api/scenarios            — create a new scenario  (admin/supervisor)
- *   PATCH  /api/scenarios/:id        — update a scenario       (admin/supervisor)
- *   DELETE /api/scenarios/:id        — delete a scenario       (admin/supervisor)
- *   POST   /api/scenarios/:id/run    — invoke a scenario on a ticket (all agents)
- *   GET    /api/scenarios/:id/runs   — execution history for a scenario (admin/supervisor)
+ *   GET    /api/scenarios            — list visible scenarios for the caller
+ *   POST   /api/scenarios            — create a scenario (any agent)
+ *   PATCH  /api/scenarios/:id        — update own scenario (admin: any scenario)
+ *   DELETE /api/scenarios/:id        — delete own scenario (admin: any scenario)
+ *   POST   /api/scenarios/:id/run    — invoke a scenario on a ticket
+ *   GET    /api/scenarios/:id/runs   — execution history (admin/supervisor)
  */
 
 import { Router } from "express";
@@ -33,61 +36,85 @@ import type { Prisma } from "../generated/prisma/client";
 
 const router = Router();
 
+const SCENARIO_SELECT = {
+  id: true, name: true, description: true, color: true,
+  isEnabled: true, actions: true,
+  visibility: true, visibilityTeamId: true,
+  visibilityTeam: { select: { id: true, name: true, color: true } },
+  createdById: true,
+  createdBy: { select: { id: true, name: true } },
+  createdAt: true, updatedAt: true,
+  _count: { select: { executions: true } },
+} as const;
+
+/** Returns true when the caller can manage ALL scenarios (not just their own). */
+function canManageAll(role: string): boolean {
+  return role === "admin" || role === "supervisor";
+}
+
+/** Build a Prisma WHERE filter so the caller only sees scenarios they are allowed to see. */
+async function visibilityWhere(userId: string): Promise<Prisma.ScenarioDefinitionWhereInput> {
+  const memberships = await prisma.teamMember.findMany({
+    where: { userId },
+    select: { teamId: true },
+  });
+  const teamIds = memberships.map((m) => m.teamId);
+  return {
+    OR: [
+      { visibility: "public" },
+      { visibility: "team", visibilityTeamId: { in: teamIds } },
+      { visibility: "private", createdById: userId },
+    ],
+  };
+}
+
 // ── GET /api/scenarios ────────────────────────────────────────────────────────
-// All agents with scenarios.run can list available scenarios.
 
 router.get(
   "/",
   requireAuth,
   requirePermission("scenarios.run"),
-  async (_req, res) => {
+  async (req, res) => {
+    const where: Prisma.ScenarioDefinitionWhereInput = canManageAll(req.user.role)
+      ? {}
+      : await visibilityWhere(req.user.id);
+
     const scenarios = await prisma.scenarioDefinition.findMany({
+      where,
       orderBy: { name: "asc" },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        color: true,
-        isEnabled: true,
-        actions: true,
-        createdAt: true,
-        updatedAt: true,
-        _count: { select: { executions: true } },
-      },
+      select: SCENARIO_SELECT,
     });
     res.json({ scenarios });
   }
 );
 
 // ── POST /api/scenarios ───────────────────────────────────────────────────────
-// Admin/supervisor: create a new scenario definition.
+// Any agent with scenarios.run can create a scenario.
 
 router.post(
   "/",
   requireAuth,
-  requirePermission("scenarios.manage"),
+  requirePermission("scenarios.run"),
   async (req, res) => {
     const data = validate(createScenarioSchema, req.body, res);
     if (!data) return;
 
+    if (data.visibility === "team" && !data.visibilityTeamId) {
+      res.status(400).json({ error: "visibilityTeamId is required when visibility is 'team'" });
+      return;
+    }
+
     const scenario = await prisma.scenarioDefinition.create({
       data: {
-        name: data.name,
-        description: data.description ?? null,
-        color: data.color ?? null,
-        actions: data.actions as unknown as Prisma.InputJsonValue,
-        createdById: req.user.id,
+        name:             data.name,
+        description:      data.description ?? null,
+        color:            data.color ?? null,
+        actions:          data.actions as unknown as Prisma.InputJsonValue,
+        visibility:       data.visibility ?? "public",
+        visibilityTeamId: data.visibility === "team" ? (data.visibilityTeamId ?? null) : null,
+        createdById:      req.user.id,
       },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        color: true,
-        isEnabled: true,
-        actions: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: SCENARIO_SELECT,
     });
 
     res.status(201).json({ scenario });
@@ -95,12 +122,12 @@ router.post(
 );
 
 // ── PATCH /api/scenarios/:id ──────────────────────────────────────────────────
-// Admin/supervisor: update name, description, color, actions, or isEnabled.
+// Owners can update their own. Admins/supervisors can update any.
 
 router.patch(
   "/:id",
   requireAuth,
-  requirePermission("scenarios.manage"),
+  requirePermission("scenarios.run"),
   async (req, res) => {
     const id = parseId(req.params.id);
     if (id === null) { res.status(400).json({ error: "Invalid scenario ID" }); return; }
@@ -111,26 +138,34 @@ router.patch(
     const existing = await prisma.scenarioDefinition.findUnique({ where: { id } });
     if (!existing) { res.status(404).json({ error: "Scenario not found" }); return; }
 
+    if (!canManageAll(req.user.role) && existing.createdById !== req.user.id) {
+      res.status(403).json({ error: "You can only edit your own scenarios" });
+      return;
+    }
+
+    if (data.visibility === "team" && data.visibilityTeamId == null) {
+      res.status(400).json({ error: "visibilityTeamId is required when visibility is 'team'" });
+      return;
+    }
+
     const updateData: Prisma.ScenarioDefinitionUpdateInput = {};
-    if (data.name !== undefined)        updateData.name        = data.name;
+    if (data.name        !== undefined) updateData.name        = data.name;
     if (data.description !== undefined) updateData.description = data.description;
-    if (data.color !== undefined)       updateData.color       = data.color;
-    if (data.isEnabled !== undefined)   updateData.isEnabled   = data.isEnabled;
-    if (data.actions !== undefined)     updateData.actions     = data.actions as unknown as Prisma.InputJsonValue;
+    if (data.color       !== undefined) updateData.color       = data.color;
+    if (data.isEnabled   !== undefined) updateData.isEnabled   = data.isEnabled;
+    if (data.actions     !== undefined) updateData.actions     = data.actions as unknown as Prisma.InputJsonValue;
+    if (data.visibility !== undefined) {
+      updateData.visibility     = data.visibility;
+      const newTeamId = data.visibility === "team" ? (data.visibilityTeamId ?? null) : null;
+      updateData.visibilityTeam = newTeamId != null
+        ? { connect: { id: newTeamId } }
+        : { disconnect: true };
+    }
 
     const updated = await prisma.scenarioDefinition.update({
       where: { id },
       data: updateData,
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        color: true,
-        isEnabled: true,
-        actions: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: SCENARIO_SELECT,
     });
 
     res.json({ scenario: updated });
@@ -138,18 +173,23 @@ router.patch(
 );
 
 // ── DELETE /api/scenarios/:id ─────────────────────────────────────────────────
-// Admin/supervisor: remove a scenario definition (cascades executions).
+// Owners can delete their own. Admins/supervisors can delete any.
 
 router.delete(
   "/:id",
   requireAuth,
-  requirePermission("scenarios.manage"),
+  requirePermission("scenarios.run"),
   async (req, res) => {
     const id = parseId(req.params.id);
     if (id === null) { res.status(400).json({ error: "Invalid scenario ID" }); return; }
 
     const existing = await prisma.scenarioDefinition.findUnique({ where: { id } });
     if (!existing) { res.status(404).json({ error: "Scenario not found" }); return; }
+
+    if (!canManageAll(req.user.role) && existing.createdById !== req.user.id) {
+      res.status(403).json({ error: "You can only delete your own scenarios" });
+      return;
+    }
 
     await prisma.scenarioDefinition.delete({ where: { id } });
     res.json({ ok: true });
@@ -180,7 +220,7 @@ router.post(
     const body = validate(runScenarioSchema, req.body, res);
     if (!body) return;
 
-    // Load scenario
+    // Load scenario and check visibility access
     const scenario = await prisma.scenarioDefinition.findUnique({ where: { id } });
     if (!scenario) { res.status(404).json({ error: "Scenario not found" }); return; }
     if (!scenario.isEnabled) {
@@ -188,22 +228,25 @@ router.post(
       return;
     }
 
+    // Enforce visibility — agents can only run scenarios they can see
+    if (!canManageAll(req.user.role)) {
+      const visible = await visibilityWhere(req.user.id);
+      const accessible = await prisma.scenarioDefinition.findFirst({ where: { id, ...visible } });
+      if (!accessible) {
+        res.status(403).json({ error: "You do not have access to this scenario" });
+        return;
+      }
+    }
+
     // Load target ticket
     const ticket = await prisma.ticket.findUnique({
       where: { id: body.ticketId },
       select: {
-        id: true,
-        subject: true,
-        body: true,
-        status: true,
-        category: true,
-        priority: true,
-        severity: true,
-        ticketType: true,
-        senderEmail: true,
-        assignedToId: true,
-        teamId: true,
-        createdAt: true,
+        id: true, subject: true, body: true, status: true,
+        category: true, priority: true, severity: true, ticketType: true,
+        impact: true, urgency: true, source: true, affectedSystem: true,
+        senderEmail: true, assignedToId: true, teamId: true,
+        linkedIncidentId: true, customFields: true, createdAt: true,
       },
     });
     if (!ticket) { res.status(404).json({ error: "Ticket not found" }); return; }
@@ -217,18 +260,24 @@ router.post(
     }
 
     const snapshot: TicketWorkflowSnapshot = {
-      id: ticket.id,
-      subject: ticket.subject,
-      body: ticket.body,
-      status: ticket.status,
-      category: ticket.category,
-      priority: ticket.priority,
-      severity: ticket.severity,
-      ticketType: ticket.ticketType,
-      senderEmail: ticket.senderEmail,
-      assignedToId: ticket.assignedToId,
-      teamId: ticket.teamId,
-      createdAt: ticket.createdAt,
+      id:               ticket.id,
+      subject:          ticket.subject,
+      body:             ticket.body,
+      status:           ticket.status,
+      category:         ticket.category,
+      priority:         ticket.priority,
+      severity:         ticket.severity,
+      ticketType:       ticket.ticketType,
+      impact:           ticket.impact,
+      urgency:          ticket.urgency,
+      source:           ticket.source,
+      affectedSystem:   ticket.affectedSystem,
+      senderEmail:      ticket.senderEmail,
+      assignedToId:     ticket.assignedToId,
+      teamId:           ticket.teamId,
+      linkedIncidentId: ticket.linkedIncidentId,
+      customFields:     (ticket.customFields as Record<string, unknown>) ?? {},
+      createdAt:        ticket.createdAt,
     };
 
     // Create execution record (status: running)

@@ -49,6 +49,8 @@ import { computeIncidentSlaDeadlines } from "./incident-sla";
 import { generateTicketNumber } from "./ticket-number";
 import { logAudit } from "./audit";
 import { logIncidentEvent } from "./incident-events";
+import { logRequestEvent } from "./request-events";
+import { applyEscalationRules } from "./apply-escalation-rules";
 import type { IncidentPriority } from "core/constants/incident-priority.ts";
 import type { TicketStatus } from "core/constants/ticket-status.ts";
 import type { TicketSeverity } from "core/constants/ticket-severity.ts";
@@ -129,15 +131,11 @@ export async function createLinkedIncident(
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
       select: {
-        subject: true,
-        body: true,
-        affectedSystem: true,
-        assignedToId: true,
-        teamId: true,
-        severity: true,
-        priority: true,
-        status: true,
-        linkedIncidentId: true,
+        subject: true, body: true, affectedSystem: true,
+        assignedToId: true, teamId: true,
+        severity: true, priority: true, impact: true, urgency: true,
+        category: true, source: true, isEscalated: true, slaBreached: true,
+        status: true, linkedIncidentId: true, customFields: true,
       },
     });
 
@@ -178,6 +176,37 @@ export async function createLinkedIncident(
       ticketId,
     });
 
+    // Evaluate escalation rules with full ticket context
+    const cfEntries = Object.entries(ticket.customFields as Record<string, unknown>)
+      .map(([k, v]) => [k, v === null || v === undefined ? "" : String(v)]);
+    void applyEscalationRules("incident", {
+      priority:          incidentPriority,
+      status:            "new",
+      isMajor:           "false",
+      slaBreached:       "false",
+      affectedSystem:    ticket.affectedSystem ?? "",
+      affectedUserCount: "",
+      ticketPriority:    ticket.priority  ?? "",
+      severity:          ticket.severity  ?? "",
+      impact:            ticket.impact    ?? "",
+      urgency:           ticket.urgency   ?? "",
+      category:          ticket.category  ?? "",
+      source:            ticket.source    ?? "",
+      ticketIsEscalated: String(ticket.isEscalated),
+      ticketSlaBreached: String(ticket.slaBreached),
+      ...Object.fromEntries(cfEntries),
+    }).then(async (escalation) => {
+      if (!escalation) return;
+      const update: { teamId?: number; assignedToId?: string } = {};
+      if (escalation.teamId && !ticket.teamId) update.teamId = escalation.teamId;
+      if (escalation.userId && !ticket.assignedToId) update.assignedToId = escalation.userId;
+      if (Object.keys(update).length === 0) return;
+      await prisma.incident.update({ where: { id: incident.id }, data: update });
+      await logIncidentEvent(incident.id, null, "incident.escalation_rule_applied", {
+        rule: escalation.ruleName, ...update,
+      });
+    });
+
     return incident.id;
   } catch (err) {
     console.error(`[ticket-sync] createLinkedIncident failed for ticket ${ticketId}:`, err);
@@ -195,16 +224,12 @@ export async function createLinkedServiceRequest(
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
       select: {
-        subject: true,
-        body: true,
-        senderName: true,
-        senderEmail: true,
-        customerId: true,
-        assignedToId: true,
-        teamId: true,
-        priority: true,
-        status: true,
-        linkedServiceRequestId: true,
+        subject: true, body: true,
+        senderName: true, senderEmail: true, customerId: true,
+        assignedToId: true, teamId: true,
+        priority: true, severity: true, impact: true, urgency: true,
+        category: true, source: true, slaBreached: true,
+        status: true, linkedServiceRequestId: true, customFields: true,
       },
     });
 
@@ -233,6 +258,36 @@ export async function createLinkedServiceRequest(
     await prisma.ticket.update({
       where: { id: ticketId },
       data: { linkedServiceRequestId: sr.id },
+    });
+
+    // Evaluate escalation rules with full ticket context
+    const cfEntries = Object.entries(ticket.customFields as Record<string, unknown>)
+      .map(([k, v]) => [k, v === null || v === undefined ? "" : String(v)]);
+    void applyEscalationRules("request", {
+      priority:        ticket.priority ?? "medium",
+      status:          requestStatus,
+      approvalStatus:  "not_required",
+      slaBreached:     "false",
+      catalogItemName: "",
+      ticketPriority:  ticket.priority  ?? "",
+      severity:        ticket.severity  ?? "",
+      impact:          ticket.impact    ?? "",
+      urgency:         ticket.urgency   ?? "",
+      category:        ticket.category  ?? "",
+      source:          ticket.source    ?? "",
+      ticketSlaBreached: String(ticket.slaBreached),
+      ticketIsEscalated: "false",
+      ...Object.fromEntries(cfEntries),
+    }).then(async (escalation) => {
+      if (!escalation) return;
+      const update: { teamId?: number; assignedToId?: string } = {};
+      if (escalation.teamId && !ticket.teamId) update.teamId = escalation.teamId;
+      if (escalation.userId && !ticket.assignedToId) update.assignedToId = escalation.userId;
+      if (Object.keys(update).length === 0) return;
+      await prisma.serviceRequest.update({ where: { id: sr.id }, data: update });
+      await logRequestEvent(sr.id, null, "request.escalation_rule_applied", {
+        rule: escalation.ruleName, ...update,
+      });
     });
 
     return sr.id;

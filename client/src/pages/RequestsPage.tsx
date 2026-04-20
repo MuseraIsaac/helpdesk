@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "react-router";
+import { useState, useCallback } from "react";
+import { Link, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth-client";
 import axios from "axios";
@@ -25,8 +25,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import ErrorAlert from "@/components/ErrorAlert";
-import NewRequestDialog from "@/components/NewRequestDialog";
-import { Inbox, ChevronRight, Clock, User } from "lucide-react";
+import ModuleBulkActionsBar from "@/components/ModuleBulkActionsBar";
+import { Inbox, ChevronRight, Clock, User, Plus } from "lucide-react";
 
 // ── Badges ────────────────────────────────────────────────────────────────────
 
@@ -111,6 +111,7 @@ const ACTIVE_STATUSES = requestStatuses.filter(
 );
 
 export default function RequestsPage() {
+  const navigate = useNavigate();
   const { data: session } = useSession();
   const currentUserId = session?.user?.id ?? "";
 
@@ -118,6 +119,15 @@ export default function RequestsPage() {
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [assignedToMe, setAssignedToMe] = useState(false);
   const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const clearSelection = useCallback(() => setSelectedIds([]), []);
+
+  function toggleRow(id: number) {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+  function toggleAll(ids: number[]) {
+    setSelectedIds((prev) => prev.length === ids.length && ids.every((id) => prev.includes(id)) ? [] : ids);
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["requests", { statusFilter, priorityFilter, assignedToMe, search }],
@@ -154,7 +164,10 @@ export default function RequestsPage() {
             )}
           </p>
         </div>
-        <NewRequestDialog />
+        <Button size="sm" className="gap-1.5" onClick={() => navigate("/requests/new")}>
+          <Plus className="h-4 w-4" />
+          New Request
+        </Button>
       </div>
 
       {/* Filters */}
@@ -226,6 +239,12 @@ export default function RequestsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8 pl-3">
+                  <input type="checkbox" className="accent-primary h-3.5 w-3.5 cursor-pointer"
+                    checked={requests.length > 0 && selectedIds.length === requests.length}
+                    ref={(el) => { if (el) el.indeterminate = selectedIds.length > 0 && selectedIds.length < requests.length; }}
+                    onChange={() => toggleAll(requests.map((r) => r.id))} />
+                </TableHead>
                 <TableHead className="w-28">Number</TableHead>
                 <TableHead>Request</TableHead>
                 <TableHead className="w-20">Priority</TableHead>
@@ -239,7 +258,13 @@ export default function RequestsPage() {
             </TableHeader>
             <TableBody>
               {requests.map((req) => (
-                <TableRow key={req.id} className="group">
+                <TableRow key={req.id} className={`group ${selectedIds.includes(req.id) ? "bg-primary/5" : ""}`}>
+                  <TableCell className="pl-3">
+                    <input type="checkbox" className="accent-primary h-3.5 w-3.5 cursor-pointer"
+                      checked={selectedIds.includes(req.id)}
+                      onChange={() => toggleRow(req.id)}
+                      onClick={(e) => e.stopPropagation()} />
+                  </TableCell>
                   <TableCell className="font-mono text-xs font-medium text-muted-foreground">
                     <Link
                       to={`/requests/${req.id}`}
@@ -311,6 +336,15 @@ export default function RequestsPage() {
           </Table>
         </div>
       )}
+
+      <ModuleBulkActionsBar
+        selectedIds={selectedIds}
+        onClearSelection={clearSelection}
+        endpoint="/api/requests"
+        queryKey={["requests"]}
+        entityLabel="request"
+        statusOptions={requestStatuses.map((s) => ({ value: s, label: requestStatusLabel[s] }))}
+      />
     </div>
   );
 }

@@ -41,16 +41,75 @@ async function executeWorkflowAction(
   switch (action.type) {
     // ── Canonical: update_field ────────────────────────────────────────────
     case "update_field": {
-      const current = (ticket as unknown as Record<string, unknown>)[action.field];
-      if (current === action.value) {
+      const { field, value } = action;
+
+      // Custom field: merge into the ticket's customFields JSON
+      if (field.startsWith("custom_")) {
+        const row = await prisma.ticket.findUnique({
+          where: { id: ticket.id },
+          select: { customFields: true },
+        });
+        const cf = (row?.customFields as Record<string, unknown>) ?? {};
+        if (String(cf[field] ?? "") === value) {
+          return { type: action.type, applied: false, skippedReason: "field_unchanged" };
+        }
+        await prisma.ticket.update({
+          where: { id: ticket.id },
+          data: { customFields: { ...cf, [field]: value } as Prisma.InputJsonValue },
+        });
+        return { type: action.type, applied: true };
+      }
+
+      // Incident Record fields: written to the linked Incident record
+      const INCIDENT_RECORD_FIELDS = new Set(["isMajor", "incidentPriority", "incidentStatus", "affectedUserCount"]);
+      if (INCIDENT_RECORD_FIELDS.has(field)) {
+        if (!ticket.linkedIncidentId) {
+          return { type: action.type, applied: false, skippedReason: "no_linked_incident" };
+        }
+        const incident = await prisma.incident.findUnique({
+          where: { id: ticket.linkedIncidentId },
+          select: { isMajor: true, priority: true, status: true, affectedUserCount: true },
+        });
+        if (!incident) {
+          return { type: action.type, applied: false, skippedReason: "incident_not_found" };
+        }
+
+        if (field === "isMajor") {
+          const boolVal = value === "true";
+          if (incident.isMajor === boolVal) {
+            return { type: action.type, applied: false, skippedReason: "field_unchanged" };
+          }
+          await prisma.incident.update({ where: { id: ticket.linkedIncidentId }, data: { isMajor: boolVal } });
+        } else if (field === "incidentPriority") {
+          if (String(incident.priority) === value) {
+            return { type: action.type, applied: false, skippedReason: "field_unchanged" };
+          }
+          await prisma.incident.update({ where: { id: ticket.linkedIncidentId }, data: { priority: value as any } });
+        } else if (field === "incidentStatus") {
+          if (String(incident.status) === value) {
+            return { type: action.type, applied: false, skippedReason: "field_unchanged" };
+          }
+          await prisma.incident.update({ where: { id: ticket.linkedIncidentId }, data: { status: value as any } });
+        } else if (field === "affectedUserCount") {
+          const numVal = value === "" ? null : parseInt(value, 10);
+          if (!isNaN(numVal as number) && incident.affectedUserCount === numVal) {
+            return { type: action.type, applied: false, skippedReason: "field_unchanged" };
+          }
+          await prisma.incident.update({ where: { id: ticket.linkedIncidentId }, data: { affectedUserCount: numVal } });
+        }
+        return { type: action.type, applied: true };
+      }
+
+      // Standard ticket field
+      const current = (ticket as unknown as Record<string, unknown>)[field];
+      if (current === value) {
         return { type: action.type, applied: false, skippedReason: "field_unchanged" };
       }
 
-      const data: Prisma.TicketUpdateInput = { [action.field]: action.value };
+      const data: Prisma.TicketUpdateInput = { [field]: value };
 
-      // Recalculate SLA deadlines when priority changes
-      if (action.field === "priority") {
-        const deadlines = computeSlaDeadlines(action.value as TicketPriority, ticket.createdAt);
+      if (field === "priority") {
+        const deadlines = computeSlaDeadlines(value as TicketPriority, ticket.createdAt);
         data.firstResponseDueAt = deadlines.firstResponseDueAt;
         data.resolutionDueAt = deadlines.resolutionDueAt;
       }

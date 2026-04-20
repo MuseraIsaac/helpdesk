@@ -55,11 +55,12 @@ export default function NoteForm({ ticketId }: NoteFormProps) {
       <RichTextEditor
         content={bodyHtml}
         onChange={handleEditorChange}
-        placeholder="Add an internal note — observations, next steps, context for the team…"
+        placeholder="Add an internal note… Use @ to mention a team member"
         minHeight="100px"
         disabled={mutation.isPending}
         editorClassName="bg-amber-500/3"
         className="border-amber-300/50 focus-within:ring-amber-400/50"
+        enableMentions
       />
 
       <div className="flex gap-2">

@@ -31,12 +31,12 @@ export default function TicketDetail({ ticket }: TicketDetailProps) {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {ticket.ticketType && (
-              <TicketTypeBadge type={ticket.ticketType} />
+              <TicketTypeBadge type={ticket.ticketType} customType={ticket.customTicketType} />
             )}
             {ticket.isEscalated && (
               <EscalationBadge reason={ticket.escalationReason} />
             )}
-            <StatusBadge status={ticket.status} />
+            <StatusBadge status={ticket.status} customStatus={ticket.customStatus} />
           </div>
         </div>
         <div className="flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-muted-foreground">

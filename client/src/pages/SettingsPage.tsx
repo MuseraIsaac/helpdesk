@@ -32,6 +32,7 @@ import {
   isSettingsSection,
   type SettingsSection,
 } from "core/schemas/settings.ts";
+import { buildSectionTokens } from "./settings/search-index";
 import {
   GeneralSection,
   BrandingSection,
@@ -140,19 +141,30 @@ const sectionComponents: Record<SettingsSection, React.FC> = {
 
 interface SearchEntry {
   section: SettingsSection;
+  /** Full lowercase token string covering all labels, descriptions, and keywords */
   tokens: string;
 }
 
-const searchIndex: SearchEntry[] = settingsSections.map((section) => {
-  const meta = settingsSectionMeta[section];
-  const tokens = [meta.label, meta.description, ...meta.keywords].join(" ").toLowerCase();
-  return { section, tokens };
-});
+// Build once at module load — tokens include full field-level content from search-index.ts
+const searchIndex: SearchEntry[] = settingsSections.map((section) => ({
+  section,
+  tokens: buildSectionTokens(section, settingsSectionMeta[section]),
+}));
 
+/**
+ * Multi-word AND search: every whitespace-separated word in the query must
+ * appear somewhere in the section's token string.
+ *
+ * Examples:
+ *   "sla breach"     → matches sections containing both "sla" and "breach"
+ *   "mfa admin"      → matches sections containing both "mfa" and "admin"
+ *   "team visibility" → matches sections containing both words
+ */
 function matchesSearch(entry: SearchEntry, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return entry.tokens.includes(q);
+  const words = q.split(/\s+/).filter(Boolean);
+  return words.every((word) => entry.tokens.includes(word));
 }
 
 // ── Settings page ─────────────────────────────────────────────────────────────

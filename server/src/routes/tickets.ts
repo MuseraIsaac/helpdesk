@@ -16,6 +16,7 @@ import { upsertCustomer } from "../lib/upsert-customer";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { htmlToText } from "../lib/html-to-text";
 import { notify } from "../lib/notify";
+import { getSection } from "../lib/settings";
 import {
   createLinkedIncident,
   createLinkedServiceRequest,
@@ -62,6 +63,12 @@ const LIST_SELECT = {
   isEscalated: true,
   escalatedAt: true,
   escalationReason: true,
+  customStatusId: true,
+  customStatus: { select: { id: true, label: true, color: true } },
+  customTicketTypeId: true,
+  customTicketType: { select: { id: true, name: true, slug: true, color: true } },
+  slaPausedAt: true,
+  slaPausedMinutes: true,
 } as const;
 
 const router = Router();
@@ -149,6 +156,9 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
       impact: data.impact ?? null,
       urgency: data.urgency ?? null,
       assignedToId: data.assignedToId ?? null,
+      teamId: data.teamId ?? null,
+      customFields: (data.customFields ?? {}) as any,
+      customTicketTypeId: data.customTicketTypeId ?? null,
       status: "open",
       source: "agent",
       firstResponseDueAt: slaDeadlines.firstResponseDueAt,
@@ -266,12 +276,15 @@ router.get("/", requireAuth, async (req, res) => {
     };
   } else {
     // Standard filter path
-    if (query.status) {
+    if (query.customStatusId) {
+      where.customStatusId = query.customStatusId;
+    } else if (query.status) {
       where.status = query.status;
     } else {
-      where.status = { in: ["open", "resolved", "closed"] };
+      where.status = { in: ["open", "in_progress", "resolved", "closed"] };
     }
-    if (query.ticketType) where.ticketType = query.ticketType;
+    if (query.ticketType)         where.ticketType         = query.ticketType;
+    if (query.customTicketTypeId) where.customTicketTypeId = query.customTicketTypeId;
     if (query.category) where.category = query.category;
     if (query.priority) where.priority = query.priority;
     if (query.severity) where.severity = query.severity;
@@ -288,6 +301,40 @@ router.get("/", requireAuth, async (req, res) => {
     }
     if (query.teamId !== undefined) {
       where.teamId = query.teamId === "none" ? null : query.teamId;
+    }
+  }
+
+  // ── Team-scoped visibility enforcement ──────────────────────────────────────
+  // Admins and supervisors always see every ticket.
+  // When teamScopedVisibility is enabled, all other roles are restricted to
+  // tickets in their team(s) — unless the user has globalTicketView = true.
+  const isUnrestricted = req.user.role === "admin" || req.user.role === "supervisor";
+  if (!isUnrestricted) {
+    const { teamScopedVisibility } = await getSection("tickets");
+    if (teamScopedVisibility) {
+      const userRecord = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: {
+          globalTicketView: true,
+          teamMemberships: { select: { teamId: true } },
+        },
+      });
+
+      if (userRecord && !userRecord.globalTicketView) {
+        const userTeamIds = userRecord.teamMemberships.map((m) => m.teamId);
+        if (userTeamIds.length > 0) {
+          // Intersect with any explicit teamId filter the client sent
+          if (query.teamId !== undefined && query.teamId !== "none") {
+            const requested = query.teamId as number;
+            where.teamId = userTeamIds.includes(requested)
+              ? requested
+              : { in: [] }; // requested team not in scope → empty result set
+          } else {
+            where.teamId = { in: userTeamIds };
+          }
+        }
+        // Agent has no teams → no restriction (prevent full lockout)
+      }
     }
   }
 
@@ -353,6 +400,8 @@ router.get("/:id", requireAuth, async (req, res) => {
       csatRating: {
         select: { rating: true, comment: true, submittedAt: true },
       },
+      customStatus: { select: { id: true, label: true, color: true } },
+      customTicketType: { select: { id: true, name: true, slug: true, color: true } },
       linkedIncident: {
         select: {
           id: true,
@@ -446,6 +495,11 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
       createdAt: true,
       resolutionDueAt: true,
       firstResponseDueAt: true,
+      firstRespondedAt: true,
+      resolvedAt: true,
+      slaPausedAt: true,
+      slaPausedMinutes: true,
+      customStatusId: true,
       linkedIncidentId: true,
       linkedServiceRequestId: true,
       assignedTo: { select: { id: true, name: true } },
@@ -454,6 +508,28 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
   if (!ticket) {
     res.status(404).json({ error: "Ticket not found" });
     return;
+  }
+
+  // Resolve new custom status and handle SLA pause transitions
+  let resolvedWorkflowState: string | undefined;
+  let newSlaBehavior: string | undefined;
+
+  if ("customStatusId" in data) {
+    if (data.customStatusId != null) {
+      const cs = await prisma.ticketStatusConfig.findUnique({ where: { id: data.customStatusId } });
+      if (!cs) {
+        res.status(400).json({ error: "Invalid custom status" });
+        return;
+      }
+      resolvedWorkflowState = cs.workflowState;
+      newSlaBehavior = cs.slaBehavior;
+    } else {
+      // Clearing custom status — treat as "continue"
+      newSlaBehavior = "continue";
+    }
+  } else if ("status" in data && data.status != null) {
+    // Switching to a built-in status always resumes SLA
+    newSlaBehavior = "continue";
   }
 
   const updateData: Prisma.TicketUpdateInput = {
@@ -471,7 +547,40 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
         ? { disconnect: true }
         : { connect: { id: data.teamId } },
     }),
+    ...("customTicketTypeId" in data && { customTicketTypeId: data.customTicketTypeId ?? null }),
+    ...("customStatusId" in data && {
+      customStatusId: data.customStatusId ?? null,
+      // Sync workflow state: when applying a custom status, move the ticket to its mapped state.
+      // When clearing, leave the current status unchanged.
+      ...(resolvedWorkflowState ? { status: resolvedWorkflowState as any } : {}),
+    }),
   };
+
+  // Handle SLA pause / resume transitions
+  if (newSlaBehavior === "on_hold" && !ticket.slaPausedAt) {
+    // Entering a paused status — stamp the pause start time
+    updateData.slaPausedAt = new Date();
+  } else if (newSlaBehavior === "continue" && ticket.slaPausedAt) {
+    // Resuming from a paused status — push deadlines forward by elapsed pause time
+    const now = new Date();
+    const pausedMs = now.getTime() - ticket.slaPausedAt.getTime();
+    const pausedMinutes = Math.round(pausedMs / 60_000);
+
+    if (ticket.firstResponseDueAt && !ticket.firstRespondedAt) {
+      updateData.firstResponseDueAt = new Date(ticket.firstResponseDueAt.getTime() + pausedMs);
+    }
+    if (ticket.resolutionDueAt && !ticket.resolvedAt) {
+      updateData.resolutionDueAt = new Date(ticket.resolutionDueAt.getTime() + pausedMs);
+    }
+    updateData.slaPausedAt = null;
+    updateData.slaPausedMinutes = (ticket.slaPausedMinutes ?? 0) + pausedMinutes;
+    // After pushing deadlines forward, re-evaluate breach flag
+    const newResolutionDue = (updateData.resolutionDueAt as Date | undefined) ?? ticket.resolutionDueAt;
+    const newFirstResponseDue = (updateData.firstResponseDueAt as Date | undefined) ?? ticket.firstResponseDueAt;
+    if ((!newResolutionDue || newResolutionDue > now) && (!newFirstResponseDue || newFirstResponseDue > now)) {
+      updateData.slaBreached = false;
+    }
+  }
 
   // Recalculate SLA deadlines when priority changes
   if ("priority" in data) {
@@ -657,6 +766,146 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
   });
 
   res.json(withSlaInfo(fresh!));
+});
+
+// ─── Bulk Actions ──────────────────────────────────────────────────────────────
+
+import { z } from "zod/v4";
+import type { WorkflowAction, TicketWorkflowSnapshot } from "../lib/workflow/types";
+import { executeWorkflowActions } from "../lib/workflow/actions";
+
+const bulkActionSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("delete"),
+    ids:    z.array(z.number().int().positive()).min(1).max(100),
+  }),
+  z.object({
+    action:      z.literal("assign"),
+    ids:         z.array(z.number().int().positive()).min(1).max(100),
+    assignedToId: z.string().nullable().optional(),
+    teamId:       z.number().int().positive().nullable().optional(),
+  }),
+  z.object({
+    action:         z.literal("status"),
+    ids:            z.array(z.number().int().positive()).min(1).max(100),
+    status:         z.string().optional(),
+    customStatusId: z.number().int().positive().nullable().optional(),
+  }),
+  z.object({
+    action:     z.literal("scenario"),
+    ids:        z.array(z.number().int().positive()).min(1).max(100),
+    scenarioId: z.number().int().positive(),
+  }),
+]);
+
+router.post("/bulk", requireAuth, requirePermission("tickets.update"), async (req, res) => {
+  const data = validate(bulkActionSchema, req.body, res);
+  if (!data) return;
+
+  switch (data.action) {
+    case "delete": {
+      const { count } = await prisma.ticket.deleteMany({ where: { id: { in: data.ids } } });
+      res.json({ affected: count });
+      return;
+    }
+
+    case "assign": {
+      const updatePayload: Prisma.TicketUpdateManyMutationInput = {};
+      if ("assignedToId" in data) updatePayload.assignedToId = data.assignedToId ?? null;
+      if ("teamId" in data) {
+        // Use raw update since teamId maps to queueId
+        await prisma.ticket.updateMany({
+          where: { id: { in: data.ids } },
+          data: {
+            ...(data.assignedToId !== undefined && { assignedToId: data.assignedToId }),
+            ...(data.teamId !== undefined && { queueId: data.teamId }),
+          } as any,
+        });
+        res.json({ affected: data.ids.length });
+        return;
+      }
+      const { count } = await prisma.ticket.updateMany({
+        where: { id: { in: data.ids } },
+        data: updatePayload,
+      });
+      res.json({ affected: count });
+      return;
+    }
+
+    case "status": {
+      let workflowState: string | undefined;
+      if (data.customStatusId) {
+        const cs = await prisma.ticketStatusConfig.findUnique({ where: { id: data.customStatusId } });
+        if (cs) workflowState = cs.workflowState;
+      }
+      await prisma.ticket.updateMany({
+        where: { id: { in: data.ids } },
+        data: {
+          ...(data.status && { status: data.status as any }),
+          ...(workflowState && { status: workflowState as any }),
+          customStatusId: data.customStatusId ?? null,
+        },
+      });
+      res.json({ affected: data.ids.length });
+      return;
+    }
+
+    case "scenario": {
+      const scenario = await prisma.scenarioDefinition.findUnique({ where: { id: data.scenarioId } });
+      if (!scenario || !scenario.isEnabled) {
+        res.status(404).json({ error: "Scenario not found or disabled" });
+        return;
+      }
+
+      const tickets = await prisma.ticket.findMany({
+        where: {
+          id: { in: data.ids },
+          status: { notIn: ["new", "processing"] },
+        },
+        select: {
+          id: true, subject: true, body: true, status: true, category: true,
+          priority: true, severity: true, ticketType: true, senderEmail: true,
+          assignedToId: true, teamId: true, createdAt: true,
+        },
+      });
+
+      const rawActions = scenario.actions as unknown as WorkflowAction[];
+      const actions = rawActions.map((a) =>
+        a.type === "assign_user" && (a as any).agentId === "__me__"
+          ? { ...a, agentId: req.user.id, agentName: req.user.name }
+          : a
+      );
+
+      let affected = 0;
+      for (const ticket of tickets) {
+        try {
+          const snapshot: TicketWorkflowSnapshot = {
+            id: ticket.id, subject: ticket.subject, body: ticket.body,
+            status: ticket.status, category: ticket.category, priority: ticket.priority,
+            severity: ticket.severity, ticketType: ticket.ticketType,
+            senderEmail: ticket.senderEmail, assignedToId: ticket.assignedToId,
+            teamId: ticket.teamId, createdAt: ticket.createdAt,
+          };
+          const results = await executeWorkflowActions(actions, snapshot);
+          const execution = await prisma.scenarioExecution.create({
+            data: { scenarioId: data.scenarioId, ticketId: ticket.id, invokedById: req.user.id, status: "completed", startedAt: new Date(), completedAt: new Date() },
+          });
+          if (results.length > 0) {
+            await prisma.scenarioExecutionStep.createMany({
+              data: results.map((r) => ({ executionId: execution.id, actionType: r.type, status: r.success ? "completed" : "failed", resultSummary: r.summary ?? null })),
+            });
+          }
+          void logAudit(ticket.id, req.user.id, "scenario.run", { scenarioId: data.scenarioId, scenarioName: scenario.name });
+          affected++;
+        } catch {
+          // Continue processing remaining tickets even if one fails
+        }
+      }
+
+      res.json({ affected });
+      return;
+    }
+  }
 });
 
 export default router;

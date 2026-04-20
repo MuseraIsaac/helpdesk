@@ -22,13 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import RichTextEditor from "@/components/RichTextEditor";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import SearchableSelect from "@/components/SearchableSelect";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
 import { Plus } from "lucide-react";
@@ -51,27 +45,21 @@ function FieldSelect<T extends string>({
   labelMap: Record<T, string>;
   placeholder: string;
 }) {
+  const selectOptions = [
+    { value: "none", label: "None" },
+    ...options.map((o) => ({ value: o, label: labelMap[o] })),
+  ];
   return (
     <Controller
       name={name}
       control={control}
       render={({ field }) => (
-        <Select
+        <SearchableSelect
           value={(field.value as string | null) ?? "none"}
-          onValueChange={(val) => field.onChange(val === "none" ? null : val)}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={placeholder} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">None</SelectItem>
-            {options.map((o) => (
-              <SelectItem key={o} value={o}>
-                {labelMap[o]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          onChange={(val) => field.onChange(val === "none" ? null : val)}
+          options={selectOptions}
+          placeholder={placeholder}
+        />
       )}
     />
   );
@@ -169,22 +157,15 @@ export default function NewTicketDialog() {
               name="ticketType"
               control={control}
               render={({ field }) => (
-                <Select
+                <SearchableSelect
                   value={(field.value as string | null) ?? "none"}
-                  onValueChange={(val) => field.onChange(val === "none" ? null : val)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Generic (untyped)</SelectItem>
-                    {ticketTypes.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {ticketTypeLabel[t]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  onChange={(val) => field.onChange(val === "none" ? null : val)}
+                  placeholder="Generic (untyped)"
+                  options={[
+                    { value: "none", label: "Generic (untyped)" },
+                    ...ticketTypes.map((t) => ({ value: t, label: ticketTypeLabel[t] })),
+                  ]}
+                />
               )}
             />
           </div>
@@ -311,24 +292,15 @@ export default function NewTicketDialog() {
                 name="assignedToId"
                 control={control}
                 render={({ field }) => (
-                  <Select
+                  <SearchableSelect
                     value={field.value ?? "unassigned"}
-                    onValueChange={(val) =>
-                      field.onChange(val === "unassigned" ? null : val)
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Unassigned" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {agentsData?.agents.map((agent) => (
-                        <SelectItem key={agent.id} value={agent.id}>
-                          {agent.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onChange={(val) => field.onChange(val === "unassigned" ? null : val)}
+                    placeholder="Unassigned"
+                    options={[
+                      { value: "unassigned", label: "Unassigned" },
+                      ...(agentsData?.agents ?? []).map((a) => ({ value: a.id, label: a.name })),
+                    ]}
+                  />
                 )}
               />
             </div>

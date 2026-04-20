@@ -93,6 +93,7 @@ type TicketSlaSnapshot = {
   resolutionDueAt: Date | null;
   firstRespondedAt: Date | null;
   resolvedAt: Date | null;
+  slaPausedAt?: Date | null;
 };
 
 /**
@@ -105,6 +106,11 @@ export function computeSlaInfo(
 ): SlaInfo {
   const { firstResponseDueAt, resolutionDueAt, firstRespondedAt, resolvedAt } = ticket;
   const isTerminal = ticket.status === "resolved" || ticket.status === "closed";
+
+  // SLA is paused — return early without computing breach times.
+  if (ticket.slaPausedAt) {
+    return { slaStatus: "paused", minutesUntilBreach: null };
+  }
 
   // No SLA configured — this shouldn't happen with current policy, but guard anyway.
   if (!firstResponseDueAt && !resolutionDueAt) {

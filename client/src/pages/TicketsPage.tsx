@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useMemo, useState, useCallback } from "react";
+import { useSearchParams, useNavigate } from "react-router";
+import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import { type TicketStatus } from "core/constants/ticket-status.ts";
 import { type TicketType } from "core/constants/ticket-type.ts";
 import { type TicketCategory, categoryLabel } from "core/constants/ticket-category.ts";
@@ -11,7 +13,7 @@ import { useTicketViews } from "@/hooks/useTicketViews";
 import { Button } from "@/components/ui/button";
 import TicketsTable from "./TicketsTable";
 import TicketsFilters from "./TicketsFilters";
-import NewTicketDialog from "@/components/NewTicketDialog";
+import BulkActionsBar from "@/components/BulkActionsBar";
 import TicketViewCustomizer from "@/components/TicketViewCustomizer";
 import {
   AlertTriangle,
@@ -21,6 +23,8 @@ import {
   X,
   Columns3,
   ChevronDown,
+  Plus,
+  Users,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -32,7 +36,9 @@ import {
 
 export interface TicketFilters {
   status?: TicketStatus;
+  customStatusId?: number;
   ticketType?: TicketType;
+  customTicketTypeId?: number;
   category?: TicketCategory;
   priority?: TicketPriority;
   severity?: TicketSeverity;
@@ -82,8 +88,10 @@ const QUICK_VIEWS: QuickView[] = [
 /** Read TicketFilters from URLSearchParams. */
 export function parseFiltersFromParams(params: URLSearchParams): TicketFilters {
   const f: TicketFilters = {};
-  if (params.has("status"))       f.status       = params.get("status") as TicketStatus;
-  if (params.has("ticketType"))   f.ticketType   = params.get("ticketType") as TicketType;
+  if (params.has("status"))             f.status             = params.get("status") as TicketStatus;
+  if (params.has("customStatusId"))     f.customStatusId     = Number(params.get("customStatusId"));
+  if (params.has("ticketType"))         f.ticketType         = params.get("ticketType") as TicketType;
+  if (params.has("customTicketTypeId")) f.customTicketTypeId = Number(params.get("customTicketTypeId"));
   if (params.has("category"))     f.category     = params.get("category") as TicketCategory;
   if (params.has("priority"))     f.priority     = params.get("priority") as TicketPriority;
   if (params.has("severity"))     f.severity     = params.get("severity") as TicketSeverity;
@@ -104,8 +112,10 @@ function filtersToRecord(
   vid?: string | null,
 ): Record<string, string> {
   const p: Record<string, string> = {};
-  if (filters.status)       p.status       = filters.status;
-  if (filters.ticketType)   p.ticketType   = filters.ticketType;
+  if (filters.status)               p.status             = filters.status;
+  if (filters.customStatusId)       p.customStatusId     = String(filters.customStatusId);
+  if (filters.ticketType)           p.ticketType         = filters.ticketType;
+  if (filters.customTicketTypeId)   p.customTicketTypeId = String(filters.customTicketTypeId);
   if (filters.category)     p.category     = filters.category;
   if (filters.priority)     p.priority     = filters.priority;
   if (filters.severity)     p.severity     = filters.severity;
@@ -139,9 +149,33 @@ function describeFilters(filters: TicketFilters): string {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+interface TicketScope {
+  scoped: boolean;
+  globalTicketView: boolean;
+  teams: { id: number; name: string; color: string }[];
+}
+
 export default function TicketsPage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [customizerOpen, setCustomizerOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [selectionResetKey, setSelectionResetKey] = useState(0);
+
+  const handleSelectionChange = useCallback((ids: number[]) => setSelectedIds(ids), []);
+  const clearSelection = useCallback(() => {
+    setSelectedIds([]);
+    setSelectionResetKey((k) => k + 1);
+  }, []);
+
+  const { data: ticketScope } = useQuery<TicketScope>({
+    queryKey: ["me-ticket-scope"],
+    queryFn: async () => {
+      const { data } = await axios.get<TicketScope>("/api/me/ticket-scope");
+      return data;
+    },
+    staleTime: 60 * 1000,
+  });
 
   const { viewList, activeView, activeConfig } = useTicketViews();
 
@@ -221,9 +255,26 @@ export default function TicketsPage() {
             <Columns3 className="h-4 w-4" />
             {activeView ? activeView.name : "Columns"}
           </Button>
-          <NewTicketDialog />
+          <Button onClick={() => navigate("/tickets/new")}>
+            <Plus className="h-4 w-4 mr-1.5" />
+            New Ticket
+          </Button>
         </div>
       </div>
+
+      {/* Team-scoped visibility indicator */}
+      {ticketScope?.scoped && ticketScope.teams.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-xs text-primary">
+          <Users className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            Showing tickets for your team{ticketScope.teams.length !== 1 ? "s" : ""}:{" "}
+            {ticketScope.teams.map((t) => (
+              <span key={t.id} className="font-semibold">{t.name}</span>
+            )).reduce<React.ReactNode[]>((acc, el, i) => i === 0 ? [el] : [...acc, ", ", el], [])}
+          </span>
+          <span className="ml-auto opacity-60">Contact an admin for broader access.</span>
+        </div>
+      )}
 
       {/* Quick view pills + saved views dropdown */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -367,6 +418,13 @@ export default function TicketsPage() {
         key={vid ?? "default"}
         filters={filters}
         viewConfig={resolvedViewConfig}
+        onSelectionChange={handleSelectionChange}
+        selectionResetKey={selectionResetKey}
+      />
+
+      <BulkActionsBar
+        selectedIds={selectedIds}
+        onClearSelection={clearSelection}
       />
 
       <TicketViewCustomizer

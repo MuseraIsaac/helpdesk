@@ -31,7 +31,8 @@ export const updateIncidentSchema = z.object({
 export type UpdateIncidentInput = z.infer<typeof updateIncidentSchema>;
 
 export const createIncidentUpdateSchema = z.object({
-  body: z.string().trim().min(1, "Update body is required").max(5000),
+  body:     z.string().trim().min(1, "Update body is required").max(5000),
+  bodyHtml: z.string().optional(),
   updateType: z.enum(incidentUpdateTypes).default("update"),
 });
 export type CreateIncidentUpdateInput = z.infer<typeof createIncidentUpdateSchema>;

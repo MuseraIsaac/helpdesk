@@ -16,12 +16,15 @@ export type KbVisibility = (typeof KB_VISIBILITIES)[number];
 
 export const createKbArticleSchema = z.object({
   title:       z.string().min(1).max(200),
+  summary:     z.string().max(500).optional().nullable(),
   body:        z.string().min(1),
   status:      z.enum(["draft", "published"]).optional(),
   reviewStatus: z.enum(KB_REVIEW_STATUSES).optional(),
   visibility:  z.enum(KB_VISIBILITIES).optional(),
   categoryId:  z.number().int().positive().nullable().optional(),
   ownerId:     z.string().nullable().optional(),
+  tags:        z.array(z.string().trim().min(1).max(50)).max(20).optional().default([]),
+  customFields: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
 export const updateKbArticleSchema = createKbArticleSchema.partial();

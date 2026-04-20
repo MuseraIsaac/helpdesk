@@ -17,17 +17,29 @@
  *   - Create a new export here following the same pattern
  *   - Register it in SettingsPage.tsx sectionComponents map
  */
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import axios from "axios";
 import { useForm, useWatch, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Link } from "react-router";
 import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
 import SettingsFormShell from "./SettingsFormShell";
 import { SettingsField, SettingsSwitchRow, SettingsGroup } from "./SettingsField";
+import EscalationRulesManager from "@/components/EscalationRulesManager";
 import { Upload, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import ErrorAlert from "@/components/ErrorAlert";
 import {
   Select,
   SelectContent,
@@ -42,7 +54,6 @@ import {
   brandingSettingsSchema,
   ticketsSettingsSchema,
   ticketNumberingSettingsSchema,
-  seriesConfigSchema,
   slaSettingsSchema,
   knowledgeBaseSettingsSchema,
   templatesSettingsSchema,
@@ -352,6 +363,17 @@ export function TicketsSection() {
         </SettingsField>
       </SettingsGroup>
 
+      <SettingsGroup title="Visibility">
+        <SettingsSwitchRow
+          label="Team-scoped ticket visibility"
+          description="When enabled, agents only see tickets assigned to their team(s). Admins and supervisors are never restricted. Individual agents can be granted a global override in Administration → Users."
+        >
+          <Controller name="teamScopedVisibility" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
+
       <SettingsGroup title="Behavior">
         <SettingsSwitchRow label="Auto-assignment" description="Automatically assign new tickets to available agents based on workload.">
           <Controller name="autoAssignment" control={control} render={({ field }) => (
@@ -403,14 +425,12 @@ export function TicketsSection() {
 
 // ── 4. Ticket Numbering ───────────────────────────────────────────────────────
 
-type TicketSeriesKey = "incident" | "service_request" | "change_request" | "problem" | "generic";
+type TicketSeriesKey = "ticket" | "change_request" | "problem";
 
 const SERIES_META: { key: TicketSeriesKey; label: string; description: string }[] = [
-  { key: "incident",        label: "Incident",        description: "INC — system outages, failures, unexpected disruptions" },
-  { key: "service_request", label: "Service Request",  description: "SR — standard, pre-approved requests" },
-  { key: "change_request",  label: "Change Request",   description: "CHG — changes to systems or infrastructure" },
-  { key: "problem",         label: "Problem",          description: "PRB — root cause investigations" },
-  { key: "generic",         label: "Generic",          description: "TKT — tickets with no specific type assigned" },
+  { key: "ticket",         label: "Ticket",         description: "Shared counter for Incidents, Service Requests, and untyped tickets — all numbered together" },
+  { key: "change_request", label: "Change Request",  description: "Separate counter for changes to systems or infrastructure" },
+  { key: "problem",        label: "Problem",         description: "Separate counter for root cause investigations" },
 ];
 
 function buildPreview(config: Partial<SeriesConfig>, now = new Date()): string {
@@ -575,9 +595,9 @@ export function TicketNumberingSection() {
       </div>
 
       <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground space-y-1">
+        <p><span className="font-semibold text-foreground">Ticket counter</span> — Incidents, Service Requests, and untyped tickets all share one counter and prefix. A TKT0001 incident and a TKT0002 service request are counted together.</p>
         <p><span className="font-semibold text-foreground">Start At</span> — seeds the counter only when no ticket in that series exists yet. It has no effect once the first number has been issued.</p>
-        <p><span className="font-semibold text-foreground">Reset</span> — resets the sequence each year or month. Combine with a date segment to produce formats like <span className="font-mono">INC20240001</span>.</p>
-        <p><span className="font-semibold text-foreground">Generic</span> — used when a ticket has no type (e.g. inbound emails before AI classification).</p>
+        <p><span className="font-semibold text-foreground">Reset</span> — resets the sequence each year or month. Combine with a date segment to produce formats like <span className="font-mono">TKT202400001</span>.</p>
       </div>
     </SettingsFormShell>
   );
@@ -1481,7 +1501,18 @@ export function IncidentsSection() {
             </Select>
           )} />
         </SettingsField>
+        <SettingsSwitchRow label="Enable escalation rules" description="Automatically escalate incidents to specific teams/agents based on field conditions.">
+          <Controller name="autoEscalate" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
       </SettingsGroup>
+
+      {data?.autoEscalate && (
+        <SettingsGroup title="Escalation Rules">
+          <EscalationRulesManager module="incident" />
+        </SettingsGroup>
+      )}
     </SettingsFormShell>
   );
 }
@@ -1558,6 +1589,20 @@ export function RequestsSection() {
           </div>
         </SettingsField>
       </SettingsGroup>
+
+      <SettingsGroup title="Escalation">
+        <SettingsSwitchRow label="Enable escalation rules" description="Automatically escalate requests to specific teams/agents based on field conditions.">
+          <Controller name="autoEscalate" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
+
+      {data?.autoEscalate && (
+        <SettingsGroup title="Escalation Rules">
+          <EscalationRulesManager module="request" />
+        </SettingsGroup>
+      )}
     </SettingsFormShell>
   );
 }
@@ -1640,6 +1685,14 @@ export function ChangesSection() {
   const freezeEnabled = useWatch({ control, name: "freezeWindowEnabled" });
   const pirEnabled    = useWatch({ control, name: "postImplementationReviewEnabled" });
 
+  const { data: cabGroups = [] } = useQuery({
+    queryKey: ["cab-groups"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ groups: { id: number; name: string; isActive: boolean }[] }>("/api/cab-groups");
+      return data.groups;
+    },
+  });
+
   return (
     <SettingsFormShell
       title="Changes"
@@ -1709,6 +1762,43 @@ export function ChangesSection() {
       </SettingsGroup>
 
       <SettingsGroup title="CAB Approval">
+        <SettingsField
+          label="Default CAB group"
+          description="Members of this group are the authorised approvers for change requests that require CAB review. Manage members in Administration → CAB Groups."
+          htmlFor="defaultCabGroupId"
+        >
+          <Controller
+            name="defaultCabGroupId"
+            control={control}
+            render={({ field }) => (
+              <Select
+                value={field.value != null ? String(field.value) : "__none__"}
+                onValueChange={(v) => field.onChange(v === "__none__" ? null : Number(v))}
+              >
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="No group set" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No group set</SelectItem>
+                  {cabGroups.map((g) => (
+                    <SelectItem key={g.id} value={String(g.id)}>
+                      {g.name}{!g.isActive ? " (inactive)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+          {cabGroups.length === 0 && (
+            <p className="text-[11px] text-muted-foreground mt-1">
+              No CAB groups yet.{" "}
+              <a href="/admin/cab-groups" className="text-primary underline underline-offset-2">
+                Create one
+              </a>{" "}
+              first.
+            </p>
+          )}
+        </SettingsField>
         <SettingsSwitchRow label="Require CAB for normal changes" description="Normal and major changes must be reviewed by the Change Advisory Board.">
           <Controller name="requireCabForNormal" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
@@ -1724,6 +1814,36 @@ export function ChangesSection() {
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
+        <SettingsSwitchRow
+          label="Sequential CAB approval"
+          description="When on, CAB members must approve one at a time in the listed order. When off (default), all CAB members are notified simultaneously and can approve in any order."
+        >
+          <Controller name="cabApprovalSequential" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsField
+          label="Minimum CAB approvers"
+          description="The minimum number of CAB members that must be selected before a change can be submitted for approval."
+          htmlFor="minCabApprovers"
+        >
+          <div className="flex items-center gap-2">
+            <Input id="minCabApprovers" type="number" min={1} className="w-20"
+              {...register("minCabApprovers", { valueAsNumber: true })} />
+            <span className="text-xs text-muted-foreground">approvers</span>
+          </div>
+        </SettingsField>
+        <SettingsField
+          label="Max Approval Sends"
+          description="Total number of times an approval request can be sent to the same CAB member for a single change. Includes the initial send and all subsequent resends."
+          htmlFor="maxApprovalResends"
+        >
+          <div className="flex items-center gap-2">
+            <Input id="maxApprovalResends" type="number" min={1} className="w-20"
+              {...register("maxApprovalResends", { valueAsNumber: true })} />
+            <span className="text-xs text-muted-foreground">sends</span>
+          </div>
+        </SettingsField>
       </SettingsGroup>
 
       <SettingsGroup title="Scheduling Rules">
@@ -2001,6 +2121,174 @@ export function CmdbSection() {
 
 // ── 19. Notifications ─────────────────────────────────────────────────────────
 
+// ── Notification Email Templates sub-component ────────────────────────────────
+
+interface NotifTemplate {
+  id: number;
+  notificationEvent: string;
+  title: string;
+  emailSubject: string;
+  body: string;
+  bodyHtml?: string | null;
+  isActive: boolean;
+  updatedAt: string;
+}
+
+const NOTIF_EVENT_LABELS: Record<string, string> = {
+  "ticket.created":    "Auto-Response: Ticket Received (sent to customer)",
+  "ticket.assigned":   "Ticket Assigned to Agent / Team",
+  "ticket.escalated":  "Ticket Escalated to Agent / Team",
+  "incident.escalated":"Incident Escalated to Agent / Team",
+  "sla.breached":      "SLA Breach Alert",
+};
+
+function NotificationEmailTemplates() {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState<NotifTemplate | null>(null);
+  const [formSubject, setFormSubject] = useState("");
+  const [formBody, setFormBody] = useState("");
+  const [formBodyHtml, setFormBodyHtml] = useState("");
+  const [formActive, setFormActive] = useState(true);
+
+  const { data, isLoading } = useQuery<{ templates: NotifTemplate[] }>({
+    queryKey: ["notification-templates"],
+    queryFn: async () => { const { data } = await axios.get("/api/notification-templates"); return data; },
+  });
+
+  const seedMutation = useMutation({
+    mutationFn: async () => { const { data } = await axios.post("/api/notification-templates/seed"); return data; },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notification-templates"] }),
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      await axios.put(`/api/notification-templates/${editing!.notificationEvent}`, {
+        title:        editing!.title,
+        emailSubject: formSubject,
+        body:         formBody,
+        bodyHtml:     formBodyHtml || undefined,
+        isActive:     formActive,
+      });
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["notification-templates"] }); setEditing(null); },
+  });
+
+  const templates = data?.templates ?? [];
+
+  function openEdit(t: NotifTemplate) {
+    setEditing(t);
+    setFormSubject(t.emailSubject);
+    setFormBody(t.body);
+    setFormBodyHtml(t.bodyHtml ?? "");
+    setFormActive(t.isActive);
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold">Email Notification Templates</p>
+          <p className="text-xs text-muted-foreground">
+            Customise the emails sent for each notification event. Use <code className="text-[11px] bg-muted px-1 rounded">{"{{entity.number}}"}</code>, <code className="text-[11px] bg-muted px-1 rounded">{"{{recipient.name}}"}</code>, etc.
+          </p>
+        </div>
+        {templates.length === 0 && (
+          <Button type="button" size="sm" variant="outline" className="text-xs h-8 shrink-0"
+            onClick={() => seedMutation.mutate()} disabled={seedMutation.isPending}>
+            {seedMutation.isPending ? "Loading…" : "Load Defaults"}
+          </Button>
+        )}
+      </div>
+
+      {isLoading && <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>}
+
+      {!isLoading && templates.length === 0 && (
+        <div className="rounded-lg border border-dashed px-4 py-6 text-center">
+          <p className="text-sm text-muted-foreground">No email templates yet.</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Click "Load Defaults" to insert built-in templates.</p>
+        </div>
+      )}
+
+      {templates.length > 0 && (
+        <div className="space-y-2">
+          {templates.map((t) => (
+            <div key={t.id} className={`rounded-lg border px-4 py-3 flex items-start gap-3 ${!t.isActive ? "opacity-55 bg-muted/20" : ""}`}>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">{NOTIF_EVENT_LABELS[t.notificationEvent] ?? t.notificationEvent}</p>
+                <p className="text-xs text-muted-foreground mt-0.5 truncate">Subject: {t.emailSubject}</p>
+                {!t.isActive && <span className="text-[10px] bg-muted text-muted-foreground rounded px-1.5 py-0.5 mt-1 inline-block">Disabled</span>}
+              </div>
+              <Button type="button" size="sm" variant="ghost" className="h-7 text-xs shrink-0" onClick={() => openEdit(t)}>
+                Edit
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Edit dialog */}
+      {editing && (
+        <Dialog open={!!editing} onOpenChange={(o) => { if (!o) setEditing(null); }}>
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Email Template</DialogTitle>
+              <p className="text-sm text-muted-foreground">{NOTIF_EVENT_LABELS[editing.notificationEvent] ?? editing.notificationEvent}</p>
+            </DialogHeader>
+            <div className="space-y-4 pt-1">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Subject line</Label>
+                <Input value={formSubject} onChange={e => setFormSubject(e.target.value)} placeholder="Subject…" className="text-sm" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Plain-text body</Label>
+                <Textarea value={formBody} onChange={e => setFormBody(e.target.value)} className="min-h-[140px] text-sm font-mono" placeholder="Plain text version…" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">HTML body <span className="text-muted-foreground font-normal">(optional — used when client supports HTML)</span></Label>
+                <Textarea value={formBodyHtml} onChange={e => setFormBodyHtml(e.target.value)} className="min-h-[140px] text-sm font-mono" placeholder="<p>HTML version…</p>" />
+              </div>
+              <div className="rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground">Available variables</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                  {[
+                    ["{{entity.number}}", "Ticket / incident number"],
+                    ["{{entity.title}}", "Subject / title"],
+                    ["{{entity.status}}", "Current status"],
+                    ["{{entity.priority}}", "Priority level"],
+                    ["{{entity.url}}", "Link to the record"],
+                    ["{{recipient.name}}", "Recipient's name"],
+                    ["{{sender.name}}", "Customer name"],
+                    ["{{sender.email}}", "Customer email"],
+                    ["{{agent.name}}", "Assigned agent name"],
+                    ["{{team.name}}", "Team name"],
+                    ["{{note}}", "Escalation note (if set)"],
+                  ].map(([v, d]) => (
+                    <div key={v} className="flex gap-1.5 items-baseline">
+                      <code className="text-[10px] bg-background border rounded px-1 shrink-0">{v}</code>
+                      <span>{d}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch checked={formActive} onCheckedChange={setFormActive} />
+                <span className="text-sm">Template active</span>
+              </div>
+              {saveMutation.isError && <ErrorAlert error={saveMutation.error} fallback="Failed to save template" />}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setEditing(null)}>Cancel</Button>
+              <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+                {saveMutation.isPending ? "Saving…" : "Save Template"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}
+
 export function NotificationsSection() {
   const { data, isLoading } = useSettings("notifications");
   const update = useUpdateSettings("notifications");
@@ -2089,6 +2377,10 @@ export function NotificationsSection() {
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Email Templates">
+        <NotificationEmailTemplates />
       </SettingsGroup>
     </SettingsFormShell>
   );

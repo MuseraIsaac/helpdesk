@@ -430,6 +430,103 @@ function EditChangeDialog({ changeId, change, open, onOpenChange, onSaved }: Edi
   );
 }
 
+// ── Notifications form ────────────────────────────────────────────────────────
+
+interface NotificationsFormProps {
+  changeId: number;
+  change: Change;
+  onSaved: () => void;
+  readonly: boolean;
+}
+
+function NotificationsForm({ changeId, change, onSaved, readonly }: NotificationsFormProps) {
+  const { register, handleSubmit, control, formState: { isDirty, isSubmitting } } =
+    useForm<UpdateChangeInput>({
+      resolver: zodResolver(updateChangeSchema),
+      defaultValues: {
+        notificationRequired: change.notificationRequired ?? false,
+        impactedUsers:        change.impactedUsers        ?? "",
+        communicationNotes:   change.communicationNotes   ?? "",
+      },
+    });
+
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const onSubmit = async (data: UpdateChangeInput) => {
+    setSaveError(null);
+    try {
+      await axios.patch(`/api/changes/${changeId}`, {
+        notificationRequired: data.notificationRequired ?? false,
+        impactedUsers:        data.impactedUsers   || null,
+        communicationNotes:   data.communicationNotes || null,
+      });
+      onSaved();
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        setSaveError(err.response?.data?.error ?? "Failed to save notification information");
+      }
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      {saveError && <ErrorAlert message={saveError} />}
+
+      {/* Notification required toggle */}
+      <div>
+        <SectionHeader>Stakeholder Notification</SectionHeader>
+        <div className="flex items-center gap-3">
+          <Controller
+            name="notificationRequired"
+            control={control}
+            render={({ field }) => (
+              <Switch
+                checked={field.value ?? false}
+                onCheckedChange={field.onChange}
+                disabled={readonly}
+              />
+            )}
+          />
+          <span className="text-sm text-muted-foreground">
+            Notification required for impacted customers / users
+          </span>
+        </div>
+      </div>
+
+      {/* Impacted users */}
+      <div>
+        <SectionHeader>Impacted Users / Customers</SectionHeader>
+        <Textarea
+          {...register("impactedUsers")}
+          placeholder="List the impacted customers, user groups, or departments that need to be notified…"
+          className="text-sm min-h-[80px] resize-y"
+          disabled={readonly}
+        />
+      </div>
+
+      {/* Communication notes */}
+      <div>
+        <SectionHeader>Communication Notes</SectionHeader>
+        <Textarea
+          {...register("communicationNotes")}
+          placeholder="Record what was communicated, to whom, through which channel, and when. Include any email subjects, Slack messages, or ticket references…"
+          className="text-sm min-h-[120px] resize-y"
+          disabled={readonly}
+        />
+      </div>
+
+      {!readonly && (
+        <div className="flex items-center justify-end pt-1">
+          <Button type="submit" size="sm" disabled={!isDirty || isSubmitting} className="h-7 text-xs gap-1.5">
+            <Save className="h-3 w-3" />
+            {isSubmitting ? "Saving…" : "Save notification info"}
+          </Button>
+        </div>
+      )}
+    </form>
+  );
+}
+
 // ── Closure form ──────────────────────────────────────────────────────────────
 
 const CLOSURE_ELIGIBLE = new Set(["implement", "review", "closed", "failed", "cancelled"]);
@@ -449,6 +546,7 @@ function ClosureForm({ changeId, change, onSaved }: ClosureFormProps) {
       defaultValues: {
         implementationOutcome: change.implementationOutcome ?? undefined,
         rollbackUsed:   change.rollbackUsed   ?? false,
+        closureCode:    change.closureCode    ?? "",
         closureNotes:   change.closureNotes   ?? "",
         reviewSummary:  change.reviewSummary  ?? "",
         lessonsLearned: change.lessonsLearned ?? "",
@@ -463,6 +561,7 @@ function ClosureForm({ changeId, change, onSaved }: ClosureFormProps) {
       await axios.patch(`/api/changes/${changeId}`, {
         implementationOutcome: data.implementationOutcome ?? null,
         rollbackUsed:   data.rollbackUsed ?? null,
+        closureCode:    data.closureCode    || null,
         closureNotes:   data.closureNotes   || null,
         reviewSummary:  data.reviewSummary  || null,
         lessonsLearned: data.lessonsLearned || null,
@@ -538,6 +637,20 @@ function ClosureForm({ changeId, change, onSaved }: ClosureFormProps) {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Closure code */}
+      <div>
+        <SectionHeader>Closure Code</SectionHeader>
+        <Input
+          {...register("closureCode")}
+          placeholder="e.g. SUCC, FAIL, ORG-001 (optional)"
+          className="text-sm max-w-xs"
+          disabled={isReadonly}
+        />
+        <p className="text-[11px] text-muted-foreground mt-1">
+          Short closure code or status label used by your organisation.
+        </p>
       </div>
 
       {/* Closure notes */}
@@ -744,14 +857,15 @@ export default function ChangeDetailPage() {
               <div className="border-b px-5 pt-0 shrink-0 bg-background">
                 <TabsList className="h-auto bg-transparent p-0 gap-0 rounded-none">
                   {[
-                    { value: "overview",     label: "Overview",     icon: <FileText       className="h-3 w-3" /> },
-                    { value: "planning",     label: "Planning",     icon: <Shield         className="h-3 w-3" /> },
-                    { value: "tasks",        label: "Tasks",        icon: <ListChecks     className="h-3 w-3" />,
+                    { value: "overview",       label: "Overview",       icon: <FileText       className="h-3 w-3" /> },
+                    { value: "planning",       label: "Planning",       icon: <Shield         className="h-3 w-3" /> },
+                    { value: "tasks",          label: "Tasks",          icon: <ListChecks     className="h-3 w-3" />,
                       badge: change.tasks?.length ?? 0 },
-                    { value: "attachments",  label: "Attachments",  icon: <Paperclip      className="h-3 w-3" /> },
-                    { value: "closure",      label: "Closure",      icon: <ClipboardCheck className="h-3 w-3" /> },
-                    { value: "conflicts",    label: "Conflicts",    icon: <AlertTriangle  className="h-3 w-3" /> },
-                    { value: "history",      label: "History",      icon: <Activity       className="h-3 w-3" /> },
+                    { value: "notifications",  label: "Notifications",  icon: <Users          className="h-3 w-3" /> },
+                    { value: "attachments",    label: "Attachments",    icon: <Paperclip      className="h-3 w-3" /> },
+                    { value: "closure",        label: "Closure",        icon: <ClipboardCheck className="h-3 w-3" /> },
+                    { value: "conflicts",      label: "Conflicts",      icon: <AlertTriangle  className="h-3 w-3" /> },
+                    { value: "history",        label: "History",        icon: <Activity       className="h-3 w-3" /> },
                   ].map((tab) => (
                     <TabsTrigger
                       key={tab.value}
@@ -863,6 +977,37 @@ export default function ChangeDetailPage() {
 
                 {/* Justification */}
                 {change.justification && <RichBlock label="Justification" content={change.justification} />}
+
+                {/* Notification / Communication */}
+                {(change.notificationRequired != null || change.impactedUsers || change.communicationNotes) && (
+                  <div>
+                    <SectionHeader>Notification &amp; Communication</SectionHeader>
+                    <div className="divide-y divide-border/50">
+                      {change.notificationRequired != null && (
+                        <FieldRow label="Notification">
+                          {change.notificationRequired ? (
+                            <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 font-medium text-xs">
+                              Required
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">Not required</span>
+                          )}
+                        </FieldRow>
+                      )}
+                      {change.impactedUsers && (
+                        <FieldRow label="Impacted users">{change.impactedUsers}</FieldRow>
+                      )}
+                    </div>
+                    {change.communicationNotes && (
+                      <div className="mt-3">
+                        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                          Communication notes
+                        </p>
+                        <p className="text-sm whitespace-pre-wrap">{change.communicationNotes}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </TabsContent>
 
               {/* ── Planning tab ── */}
@@ -876,6 +1021,11 @@ export default function ChangeDetailPage() {
                  !change.riskAssessmentAndMitigation && !change.rollbackPlan && (
                   <p className="text-sm text-muted-foreground py-4">No planning documents recorded.</p>
                 )}
+              </TabsContent>
+
+              {/* ── Notifications tab ── */}
+              <TabsContent value="notifications" className="flex-1 overflow-y-auto p-5 mt-0">
+                <NotificationsForm changeId={changeId} change={change} onSaved={invalidateChange} readonly={isClosed ?? false} />
               </TabsContent>
 
               {/* ── Tasks tab ── */}
@@ -1025,6 +1175,11 @@ export default function ChangeDetailPage() {
                         {implementationOutcomeLabel[change.implementationOutcome]}
                       </span>
                     </SideRow>
+                    {change.closureCode && (
+                      <SideRow label="Closure code">
+                        <span className="font-mono text-[11px]">{change.closureCode}</span>
+                      </SideRow>
+                    )}
                     {change.rollbackUsed !== null && change.rollbackUsed !== undefined && (
                       <SideRow label="Rollback">
                         <span className="flex items-center gap-1">
@@ -1033,6 +1188,26 @@ export default function ChangeDetailPage() {
                         </span>
                       </SideRow>
                     )}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {change.notificationRequired != null && (
+              <>
+                <Separator />
+                <div className="px-4 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">
+                    Notifications
+                  </p>
+                  <div className="divide-y divide-border/40">
+                    <SideRow label="Required">
+                      {change.notificationRequired ? (
+                        <span className="text-amber-600 dark:text-amber-400 font-medium">Yes</span>
+                      ) : (
+                        <span className="text-muted-foreground">No</span>
+                      )}
+                    </SideRow>
                   </div>
                 </div>
               </>

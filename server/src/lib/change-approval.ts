@@ -85,6 +85,46 @@ export async function requestChangeApproval(
  * Return the most recent ApprovalRequest for a change (or null).
  * Used by GET /api/changes/:id/approval and by the UI panel.
  */
+const APPROVAL_SELECT = {
+  id: true,
+  status: true,
+  approvalMode: true,
+  requiredCount: true,
+  expiresAt: true,
+  resolvedAt: true,
+  createdAt: true,
+  requestedBy: { select: { id: true, name: true } },
+  steps: {
+    orderBy: { stepOrder: "asc" as const },
+    select: {
+      id: true,
+      stepOrder: true,
+      status: true,
+      isActive: true,
+      dueAt: true,
+      approver: { select: { id: true, name: true, email: true } },
+      decisions: {
+        select: {
+          id: true,
+          decision: true,
+          comment: true,
+          decidedAt: true,
+          decidedBy: { select: { id: true, name: true } },
+        },
+      },
+    },
+  },
+} as const;
+
+/** Return all approval requests for a change, newest first. */
+export async function getAllChangeApprovals(changeId: number) {
+  return prisma.approvalRequest.findMany({
+    where: { subjectType: "change_request", subjectId: String(changeId) },
+    orderBy: { createdAt: "desc" },
+    select: APPROVAL_SELECT,
+  });
+}
+
 export async function getChangeApproval(changeId: number) {
   return prisma.approvalRequest.findFirst({
     where: {

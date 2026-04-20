@@ -8,6 +8,7 @@ import {
   updateProblemSchema,
   listProblemsQuerySchema,
   linkIncidentSchema,
+  linkTicketSchema,
   createProblemNoteSchema,
 } from "core/schemas/problems.ts";
 import {
@@ -16,6 +17,7 @@ import {
 } from "core/constants/problem-status.ts";
 import { logProblemEvent } from "../lib/problem-events";
 import { logIncidentEvent } from "../lib/incident-events";
+import { notifyMentions } from "../lib/mentions";
 import { generateTicketNumber } from "../lib/ticket-number";
 import prisma from "../db";
 import type { Prisma, TicketPriority, ProblemStatus } from "../generated/prisma/client";
@@ -102,6 +104,24 @@ const DETAIL_SELECT = {
     select: {
       ci: { select: CI_SUMMARY_SELECT },
       linkedAt: true,
+    },
+  },
+  linkedTickets: {
+    orderBy: { linkedAt: "asc" as const },
+    select: {
+      id: true,
+      linkedAt: true,
+      linkedBy: { select: { id: true, name: true } },
+      ticket: {
+        select: {
+          id: true,
+          ticketNumber: true,
+          subject: true,
+          status: true,
+          priority: true,
+          createdAt: true,
+        },
+      },
     },
   },
 } as const;
@@ -224,9 +244,20 @@ router.get(
       linkedBy: link.linkedBy,
     }));
 
+    const linkedTickets = problem.linkedTickets.map((link) => ({
+      id: link.ticket.id,
+      ticketNumber: link.ticket.ticketNumber,
+      subject: link.ticket.subject,
+      status: link.ticket.status,
+      priority: link.ticket.priority,
+      createdAt: link.ticket.createdAt,
+      linkedAt: link.linkedAt,
+      linkedBy: link.linkedBy,
+    }));
+
     const clusterHint = buildClusterHint(problem.linkedIncidents);
 
-    res.json({ ...problem, linkedIncidents, clusterHint });
+    res.json({ ...problem, linkedIncidents, linkedTickets, clusterHint });
   }
 );
 
@@ -282,6 +313,7 @@ router.post(
         ownerId: data.ownerId ?? null,
         assignedToId: data.assignedToId ?? null,
         teamId: data.teamId ?? null,
+        customFields: (data.customFields ?? {}) as any,
       },
       select: { id: true, problemNumber: true, status: true },
     });
@@ -533,16 +565,32 @@ router.post(
       return;
     }
 
-    const incident = await prisma.incident.findUnique({
-      where: { id: data.incidentId },
+    const ref = data.incidentNumber.toUpperCase();
+
+    // Try direct incident number lookup first, then fall back to ticket number
+    let incident = await prisma.incident.findUnique({
+      where: { incidentNumber: ref },
       select: { id: true, incidentNumber: true, title: true },
     });
-    if (!incident) { res.status(404).json({ error: "Incident not found" }); return; }
+
+    if (!incident) {
+      // Try resolving via a ticket that has a linked incident
+      const ticket = await prisma.ticket.findUnique({
+        where: { ticketNumber: ref },
+        select: { linkedIncident: { select: { id: true, incidentNumber: true, title: true } } },
+      });
+      incident = ticket?.linkedIncident ?? null;
+    }
+
+    if (!incident) {
+      res.status(404).json({ error: "Incident not found. Check the incident number (e.g. INC0004) or ticket number (e.g. TKT0001)." });
+      return;
+    }
 
     // Upsert — silently OK if already linked
     await prisma.problemIncidentLink.upsert({
-      where: { problemId_incidentId: { problemId: id, incidentId: data.incidentId } },
-      create: { problemId: id, incidentId: data.incidentId, linkedById: req.user.id },
+      where: { problemId_incidentId: { problemId: id, incidentId: incident.id } },
+      create: { problemId: id, incidentId: incident.id, linkedById: req.user.id },
       update: {},
     });
 
@@ -583,6 +631,79 @@ router.delete(
   }
 );
 
+// ── POST /api/problems/:id/tickets ───────────────────────────────────────────
+// Link a ticket to this problem
+
+router.post(
+  "/:id/tickets",
+  requireAuth,
+  requirePermission("problems.manage"),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+    const data = validate(linkTicketSchema, req.body, res);
+    if (!data) return;
+
+    const problem = await prisma.problem.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!problem) { res.status(404).json({ error: "Problem not found" }); return; }
+    if (problem.status === "closed") {
+      res.status(422).json({ error: "Cannot link tickets to a closed problem" });
+      return;
+    }
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { ticketNumber: data.ticketNumber.toUpperCase() },
+      select: { id: true, ticketNumber: true, subject: true },
+    });
+    if (!ticket) { res.status(404).json({ error: "Ticket not found" }); return; }
+
+    await prisma.problemTicketLink.upsert({
+      where: { problemId_ticketId: { problemId: id, ticketId: ticket.id } },
+      create: { problemId: id, ticketId: ticket.id, linkedById: req.user.id },
+      update: {},
+    });
+
+    await logProblemEvent(id, req.user.id, "problem.ticket_linked", {
+      ticketId: ticket.id,
+      ticketNumber: ticket.ticketNumber,
+    });
+
+    res.status(201).json({ ok: true, ticketId: ticket.id });
+  }
+);
+
+// ── DELETE /api/problems/:id/tickets/:ticketId ────────────────────────────────
+
+router.delete(
+  "/:id/tickets/:ticketId",
+  requireAuth,
+  requirePermission("problems.manage"),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    const ticketId = parseId(req.params.ticketId);
+    if (id === null || ticketId === null) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+
+    const link = await prisma.problemTicketLink.findUnique({
+      where: { problemId_ticketId: { problemId: id, ticketId } },
+    });
+    if (!link) { res.status(404).json({ error: "Link not found" }); return; }
+
+    await prisma.problemTicketLink.delete({
+      where: { problemId_ticketId: { problemId: id, ticketId } },
+    });
+
+    await logProblemEvent(id, req.user.id, "problem.ticket_unlinked", { ticketId });
+    res.json({ ok: true });
+  }
+);
+
 // ── POST /api/problems/:id/notes ──────────────────────────────────────────────
 
 router.post(
@@ -598,7 +719,7 @@ router.post(
 
     const problem = await prisma.problem.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, problemNumber: true, title: true },
     });
     if (!problem) { res.status(404).json({ error: "Problem not found" }); return; }
     if (problem.status === "closed") {
@@ -628,6 +749,16 @@ router.post(
     await logProblemEvent(id, req.user.id, "problem.note_added", {
       noteId: note.id,
       noteType: note.noteType,
+    });
+
+    // Notify @mentioned users (fire-and-forget)
+    void notifyMentions(data.bodyHtml, {
+      authorId:     req.user.id,
+      entityNumber: problem.problemNumber,
+      entityTitle:  problem.title,
+      entityUrl:    `/problems/${id}`,
+      entityType:   "problem_note",
+      entityId:     String(note.id),
     });
 
     // Auto-promote status when an RCA note is added on a new/investigating problem
@@ -680,5 +811,34 @@ router.delete(
     res.json({ ok: true });
   }
 );
+
+// ─── Bulk Actions ──────────────────────────────────────────────────────────────
+
+import { z as zBulk } from "zod/v4";
+
+const problemsBulkSchema = zBulk.discriminatedUnion("action", [
+  zBulk.object({ action: zBulk.literal("delete"), ids: zBulk.array(zBulk.number().int().positive()).min(1).max(100) }),
+  zBulk.object({ action: zBulk.literal("assign"), ids: zBulk.array(zBulk.number().int().positive()).min(1).max(100), assignedToId: zBulk.string().nullable().optional(), teamId: zBulk.number().int().positive().nullable().optional() }),
+  zBulk.object({ action: zBulk.literal("status"), ids: zBulk.array(zBulk.number().int().positive()).min(1).max(100), status: zBulk.string() }),
+]);
+
+router.post("/bulk", requireAuth, requirePermission("problems.manage"), async (req, res) => {
+  const data = validate(problemsBulkSchema, req.body, res);
+  if (!data) return;
+  switch (data.action) {
+    case "delete": {
+      const { count } = await prisma.problem.deleteMany({ where: { id: { in: data.ids } } });
+      res.json({ affected: count }); return;
+    }
+    case "assign": {
+      await prisma.problem.updateMany({ where: { id: { in: data.ids } }, data: { ...(data.assignedToId !== undefined && { assignedToId: data.assignedToId }), ...(data.teamId !== undefined && { teamId: data.teamId }) } });
+      res.json({ affected: data.ids.length }); return;
+    }
+    case "status": {
+      const { count } = await prisma.problem.updateMany({ where: { id: { in: data.ids } }, data: { status: data.status as any } });
+      res.json({ affected: count }); return;
+    }
+  }
+});
 
 export default router;

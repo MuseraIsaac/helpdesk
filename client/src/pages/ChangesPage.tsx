@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router";
+
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth-client";
 import axios from "axios";
@@ -32,8 +33,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import ErrorAlert from "@/components/ErrorAlert";
-import NewChangeDialog from "@/components/NewChangeDialog";
-import { GitMerge, ChevronRight, Shield, AlertTriangle } from "lucide-react";
+import ModuleBulkActionsBar from "@/components/ModuleBulkActionsBar";
+import { GitMerge, ChevronRight, Shield, AlertTriangle, Plus } from "lucide-react";
 
 // ── Badge components ──────────────────────────────────────────────────────────
 
@@ -133,6 +134,15 @@ export default function ChangesPage() {
   const [typeFilter, setTypeFilter]    = useState<string>("all");
   const [riskFilter, setRiskFilter]    = useState<string>("all");
   const [assignedToMe, setAssignedToMe] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const clearSelection = useCallback(() => setSelectedIds([]), []);
+
+  function toggleRow(id: number) {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+  function toggleAll(ids: number[]) {
+    setSelectedIds((prev) => prev.length === ids.length && ids.every((id) => prev.includes(id)) ? [] : ids);
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["changes", { stateFilter, typeFilter, riskFilter, assignedToMe }],
@@ -173,7 +183,10 @@ export default function ChangesPage() {
             )}
           </p>
         </div>
-        <NewChangeDialog />
+        <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => navigate("/changes/new")}>
+          <Plus className="h-3.5 w-3.5" />
+          New Change
+        </Button>
       </div>
 
       {/* Filters */}
@@ -249,6 +262,12 @@ export default function ChangesPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8 pl-3">
+                  <input type="checkbox" className="accent-primary h-3.5 w-3.5 cursor-pointer"
+                    checked={changes.length > 0 && selectedIds.length === changes.length}
+                    ref={(el) => { if (el) el.indeterminate = selectedIds.length > 0 && selectedIds.length < changes.length; }}
+                    onChange={() => toggleAll(changes.map((c) => c.id))} />
+                </TableHead>
                 <TableHead className="w-32">Number</TableHead>
                 <TableHead>Summary</TableHead>
                 <TableHead className="w-32">State</TableHead>
@@ -266,9 +285,14 @@ export default function ChangesPage() {
               {changes.map((change) => (
                 <TableRow
                   key={change.id}
-                  className="group cursor-pointer"
+                  className={`group cursor-pointer ${selectedIds.includes(change.id) ? "bg-primary/5" : ""}`}
                   onClick={() => navigate(`/changes/${change.id}`)}
                 >
+                  <TableCell className="pl-3" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" className="accent-primary h-3.5 w-3.5 cursor-pointer"
+                      checked={selectedIds.includes(change.id)}
+                      onChange={() => toggleRow(change.id)} />
+                  </TableCell>
                   <TableCell className="font-mono text-xs font-medium text-muted-foreground">
                     <Link
                       to={`/changes/${change.id}`}
@@ -345,6 +369,15 @@ export default function ChangesPage() {
           </Table>
         </div>
       )}
+
+      <ModuleBulkActionsBar
+        selectedIds={selectedIds}
+        onClearSelection={clearSelection}
+        endpoint="/api/changes"
+        queryKey={["changes"]}
+        entityLabel="change"
+        teamLabel="Assign Coordinator Group"
+      />
     </div>
   );
 }

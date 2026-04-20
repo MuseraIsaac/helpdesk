@@ -49,6 +49,7 @@
  * │ replies.create               │   ✓   │     ✓      │   ✓   │          │
  * │ macros.view                  │   ✓   │     ✓      │   ✓   │    ✓     │
  * │ macros.manage                │   ✓   │            │       │          │
+ * │ templates.manage             │   ✓   │            │       │          │
  * │ ── ITSM Modules ───────────────────────────────────────────────────── │
  * │ incidents.view               │   ✓   │     ✓      │   ✓   │    ✓     │
  * │ incidents.manage             │   ✓   │     ✓      │   ✓   │          │
@@ -90,6 +91,7 @@
  * │ ── Platform Administration ────────────────────────────────────────── │
  * │ users.manage                 │   ✓   │            │       │          │
  * │ teams.manage                 │   ✓   │            │       │          │
+ * │ cab.manage                   │   ✓   │            │       │          │
  * │ kb.manage                    │   ✓   │     ✓      │       │          │
  * │ integrations.manage          │   ✓   │            │       │          │
  * │ audit.view                   │   ✓   │     ✓      │       │    ✓     │
@@ -131,6 +133,7 @@ export type Permission =
   | "replies.create"
   | "macros.view"
   | "macros.manage"
+  | "templates.manage"
 
   // ── ITSM Modules ──────────────────────────────────────────────────────────
   | "incidents.view"
@@ -184,11 +187,13 @@ export type Permission =
   // ── Platform Administration ────────────────────────────────────────────────
   | "users.manage"
   | "teams.manage"
+  | "cab.manage"
   | "kb.manage"
   | "integrations.manage"
   | "audit.view"
   | "reports.view"
-  | "reports.advanced_view";
+  | "reports.advanced_view"
+  | "ticket_types.manage";
 
 // ── Role permission arrays ─────────────────────────────────────────────────────
 //
@@ -211,6 +216,7 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "replies.create",
   "macros.view",
   "macros.manage",
+  "templates.manage",
   // ITSM Modules
   "incidents.view",
   "incidents.manage",
@@ -255,11 +261,13 @@ const ADMIN_PERMISSIONS: Permission[] = [
   // Platform Administration
   "users.manage",
   "teams.manage",
+  "cab.manage",
   "kb.manage",
   "integrations.manage",
   "audit.view",
   "reports.view",
   "reports.advanced_view",
+  "ticket_types.manage",
 ];
 
 /**

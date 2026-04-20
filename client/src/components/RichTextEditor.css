@@ -165,3 +165,51 @@
 .rte-content .ProseMirror .is-active {
   background: var(--accent, #f3f4f6);
 }
+
+/* ── @mention chip ──────────────────────────────────────────────────────────── */
+.rte-body .rte-mention,
+.rte-content .ProseMirror .rte-mention {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;           /* pill shape */
+  background: hsl(239 84% 67% / 0.12);
+  border: 1px solid hsl(239 84% 67% / 0.25);
+  vertical-align: baseline;
+  white-space: nowrap;
+  cursor: default;
+  text-decoration: none;
+}
+
+.rte-body .rte-mention-name,
+.rte-content .ProseMirror .rte-mention-name {
+  color: hsl(239 84% 55%);        /* indigo-600 equivalent */
+  font-weight: 600;
+  font-size: 0.875em;
+}
+
+.rte-body .rte-mention-email,
+.rte-content .ProseMirror .rte-mention-email {
+  color: hsl(239 84% 45%);        /* slightly deeper for contrast */
+  font-size: 0.78em;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+/* Dark mode overrides */
+@media (prefers-color-scheme: dark) {
+  .rte-body .rte-mention,
+  .rte-content .ProseMirror .rte-mention {
+    background: hsl(239 84% 67% / 0.18);
+    border-color: hsl(239 84% 67% / 0.35);
+  }
+  .rte-body .rte-mention-name,
+  .rte-content .ProseMirror .rte-mention-name {
+    color: hsl(239 84% 75%);
+  }
+  .rte-body .rte-mention-email,
+  .rte-content .ProseMirror .rte-mention-email {
+    color: hsl(239 84% 68%);
+  }
+}

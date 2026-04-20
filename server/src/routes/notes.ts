@@ -7,6 +7,7 @@ import { htmlToText } from "../lib/html-to-text";
 import { can } from "core/constants/permission.ts";
 import prisma from "../db";
 import { logAudit } from "../lib/audit";
+import { notifyMentions } from "../lib/mentions";
 
 const router = Router({ mergeParams: true });
 
@@ -74,7 +75,15 @@ router.post("/", requireAuth, async (req, res) => {
 
   await logAudit(ticketId, req.user.id, "note.created", { noteId: note.id });
 
-  // Future: fire mention notifications to data.mentionedUserIds via ACTIVE_CHANNELS
+  // Notify @mentioned users from the HTML content (fire-and-forget)
+  void notifyMentions(data.bodyHtml, {
+    authorId:     req.user.id,
+    entityNumber: ticket.ticketNumber,
+    entityTitle:  ticket.subject,
+    entityUrl:    `/tickets/${ticketId}`,
+    entityType:   "ticket_note",
+    entityId:     String(note.id),
+  });
 
   res.status(201).json(note);
 });

@@ -46,7 +46,10 @@ export default function TicketDetailPage() {
 
   return (
     <div className="space-y-6">
-      <BackLink to="/tickets">Back to tickets</BackLink>
+      <div className="flex items-center justify-between gap-4">
+        <BackLink to="/tickets">Back to tickets</BackLink>
+        {ticket && <RunScenarioButton ticketId={ticket.id} variant="header" />}
+      </div>
 
       {isLoading && <TicketDetailSkeleton />}
 
@@ -139,9 +142,6 @@ export default function TicketDetailPage() {
 
           <div className="space-y-4">
             <UpdateTicket ticket={ticket} />
-
-            {/* Scenario automations — intentionally invoked by agent */}
-            <RunScenarioButton ticketId={ticket.id} />
 
             {/* Linked Incident panel */}
             {ticket.linkedIncident && (

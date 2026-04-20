@@ -26,6 +26,7 @@ export const createProblemSchema = z.object({
    * Supports the "promote recurring incident → problem" workflow.
    */
   linkedIncidentIds: z.array(z.number().int().positive()).default([]),
+  customFields: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
 export type CreateProblemInput = z.infer<typeof createProblemSchema>;
@@ -77,10 +78,18 @@ export type ListProblemsQuery = z.infer<typeof listProblemsQuerySchema>;
 // ── Link Incident ─────────────────────────────────────────────────────────────
 
 export const linkIncidentSchema = z.object({
-  incidentId: z.number().int().positive(),
+  incidentNumber: z.string().min(1).trim(),
 });
 
 export type LinkIncidentInput = z.infer<typeof linkIncidentSchema>;
+
+// ── Link Ticket ───────────────────────────────────────────────────────────────
+
+export const linkTicketSchema = z.object({
+  ticketNumber: z.string().min(1).trim(),
+});
+
+export type LinkTicketInput = z.infer<typeof linkTicketSchema>;
 
 // ── Add Problem Note ──────────────────────────────────────────────────────────
 

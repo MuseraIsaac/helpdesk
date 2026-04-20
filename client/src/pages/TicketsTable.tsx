@@ -6,8 +6,10 @@ import {
   type ColumnDef,
   type SortingState,
   type PaginationState,
+  type RowSelectionState,
   useReactTable,
   getCoreRowModel,
+  getFilteredRowModel,
   flexRender,
 } from "@tanstack/react-table";
 import { type Ticket } from "core/constants/ticket.ts";
@@ -106,13 +108,13 @@ const ALL_COLUMN_DEFS: Record<ColumnId, ColumnDef<Ticket>> = {
     accessorKey: "ticketType",
     header: "Type",
     enableSorting: false,
-    cell: ({ row }) => <TicketTypeBadge type={row.original.ticketType} />,
+    cell: ({ row }) => <TicketTypeBadge type={row.original.ticketType} customType={row.original.customTicketType} />,
   },
   status: {
     accessorKey: "status",
     header: "Status",
     enableSorting: true,
-    cell: ({ row }) => <StatusBadge status={row.original.status} />,
+    cell: ({ row }) => <StatusBadge status={row.original.status} customStatus={row.original.customStatus} />,
   },
   priority: {
     accessorKey: "priority",
@@ -228,9 +230,11 @@ const PAGE_SIZE = 10;
 interface TicketsTableProps {
   filters: TicketFilters;
   viewConfig?: SavedViewConfig;
+  onSelectionChange?: (ids: number[]) => void;
+  selectionResetKey?: number;
 }
 
-export default function TicketsTable({ filters, viewConfig }: TicketsTableProps) {
+export default function TicketsTable({ filters, viewConfig, onSelectionChange, selectionResetKey }: TicketsTableProps) {
   const defaultSort = viewConfig?.sort;
 
   const [sorting, setSorting] = useState<SortingState>([
@@ -240,23 +244,60 @@ export default function TicketsTable({ filters, viewConfig }: TicketsTableProps)
     pageIndex: 0,
     pageSize: PAGE_SIZE,
   });
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
   useEffect(() => {
     setPagination(prev => ({ ...prev, pageIndex: 0 }));
+    setRowSelection({});
   }, [filters]);
+
+  useEffect(() => {
+    if (selectionResetKey !== undefined) setRowSelection({});
+  }, [selectionResetKey]);
+
+  // Checkbox column prepended to every view
+  const checkboxColumn = useMemo<ColumnDef<Ticket>>(() => ({
+    id: "__select__",
+    enableSorting: false,
+    header: ({ table }) => (
+      <input
+        type="checkbox"
+        className="accent-primary h-3.5 w-3.5 cursor-pointer"
+        checked={table.getIsAllPageRowsSelected()}
+        ref={(el) => {
+          if (el) el.indeterminate = table.getIsSomePageRowsSelected();
+        }}
+        onChange={table.getToggleAllPageRowsSelectedHandler()}
+        aria-label="Select all on this page"
+      />
+    ),
+    cell: ({ row }) => (
+      <input
+        type="checkbox"
+        className="accent-primary h-3.5 w-3.5 cursor-pointer"
+        checked={row.getIsSelected()}
+        onChange={row.getToggleSelectedHandler()}
+        onClick={(e) => e.stopPropagation()}
+        aria-label="Select row"
+      />
+    ),
+    size: 36,
+  }), []);
 
   // Build the active column list from viewConfig
   const columns = useMemo<ColumnDef<Ticket>[]>(() => {
-    if (!viewConfig) {
-      // No view config — show default visible columns in default order
-      return Object.entries(COLUMN_META)
-        .filter(([, meta]) => meta.defaultVisible)
-        .map(([id]) => ALL_COLUMN_DEFS[id as ColumnId]);
-    }
-    return viewConfig.columns
-      .filter(c => c.visible)
-      .map(c => ALL_COLUMN_DEFS[c.id]);
-  }, [viewConfig]);
+    const dataColumns = (() => {
+      if (!viewConfig) {
+        return Object.entries(COLUMN_META)
+          .filter(([, meta]) => meta.defaultVisible)
+          .map(([id]) => ALL_COLUMN_DEFS[id as ColumnId]);
+      }
+      return viewConfig.columns
+        .filter(c => c.visible)
+        .map(c => ALL_COLUMN_DEFS[c.id]);
+    })();
+    return [checkboxColumn, ...dataColumns];
+  }, [viewConfig, checkboxColumn]);
 
   const sortBy = sorting[0]?.id ?? "createdAt";
   // Map column id to API sort key (e.g. "requester" → "senderName")
@@ -282,27 +323,42 @@ export default function TicketsTable({ filters, viewConfig }: TicketsTableProps)
   const total = data?.total ?? 0;
   const pageCount = Math.ceil(total / pagination.pageSize);
 
+  const tickets = data?.tickets ?? [];
+
   const table = useReactTable({
-    data: data?.tickets ?? [],
+    data: tickets,
     columns,
-    state: { sorting, pagination },
+    state: { sorting, pagination, rowSelection },
+    getRowId: (row) => String(row.id),
     onSortingChange: updater => {
       setSorting(updater);
       setPagination(prev => ({ ...prev, pageIndex: 0 }));
     },
     onPaginationChange: setPagination,
+    onRowSelectionChange: (updater) => {
+      const next = typeof updater === "function" ? updater(rowSelection) : updater;
+      setRowSelection(next);
+      if (onSelectionChange) {
+        const selectedIds = Object.keys(next)
+          .filter((k) => next[k])
+          .map(Number);
+        onSelectionChange(selectedIds);
+      }
+    },
+    enableRowSelection: true,
     manualSorting: true,
     manualPagination: true,
     enableMultiSort: false,
     pageCount,
     getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
   });
 
   if (error) {
     return <ErrorAlert message="Failed to fetch tickets" />;
   }
 
-  const visibleColCount = columns.length;
+  const visibleColCount = columns.length; // includes checkbox column
 
   return (
     <div>

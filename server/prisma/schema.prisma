@@ -25,6 +25,7 @@ enum TicketStatus {
   new
   processing
   open
+  in_progress
   resolved
   closed
 }
@@ -111,11 +112,12 @@ model User {
   name          String
   email         String    @unique
   emailVerified Boolean
-  image         String?
-  role          Role      @default(agent)
-  createdAt     DateTime
-  updatedAt     DateTime
-  deletedAt     DateTime?
+  image            String?
+  role             Role    @default(agent)
+  globalTicketView Boolean @default(false)
+  createdAt        DateTime
+  updatedAt        DateTime
+  deletedAt        DateTime?
   sessions        Session[]
   accounts        Account[]
   assignedTickets     Ticket[]
@@ -155,6 +157,7 @@ model User {
   problemsAssigned      Problem[]           @relation("ProblemAssignee")
   problemNotes          ProblemNote[]       @relation("ProblemNoteAuthor")
   problemIncidentLinks  ProblemIncidentLink[] @relation("ProblemLinkLinkedBy")
+  problemTicketLinks    ProblemTicketLink[]   @relation("ProblemTicketLinkedBy")
   problemEvents         ProblemEvent[]      @relation("ProblemEventActor")
   // CMDB relations
   cisOwned              ConfigItem[]        @relation("CiOwner")
@@ -177,6 +180,14 @@ model User {
   changeEvents          ChangeEvent[]        @relation("ChangeEventActor")
   changeCiLinks         ChangeCiLink[]       @relation("ChangeCiLinkLinkedBy")
   changeAttachments     ChangeAttachment[]   @relation("ChangeAttachmentUploader")
+  templates             Template[]
+  formDefinitions       FormDefinition[]
+  customFields          CustomField[]
+  cabGroupsCreated      CabGroup[]
+  cabMemberships        CabMember[]
+  ticketTypesCreated       TicketTypeConfig[]
+  ticketStatusesCreated    TicketStatusConfig[]
+  escalationRulesCreated   EscalationRule[]
 
   @@map("user")
 }
@@ -197,7 +208,8 @@ model UserPreference {
   sidebarCollapsed  Boolean  @default(false)
   defaultDashboard  String   @default("overview")
   ticketListDensity String   @default("comfortable")
-  // Future: notificationPrefs Json?  signatureHtml String?
+  // Reply signature (HTML)
+  signature         String?
   updatedAt         DateTime @updatedAt
 
   @@map("user_preference")
@@ -396,6 +408,16 @@ model Ticket {
   linkedServiceRequestId Int?            @unique @map("linked_service_request_id")
   linkedServiceRequest   ServiceRequest? @relation("TicketLinkedServiceRequest", fields: [linkedServiceRequestId], references: [id])
   scenarioExecutions     ScenarioExecution[]
+  problemLinks           ProblemTicketLink[]
+  customFields           Json                @default("{}")
+  customStatusId         Int?
+  customStatus           TicketStatusConfig? @relation(fields: [customStatusId], references: [id], onDelete: SetNull)
+  customTicketTypeId     Int?
+  customTicketType       TicketTypeConfig?   @relation(fields: [customTicketTypeId], references: [id], onDelete: SetNull)
+  // SLA pause tracking — set when ticket enters an on_hold custom status; cleared on resume.
+  slaPausedAt            DateTime?
+  // Accumulated pause time in minutes (historical total, for reporting).
+  slaPausedMinutes       Int                 @default(0)
 
   @@map("ticket")
 }
@@ -534,6 +556,212 @@ model Macro {
   @@map("macro")
 }
 
+enum FormEntityType {
+  ticket
+  request
+  change
+  problem
+  article
+}
+
+model FormDefinition {
+  id          Int            @id @default(autoincrement())
+  entityType  FormEntityType @unique
+  fields      Json
+  createdById String
+  createdBy   User           @relation(fields: [createdById], references: [id])
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("form_definition")
+}
+
+model TicketTypeConfig {
+  id             Int                       @id @default(autoincrement())
+  name           String                    @unique @db.VarChar(120)
+  slug           String                    @unique @db.VarChar(80)
+  description    String?                   @db.VarChar(500)
+  color          String                    @default("#6366f1") @db.VarChar(20)
+  isActive       Boolean                   @default(true)
+  formDefinition TicketTypeFormDefinition?
+  customFields   CustomField[]
+  tickets        Ticket[]
+  createdById    String
+  createdBy      User                      @relation(fields: [createdById], references: [id])
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+
+  @@map("ticket_type_config")
+}
+
+model TicketTypeFormDefinition {
+  id           Int              @id @default(autoincrement())
+  ticketTypeId Int              @unique
+  ticketType   TicketTypeConfig @relation(fields: [ticketTypeId], references: [id], onDelete: Cascade)
+  fields       Json
+  updatedAt    DateTime         @updatedAt
+
+  @@map("ticket_type_form_definition")
+}
+
+enum SlaBehavior {
+  continue
+  on_hold
+}
+
+model TicketStatusConfig {
+  id            Int          @id @default(autoincrement())
+  label         String       @unique @db.VarChar(80)
+  color         String       @default("#6366f1") @db.VarChar(20)
+  workflowState TicketStatus @default(open)
+  slaBehavior   SlaBehavior  @default(continue)
+  position      Int          @default(0)
+  isActive      Boolean      @default(true)
+  tickets       Ticket[]
+  createdById   String
+  createdBy     User         @relation(fields: [createdById], references: [id])
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@map("ticket_status_config")
+}
+
+/**
+ * CabGroup — a Change Advisory Board group whose members are authorised to
+ * approve change requests. The "default" CAB group is tracked via the
+ * Changes settings (defaultCabGroupId).
+ */
+enum EscalationRuleModule {
+  incident
+  request
+  ticket
+}
+
+model EscalationRule {
+  id               Int                  @id @default(autoincrement())
+  name             String               @db.VarChar(120)
+  module           EscalationRuleModule
+  /// JSON array of { field, operator, value } objects
+  conditions       Json
+  /// "AND" or "OR" — how conditions are combined
+  conditionLogic   String               @default("AND") @db.VarChar(3)
+  /// Whether to send email / in-app notifications to the escalation target
+  notifyByEmail    Boolean @default(false) @map("notify_by_email")
+  notifyInApp      Boolean @default(true)  @map("notify_in_app")
+  /// Optional custom message appended to the notification
+  notificationNote String? @db.VarChar(500) @map("notification_note")
+
+  /// Escalate to team (ID stored directly — no FK to keep rules light-weight)
+  escalateToTeamId Int?
+  /// Escalate to a specific agent user ID
+  escalateToUserId String?
+  /// Lower number = evaluated first
+  position         Int                  @default(0)
+  isActive         Boolean              @default(true)
+  createdById      String
+  createdBy        User                 @relation(fields: [createdById], references: [id])
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@index([module, isActive])
+  @@map("escalation_rule")
+}
+
+model CabGroup {
+  id          Int         @id @default(autoincrement())
+  name        String      @unique @db.VarChar(120)
+  description String?     @db.VarChar(500)
+  isActive    Boolean     @default(true)
+  members     CabMember[]
+  createdById String
+  createdBy   User        @relation(fields: [createdById], references: [id])
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@map("cab_group")
+}
+
+model CabMember {
+  cabGroupId Int
+  userId     String
+  cabGroup   CabGroup @relation(fields: [cabGroupId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id])
+  addedAt    DateTime @default(now())
+
+  @@id([cabGroupId, userId])
+  @@index([cabGroupId])
+  @@map("cab_member")
+}
+
+enum CustomFieldType {
+  text
+  textarea
+  number
+  select
+  multiselect
+  date
+  switch
+  email
+  url
+}
+
+model CustomField {
+  id           Int              @id @default(autoincrement())
+  entityType   FormEntityType
+  ticketTypeId Int?
+  ticketType   TicketTypeConfig? @relation(fields: [ticketTypeId], references: [id], onDelete: Cascade)
+  key          String
+  label        String           @db.VarChar(120)
+  fieldType    CustomFieldType
+  placeholder  String?          @db.VarChar(255)
+  helpText     String?          @db.VarChar(500)
+  required     Boolean          @default(false)
+  visible      Boolean          @default(true)
+  options      String[]         @default([])
+  displayOrder Int              @default(0)
+  createdById  String
+  createdBy    User             @relation(fields: [createdById], references: [id])
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([entityType, key])
+  @@unique([ticketTypeId, key])
+  @@index([entityType, visible])
+  @@index([ticketTypeId])
+  @@map("custom_field")
+}
+
+enum TemplateType {
+  ticket
+  request
+  change
+  problem
+  article
+  email
+  macro
+}
+
+model Template {
+  id          Int          @id @default(autoincrement())
+  title       String       @db.VarChar(255)
+  body        String       @db.Text
+  bodyHtml    String?      @db.Text
+  type        TemplateType
+  isActive    Boolean      @default(true)
+  /// When set, marks this as a system notification email template for the named event.
+  /// Values mirror NotificationEvent (e.g. "ticket.created", "ticket.escalated").
+  notificationEvent String? @db.VarChar(80) @map("notification_event")
+  /// Human-readable subject line for notification email templates (supports {{variables}})
+  emailSubject String?     @db.VarChar(255) @map("email_subject")
+  createdById String
+  createdBy   User         @relation(fields: [createdById], references: [id])
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([notificationEvent])
+  @@map("template")
+}
+
 model AuditEvent {
   id        Int      @id @default(autoincrement())
   ticketId  Int
@@ -597,7 +825,9 @@ model KbArticle {
   id              Int              @id @default(autoincrement())
   title           String
   slug            String           @unique
+  summary         String?
   body            String
+  tags            String[]         @default([])
   status          KbArticleStatus  @default(draft)
   reviewStatus    KbReviewStatus   @default(draft)
   visibility      KbVisibility     @default(public)
@@ -619,6 +849,7 @@ model KbArticle {
   versions        KbArticleVersion[]
   feedback        KbArticleFeedback[]
 
+  customFields           Json                @default("{}")
   @@index([status])
   @@index([reviewStatus])
   @@index([categoryId])
@@ -698,7 +929,8 @@ model Team {
   catalogItems     CatalogItem[]     @relation("CatalogItemFulfillmentTeam")
   members          TeamMember[]
   changesCoordinated Change[]        @relation("ChangeCoordinatorGroup")
-  teamDashboards DashboardConfig[]   @relation("DashboardVisibilityTeam")
+  teamDashboards     DashboardConfig[]    @relation("DashboardVisibilityTeam")
+  scenarioVisibility ScenarioDefinition[] @relation("ScenarioVisibilityTeam")
 
   @@map("queue")
 }
@@ -928,6 +1160,7 @@ model IncidentUpdate {
   incident   Incident           @relation(fields: [incidentId], references: [id], onDelete: Cascade)
   updateType IncidentUpdateType @default(update) @map("update_type")
   body       String
+  bodyHtml   String?            @map("body_html")
   authorId   String?            @map("author_id")
   author     User?              @relation("IncidentUpdateAuthor", fields: [authorId], references: [id])
   createdAt  DateTime           @default(now())
@@ -1211,6 +1444,12 @@ model ScenarioDefinition {
   color       String?  // hex colour for UI chip, e.g. "#3b82f6"
   isEnabled   Boolean  @default(true)
   actions     Json     // WorkflowAction[]
+
+  // Visibility: "public" (everyone), "team" (team members only), "private" (creator only)
+  visibility       String  @default("public") // "public" | "team" | "private"
+  visibilityTeamId Int?    @map("visibility_team_id")
+  visibilityTeam   Team?   @relation("ScenarioVisibilityTeam", fields: [visibilityTeamId], references: [id], onDelete: SetNull)
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdById String?
@@ -1219,6 +1458,7 @@ model ScenarioDefinition {
   executions ScenarioExecution[]
 
   @@index([isEnabled])
+  @@index([visibility])
   @@map("scenario_definition")
 }
 
@@ -1374,6 +1614,7 @@ model ServiceRequest {
 
   @@index([status])
   @@index([priority])
+  customFields           Json                @default("{}")
   @@index([requesterId])
   @@index([requesterCustomerId])
   @@index([assignedToId])
@@ -1558,6 +1799,7 @@ model Problem {
   updatedAt  DateTime  @updatedAt
 
   linkedIncidents ProblemIncidentLink[]
+  linkedTickets   ProblemTicketLink[]
   notes           ProblemNote[]
   events          ProblemEvent[]
   ciLinks         ProblemCiLink[]
@@ -1565,6 +1807,7 @@ model Problem {
   linkedChanges   Change[]             @relation("ChangeProblem")
 
   @@index([status])
+  customFields           Json                @default("{}")
   @@index([priority])
   @@index([isKnownError])
   @@index([ownerId])
@@ -1593,6 +1836,28 @@ model ProblemIncidentLink {
   @@index([problemId])
   @@index([incidentId])
   @@map("problem_incident_link")
+}
+
+/**
+ * ProblemTicketLink — junction table linking problems to related tickets.
+ *
+ * A ticket can be linked to a problem to track which support requests are
+ * symptoms of the same underlying root cause.
+ */
+model ProblemTicketLink {
+  id        Int      @id @default(autoincrement())
+  problemId Int      @map("problem_id")
+  problem   Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  ticketId  Int      @map("ticket_id")
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  linkedAt  DateTime @default(now()) @map("linked_at")
+  linkedById String? @map("linked_by_id")
+  linkedBy  User?    @relation("ProblemTicketLinkedBy", fields: [linkedById], references: [id])
+
+  @@unique([problemId, ticketId])
+  @@index([problemId])
+  @@index([ticketId])
+  @@map("problem_ticket_link")
 }
 
 /**
@@ -1771,6 +2036,29 @@ enum ImplementationOutcome {
 }
 
 /**
+ * ChangeDocumentType — categorises attachments uploaded to a change request.
+ *
+ *   mop                  — Method of Procedure: step-by-step implementation guide
+ *   rollback_document    — Rollback procedure / contingency plan document
+ *   test_evidence        — Test results, test scripts, or validation evidence
+ *   change_communication — Stakeholder notification email or communication artefact
+ *   screenshot           — Screenshot or visual evidence (before/after)
+ *   technical_document   — Architecture diagram, design spec, or technical reference
+ *   lessons_learned_doc  — Formal lessons-learned report
+ *   other                — Any other supporting document
+ */
+enum ChangeDocumentType {
+  mop
+  rollback_document    @map("rollback_document")
+  test_evidence        @map("test_evidence")
+  change_communication @map("change_communication")
+  screenshot
+  technical_document   @map("technical_document")
+  lessons_learned_doc  @map("lessons_learned_doc")
+  other
+}
+
+/**
  * Change — the central ITIL Change Management record (@@map: "change_request").
  *
  * Design principles:
@@ -1914,11 +2202,21 @@ model Change {
   postchecks    String?
   postchecksHtml String? @map("postchecks_html")
 
+  // ── Notification / Communication ─────────────────────────────────────────
+  /// Whether impacted customers or users need to be notified about this change.
+  notificationRequired Boolean? @default(false) @map("notification_required")
+  /// Description of impacted customers, user groups, or systems to be notified.
+  impactedUsers        String?  @map("impacted_users")
+  /// Communication notes — what was communicated, to whom, and when.
+  communicationNotes   String?  @map("communication_notes")
+
   // ── Closure & Post-Implementation Review ──────────────────────────────────
   /// Overall outcome of the change — set when closing or marking as failed/cancelled.
   implementationOutcome ImplementationOutcome? @map("implementation_outcome")
   /// Whether the rollback plan was executed during this change.
   rollbackUsed    Boolean? @map("rollback_used")
+  /// Short closure code or status label (e.g. "SUCC", "FAIL", org-defined codes).
+  closureCode     String?  @map("closure_code")
   /// Free-text closure notes — what happened, how it was resolved.
   closureNotes    String?  @map("closure_notes")
   /// Post-implementation review summary (what went well, what didn't).
@@ -1938,6 +2236,7 @@ model Change {
   @@index([priority])
   @@index([assignedToId])
   @@index([coordinatorGroupId])
+  customFields           Json                @default("{}")
   @@index([linkedProblemId])
   @@index([configurationItemId])
   @@index([serviceId])
@@ -2060,6 +2359,9 @@ model ChangeAttachment {
 
   changeId     Int    @map("change_id")
   change       Change @relation(fields: [changeId], references: [id], onDelete: Cascade)
+
+  /// Optional document category — e.g. mop, rollback_document, test_evidence.
+  documentType ChangeDocumentType? @map("document_type")
 
   uploadedById String? @map("uploaded_by_id")
   uploadedBy   User?   @relation("ChangeAttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)

@@ -198,14 +198,18 @@ router.put("/:id/members", requirePermission("teams.manage"), async (req, res) =
     return;
   }
 
-  // Validate that all provided user IDs exist and are not deleted
+  // Validate that all provided user IDs exist, are not deleted, and are not customers
   if (data.memberIds.length > 0) {
     const users = await prisma.user.findMany({
       where: { id: { in: data.memberIds }, deletedAt: null },
-      select: { id: true },
+      select: { id: true, role: true },
     });
     if (users.length !== data.memberIds.length) {
       res.status(400).json({ error: "One or more user IDs are invalid" });
+      return;
+    }
+    if (users.some((u) => u.role === "customer")) {
+      res.status(400).json({ error: "Customers cannot be added to teams" });
       return;
     }
   }

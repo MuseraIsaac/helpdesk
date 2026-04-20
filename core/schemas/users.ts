@@ -21,6 +21,11 @@ export const updateUserSchema = z.object({
     z.string().trim().min(8, "Password must be at least 8 characters"),
   ]),
   role: z.enum(assignableRoles).optional(),
+  globalTicketView: z.boolean().optional(),
+});
+
+export const patchUserSchema = z.object({
+  globalTicketView: z.boolean(),
 });
 
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;

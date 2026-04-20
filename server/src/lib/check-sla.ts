@@ -28,6 +28,7 @@ export async function registerSlaCheckerWorker(boss: PgBoss): Promise<void> {
       const breachingTickets = await prisma.ticket.findMany({
         where: {
           slaBreached: false,
+          slaPausedAt: null,
           status: { notIn: ["resolved", "closed"] },
           OR: [
             { firstResponseDueAt: { lt: now }, firstRespondedAt: null },
@@ -100,6 +101,7 @@ async function sendSlaWarningNotifications(now: Date): Promise<void> {
   const firstResponseWarning = await prisma.ticket.findMany({
     where: {
       slaBreached: false,
+      slaPausedAt: null,
       status: { notIn: ["resolved", "closed", "new", "processing"] },
       firstRespondedAt: null,
       firstResponseDueAt: { gte: now, lte: firstResponseDeadline },
@@ -112,6 +114,7 @@ async function sendSlaWarningNotifications(now: Date): Promise<void> {
   const resolutionWarning = await prisma.ticket.findMany({
     where: {
       slaBreached: false,
+      slaPausedAt: null,
       status: { notIn: ["resolved", "closed", "new", "processing"] },
       resolvedAt: null,
       resolutionDueAt: { gte: now, lte: resolutionDeadline },

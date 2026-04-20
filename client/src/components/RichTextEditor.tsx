@@ -1,9 +1,14 @@
-import { useEffect, useCallback, useState } from "react";
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useEffect, useCallback, useState, useRef, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
+import { useEditor, EditorContent, ReactRenderer } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
+import Mention from "@tiptap/extension-mention";
+import tippy, { type Instance as TippyInstance } from "tippy.js";
+import MentionList, { type MentionListHandle } from "./MentionList";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -41,6 +46,8 @@ export interface RichTextEditorProps {
   className?: string;
   /** Extra classes applied to the editable area wrapper */
   editorClassName?: string;
+  /** Enable @mention autocomplete. Fetches agents from /api/agents. */
+  enableMentions?: boolean;
 }
 
 // ── Toolbar button ────────────────────────────────────────────────────────────
@@ -83,6 +90,51 @@ function Divider() {
   return <div className="mx-0.5 h-4 w-px bg-border" />;
 }
 
+// ── @mention — extended node with email attribute ────────────────────────────
+
+interface AgentOption { id: string; name: string; email: string }
+
+/**
+ * Mention extended with an `email` attribute so the rendered chip shows both
+ * the agent's name and email address.
+ */
+const MentionWithEmail = Mention.extend({
+  addAttributes() {
+    return {
+      // Inherit the built-in `id` and `label` attributes
+      ...this.parent?.(),
+      email: {
+        default: null,
+        parseHTML: (el: Element) => el.getAttribute("data-email"),
+        renderHTML: (attrs: Record<string, unknown>) =>
+          attrs.email ? { "data-email": attrs.email } : {},
+      },
+    };
+  },
+  renderHTML({ node }: { node: any }) {
+    // Do NOT spread HTMLAttributes here — the parent addAttributes already
+    // injects data-id early via its own renderHTML, which would push
+    // data-type to the end of the attribute list and break the server-side
+    // regex that extracts mention IDs. We define all attributes explicitly
+    // so data-type always appears first (after class).
+    const name  = String(node.attrs.label ?? "");
+    const email = node.attrs.email as string | null;
+    return [
+      "span",
+      {
+        class:        "rte-mention",
+        "data-type":  "mention",
+        "data-id":    node.attrs.id,
+        "data-email": email ?? "",
+      },
+      ["span", { class: "rte-mention-name" }, `@${name}`],
+      ...(email
+        ? [["span", { class: "rte-mention-email" }, email]]
+        : []),
+    ];
+  },
+});
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function RichTextEditor({
@@ -93,9 +145,93 @@ export default function RichTextEditor({
   disabled = false,
   className = "",
   editorClassName = "",
+  enableMentions = false,
 }: RichTextEditorProps) {
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
+
+  // Fetch agents for @mention suggestions (only when mentions are enabled)
+  const { data: agentsData } = useQuery<{ agents: AgentOption[] }>({
+    queryKey: ["agents"],
+    queryFn: async () => {
+      const { data } = await axios.get("/api/agents");
+      return data;
+    },
+    enabled: enableMentions,
+    staleTime: 60_000,
+  });
+  const agents = agentsData?.agents ?? [];
+
+  // Always-current ref — the suggestion closure reads this instead of the
+  // stale `agents` value captured at extension-creation time. Without this,
+  // ReplyForm (which renders before the agents query resolves) would always
+  // see an empty list because the closure captured agents = [] at init.
+  const agentsRef = useRef<AgentOption[]>([]);
+  agentsRef.current = agents;
+
+  // Build the Mention extension only when mentions are enabled.
+  // Created once (useMemo deps: [enableMentions]) so the editor is stable,
+  // but the items callback always reads agentsRef.current for the latest data.
+  const mentionExtension = useMemo(() => {
+    if (!enableMentions) return null;
+    return MentionWithEmail.configure({
+        HTMLAttributes: { class: "rte-mention" },
+        suggestion: {
+          items: ({ query }: { query: string }) => {
+            if (!query) return [];          // show nothing until first letter
+            const q = query.toLowerCase();
+            return agentsRef.current
+              .filter(
+                (a) =>
+                  a.name.toLowerCase().includes(q) ||
+                  a.email.toLowerCase().includes(q)
+              )
+              .slice(0, 8);
+          },
+          render() {
+            let component: ReactRenderer<MentionListHandle> | null = null;
+            let popup: TippyInstance[] | null = null;
+
+            return {
+              onStart(props: any) {
+                component = new ReactRenderer(MentionList, {
+                  props,
+                  editor: props.editor,
+                });
+                if (!props.clientRect) return;
+                popup = tippy("body", {
+                  getReferenceClientRect: props.clientRect,
+                  appendTo: () => document.body,
+                  content: component.element,
+                  showOnCreate: true,
+                  interactive: true,
+                  trigger: "manual",
+                  placement: "bottom-start",
+                });
+              },
+              onUpdate(props: any) {
+                component?.updateProps(props);
+                if (!props.clientRect) return;
+                popup?.[0]?.setProps({ getReferenceClientRect: props.clientRect });
+              },
+              onKeyDown(props: any) {
+                if (props.event.key === "Escape") {
+                  popup?.[0]?.hide();
+                  return true;
+                }
+                return component?.ref?.onKeyDown(props.event) ?? false;
+              },
+              onExit() {
+                popup?.[0]?.destroy();
+                component?.destroy();
+                popup = null;
+                component = null;
+              },
+            };
+          },
+        },
+      });
+  }, [enableMentions]); // agentsRef is a ref — no need to list agents here
 
   const editor = useEditor({
     extensions: [
@@ -109,6 +245,7 @@ export default function RichTextEditor({
         HTMLAttributes: { rel: "noopener noreferrer", target: "_blank" },
       }),
       Placeholder.configure({ placeholder }),
+      ...(mentionExtension ? [mentionExtension] : []),
     ],
     content,
     editable: !disabled,

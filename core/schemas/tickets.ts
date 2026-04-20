@@ -32,6 +32,9 @@ export const createTicketSchema = z.object({
   impact: z.enum(ticketImpacts).nullable().optional(),
   urgency: z.enum(ticketUrgencies).nullable().optional(),
   assignedToId: z.string().nullable().optional(),
+  teamId: z.number().int().positive().nullable().optional(),
+  customFields: z.record(z.string(), z.unknown()).optional().default({}),
+  customTicketTypeId: z.number().int().positive().nullable().optional(),
 });
 
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
@@ -64,6 +67,10 @@ export const updateTicketSchema = z.object({
   escalate: z.boolean().optional(),
   /** null = remove from team; positive int = assign to team */
   teamId: z.number().int().positive().nullable().optional(),
+  /** null = clear custom status; positive int = apply custom status ID */
+  customStatusId: z.number().int().positive().nullable().optional(),
+  /** null = clear custom ticket type; positive int = apply custom ticket type ID */
+  customTicketTypeId: z.number().int().positive().nullable().optional(),
 });
 
 // Predefined views that translate to compound where-clauses on the backend.
@@ -92,6 +99,10 @@ export const ticketListQuerySchema = z.object({
   assignedToMe: boolParam,
   /** Filter by team ID; "none" matches tickets with no team */
   teamId: z.union([z.coerce.number().int().positive(), z.literal("none")]).optional(),
+  /** Filter by custom status ID */
+  customStatusId: z.coerce.number().int().positive().optional(),
+  /** Filter by custom ticket type ID */
+  customTicketTypeId: z.coerce.number().int().positive().optional(),
   /** Predefined compound views — overrides some individual filters */
   view: z.enum(ticketViews).optional(),
   page: z.coerce.number().int().min(1).default(1),

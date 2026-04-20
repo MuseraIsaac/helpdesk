@@ -26,6 +26,8 @@ import {
 import { scanBuffer } from "../lib/virus-scan";
 import { createDownloadToken, verifyDownloadToken } from "../lib/download-token";
 import { can } from "core/constants/permission.ts";
+import { changeDocumentTypes } from "core/constants/change.ts";
+import type { ChangeDocumentType } from "core/constants/change.ts";
 import prisma from "../db";
 
 const router = Router({ mergeParams: true });
@@ -60,6 +62,7 @@ const ATTACHMENT_SELECT = {
   filename: true,
   mimeType: true,
   size: true,
+  documentType: true,
   virusScanStatus: true,
   checksum: true,
   createdAt: true,
@@ -117,6 +120,13 @@ router.post(
       file.originalname
     );
 
+    // documentType may be sent as a multipart form field alongside the file
+    const rawDocType = req.body?.documentType as string | undefined;
+    const documentType: ChangeDocumentType | null =
+      rawDocType && (changeDocumentTypes as readonly string[]).includes(rawDocType)
+        ? (rawDocType as ChangeDocumentType)
+        : null;
+
     const attachment = await prisma.changeAttachment.create({
       data: {
         filename:        file.originalname,
@@ -126,6 +136,7 @@ router.post(
         storageProvider,
         checksum,
         virusScanStatus: scanResult,
+        documentType:    documentType ?? undefined,
         changeId,
         uploadedById:    req.user.id,
       },

@@ -24,6 +24,19 @@ interface Team {
 
 const ALL = "__all__";
 
+interface CustomStatusConfig {
+  id: number;
+  label: string;
+  color: string;
+  isActive: boolean;
+}
+
+interface CustomTicketTypeConfig {
+  id: number;
+  name: string;
+  isActive: boolean;
+}
+
 interface TicketsFiltersProps {
   filters: TicketFilters;
   onChange: (filters: TicketFilters) => void;
@@ -38,6 +51,23 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
     },
   });
 
+  const { data: customStatusesData } = useQuery({
+    queryKey: ["ticket-status-configs"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ configs: CustomStatusConfig[] }>("/api/ticket-status-configs");
+      return data.configs;
+    },
+  });
+
+  const { data: customTicketTypesData } = useQuery({
+    queryKey: ["ticket-types"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ ticketTypes: CustomTicketTypeConfig[] }>("/api/ticket-types");
+      return data.ticketTypes;
+    },
+  });
+  const activeCustomTypes = (customTicketTypesData ?? []).filter((t) => t.isActive);
+
   return (
     <div className="flex flex-wrap items-center gap-3 mb-4">
       <div className="relative flex-1 min-w-[180px] max-w-sm">
@@ -51,10 +81,20 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
       </div>
 
       <Select
-        value={filters.ticketType ?? ALL}
-        onValueChange={(value) =>
-          onChange({ ...filters, ticketType: value === ALL ? undefined : (value as TicketFilters["ticketType"]) })
+        value={
+          filters.customTicketTypeId != null
+            ? `custom_${filters.customTicketTypeId}`
+            : filters.ticketType ?? ALL
         }
+        onValueChange={(value) => {
+          if (value === ALL) {
+            onChange({ ...filters, ticketType: undefined, customTicketTypeId: undefined });
+          } else if (value.startsWith("custom_")) {
+            onChange({ ...filters, ticketType: undefined, customTicketTypeId: parseInt(value.replace("custom_", ""), 10) });
+          } else {
+            onChange({ ...filters, ticketType: value as TicketFilters["ticketType"], customTicketTypeId: undefined });
+          }
+        }}
       >
         <SelectTrigger className="w-[150px]">
           <SelectValue placeholder="All types" />
@@ -64,16 +104,27 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
           {ticketTypes.map((t) => (
             <SelectItem key={t} value={t}>{ticketTypeLabel[t]}</SelectItem>
           ))}
+          {activeCustomTypes.map((t) => (
+            <SelectItem key={`custom_${t.id}`} value={`custom_${t.id}`}>
+              {t.name}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
 
       <Select
-        value={filters.status ?? ALL}
-        onValueChange={(value) =>
-          onChange({ ...filters, status: value === ALL ? undefined : (value as TicketFilters["status"]) })
-        }
+        value={filters.customStatusId != null ? `custom_${filters.customStatusId}` : (filters.status ?? ALL)}
+        onValueChange={(value) => {
+          if (value === ALL) {
+            onChange({ ...filters, status: undefined, customStatusId: undefined });
+          } else if (value.startsWith("custom_")) {
+            onChange({ ...filters, status: undefined, customStatusId: parseInt(value.replace("custom_", ""), 10) });
+          } else {
+            onChange({ ...filters, status: value as TicketFilters["status"], customStatusId: undefined });
+          }
+        }}
       >
-        <SelectTrigger className="w-[140px]">
+        <SelectTrigger className="w-[150px]">
           <SelectValue placeholder="All statuses" />
         </SelectTrigger>
         <SelectContent>
@@ -81,6 +132,13 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
           {agentTicketStatuses.map((s) => (
             <SelectItem key={s} value={s}>{statusLabel[s]}</SelectItem>
           ))}
+          {(customStatusesData ?? [])
+            .filter((cs) => cs.isActive)
+            .map((cs) => (
+              <SelectItem key={`custom_${cs.id}`} value={`custom_${cs.id}`}>
+                {cs.label}
+              </SelectItem>
+            ))}
         </SelectContent>
       </Select>
 

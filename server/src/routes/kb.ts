@@ -395,7 +395,9 @@ router.post("/articles", async (req, res) => {
     data: {
       title:        data.title,
       slug,
+      summary:      data.summary ?? null,
       body:         data.body,
+      tags:         data.tags ?? [],
       status:       data.status ?? "draft",
       reviewStatus: data.reviewStatus ?? "draft",
       visibility:   data.visibility ?? "public",
@@ -403,6 +405,7 @@ router.post("/articles", async (req, res) => {
       ownerId:      data.ownerId ?? null,
       authorId:     req.user.id,
       publishedAt,
+      customFields: (data.customFields ?? {}) as any,
     },
     include: { ...articleInclude, _count: { select: { feedback: true, versions: true } } },
   });
@@ -446,9 +449,15 @@ router.patch("/articles/:id", async (req, res) => {
   const publishedAt =
     data.status === "published" && !existing.publishedAt ? new Date() : existing.publishedAt;
 
+  const { customFields, ...rest } = data as any;
   const article = await prisma.kbArticle.update({
     where: { id },
-    data: { ...data, slug, publishedAt },
+    data: {
+      ...rest,
+      slug,
+      publishedAt,
+      ...(customFields !== undefined && { customFields: customFields as any }),
+    },
     include: { ...articleInclude, _count: { select: { feedback: true, versions: true } } },
   });
   res.json({ article });

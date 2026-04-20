@@ -185,6 +185,12 @@ export const ticketsSettingsSchema = z.object({
   csatEnabled:                  z.boolean().default(true),
   autoCloseResolvedAfterDays:   z.number().int().min(0).max(365).default(7),
   requireCategoryOnCreate:      z.boolean().default(false),
+  /**
+   * When true, agents only see tickets assigned to their team(s).
+   * Admins and supervisors are always unrestricted.
+   * Individual agents can be granted a global override via globalTicketView on the User record.
+   */
+  teamScopedVisibility:         z.boolean().default(false),
 });
 
 // Per-series configuration for one numbering series (incident, SR, etc.)
@@ -201,13 +207,11 @@ export const seriesConfigSchema = z.object({
 export type SeriesConfig = z.infer<typeof seriesConfigSchema>;
 
 export const ticketNumberingSettingsSchema = z.object({
-  incident:        seriesConfigSchema.default({ prefix: "INC", paddingLength: 4, startAt: 1,    includeDateSegment: "none", resetPeriod: "never" }),
-  service_request: seriesConfigSchema.default({ prefix: "SR",  paddingLength: 4, startAt: 1,    includeDateSegment: "none", resetPeriod: "never" }),
-  // CRQ prefix + 7-digit padding yields CRQ0000001 … CRQ9999999 (enterprise style).
-  // Admins can override via Settings → Ticket Numbering (e.g. CHG, RFC, CR).
-  change_request:  seriesConfigSchema.default({ prefix: "CRQ", paddingLength: 7, startAt: 1,    includeDateSegment: "none", resetPeriod: "never" }),
-  problem:         seriesConfigSchema.default({ prefix: "PRB", paddingLength: 4, startAt: 1,    includeDateSegment: "none", resetPeriod: "never" }),
-  generic:         seriesConfigSchema.default({ prefix: "TKT", paddingLength: 6, startAt: 1000, includeDateSegment: "none", resetPeriod: "never" }),
+  // Shared counter for incidents, service requests, and untyped (generic) tickets.
+  // All three use this one prefix and sequence — they are numbered together.
+  ticket:         seriesConfigSchema.default({ prefix: "TKT", paddingLength: 4, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
+  change_request: seriesConfigSchema.default({ prefix: "CRQ", paddingLength: 7, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
+  problem:        seriesConfigSchema.default({ prefix: "PRB", paddingLength: 4, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
 });
 
 export const slaSettingsSchema = z.object({
@@ -304,6 +308,8 @@ export const advancedSettingsSchema = z.object({
 
 export const incidentsSettingsSchema = z.object({
   enabled:                   z.boolean().default(true),
+  // Auto-escalate: apply escalation rules automatically on incident create/update
+  autoEscalate:              z.boolean().default(true),
   // Major incident threshold: severity at or above this triggers major-incident workflow
   majorIncidentSeverity:     z.enum(["sev1", "sev2", "sev3"]).default("sev1"),
   // Auto-escalate to on-call when breach imminent (minutes before SLA breach)
@@ -323,6 +329,8 @@ export const incidentsSettingsSchema = z.object({
 
 export const requestsSettingsSchema = z.object({
   enabled:                    z.boolean().default(true),
+  // Auto-escalate: apply escalation rules automatically on request create/update
+  autoEscalate:               z.boolean().default(false),
   requireApprovalByDefault:   z.boolean().default(false),
   // Default fulfillment SLA (hours) when no catalog item SLA is set
   defaultFulfillmentHours:    z.number().int().positive().default(24),
@@ -351,6 +359,8 @@ export const changesSettingsSchema = z.object({
   requireCabForNormal:         z.boolean().default(true),
   requireCabForEmergency:      z.boolean().default(false),
   standardChangesEnabled:      z.boolean().default(true),
+  /** ID of the CabGroup used as the default approver pool for CAB reviews. */
+  defaultCabGroupId:           z.number().int().positive().nullable().default(null),
   // Freeze window: no normal/major changes deployed (emergency still allowed)
   freezeWindowEnabled:         z.boolean().default(false),
   freezeWindowStart:           z.string().default(""),
@@ -361,6 +371,16 @@ export const changesSettingsSchema = z.object({
   requireTestPlanAboveRisk:    z.enum(["low", "medium", "high"]).default("medium"),
   requireRollbackPlan:         z.boolean().default(true),
   autoApproveStandardChanges:  z.boolean().default(true),
+  /**
+   * When false (default), all CAB approvers are notified simultaneously and
+   * can approve in any order — no sequence is enforced.
+   * When true, approvers must approve one at a time in the order listed.
+   */
+  cabApprovalSequential:       z.boolean().default(false),
+  /** Minimum number of CAB approvers that must be selected before a change can be submitted for approval. */
+  minCabApprovers:             z.number().int().min(1).default(1),
+  /** Maximum number of times an approval request can be resent to an approver who has rejected. 0 = no resends allowed. */
+  maxApprovalResends:          z.number().int().min(0).default(3),
 
   // ── Default field values ─────────────────────────────────────────────────────
   // Pre-populate new change forms so teams don't have to set the same values each time.

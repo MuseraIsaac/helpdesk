@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { type Ticket } from "core/constants/ticket.ts";
@@ -7,6 +7,7 @@ import ErrorAlert from "@/components/ErrorAlert";
 import MacroPicker from "@/components/MacroPicker";
 import RichTextEditor from "@/components/RichTextEditor";
 import { useSession } from "@/lib/auth-client";
+import { useMe } from "@/hooks/useMe";
 import { BookOpen, Paperclip, X } from "lucide-react";
 
 interface StagedFile {
@@ -34,13 +35,25 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: session } = useSession();
+  const { data: meData } = useMe();
+  const [signatureInjected, setSignatureInjected] = useState(false);
 
   // Rich-text state — html for storage, text for validation
   const [bodyHtml, setBodyHtml] = useState("");
   const [bodyText, setBodyText] = useState("");
 
-  // External content injection (macros, AI polish) — drives editor sync
+  // External content injection (macros, AI polish, signature) — drives editor sync
   const [editorContent, setEditorContent] = useState("");
+
+  // Inject signature once when user data first loads
+  useEffect(() => {
+    if (signatureInjected) return;
+    const sig = meData?.user?.preference?.signature;
+    if (sig) {
+      setEditorContent(`<p><br></p>${sig}`);
+      setSignatureInjected(true);
+    }
+  }, [meData, signatureInjected]);
 
   const handleEditorChange = useCallback((html: string, text: string) => {
     setBodyHtml(html);
@@ -148,9 +161,10 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
         <RichTextEditor
           content={editorContent}
           onChange={handleEditorChange}
-          placeholder="Type your reply…"
+          placeholder="Type your reply… Use @ to mention a team member"
           minHeight="120px"
           disabled={isBusy}
+          enableMentions
         />
 
         {/* Staged attachment chips */}

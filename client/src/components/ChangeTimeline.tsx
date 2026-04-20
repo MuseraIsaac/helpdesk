@@ -244,7 +244,7 @@ const EVENT_MAP: Record<string, EventDescriptor> = {
   },
   "change.approval_approved": {
     icon:  <ShieldCheck className={`${ICON_CLS} text-green-600`} />,
-    label: () => "CAB approval granted",
+    label: () => "CAB approval granted — all approvers signed off",
   },
   "change.approval_rejected": {
     icon:  <ShieldX className={`${ICON_CLS} text-destructive`} />,
@@ -256,7 +256,21 @@ const EVENT_MAP: Record<string, EventDescriptor> = {
   },
   "change.approval_cancelled": {
     icon:  <Ban className={`${ICON_CLS} text-muted-foreground`} />,
-    label: () => "Approval request cancelled",
+    label: () => "Approval request cancelled (superseded by new request)",
+  },
+  "change.step_approved": {
+    icon:  <CheckCircle2 className={`${ICON_CLS} text-green-600`} />,
+    label: (m) => `Approved by ${String(m.approverName ?? "CAB member")}`,
+    detail: (m) => m.comment
+      ? <span className="italic">"{String(m.comment)}"</span>
+      : null,
+  },
+  "change.step_rejected": {
+    icon:  <XCircle className={`${ICON_CLS} text-destructive`} />,
+    label: (m) => `Rejected by ${String(m.approverName ?? "CAB member")}`,
+    detail: (m) => m.comment
+      ? <span className="italic">"{String(m.comment)}"</span>
+      : null,
   },
 
   // ── Attachments ───────────────────────────────────────────────────────────

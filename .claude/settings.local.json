@@ -73,7 +73,18 @@
       "Bash(node *)",
       "Bash(grep -E \"index|\\\\.mjs$\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
-      "Bash(taskkill //F //IM bun.exe)"
+      "Bash(taskkill //F //IM bun.exe)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/api/auth/get-session)",
+      "Bash(DATABASE_URL=\"postgresql://postgres:postgres@138.199.153.57:5432/postgres?schema=public\" bun run prisma db execute --stdin)",
+      "Bash(taskkill //F //IM bun.exe sleep 1 cd \"/c/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/server\")",
+      "Bash(psql \"postgresql://postgres:postgres@138.199.153.57:5432/postgres\" -c \"SELECT 1\")",
+      "Bash(bun prisma/seed.ts)",
+      "Bash(pkill -f \"bun run dev\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('totalTickets:', d['totalTickets'], '| openTickets:', d['openTickets']\\)\")",
+      "Bash(bun --bun tsc --noEmit)",
+      "Bash(taskkill *)",
+      "Bash(pkill -f \"bun.*src/index.ts\")",
+      "Bash(grep -v \"\\\\.map\\\\|comment\\\\|//\")"
     ]
   }
 }

@@ -22,6 +22,7 @@ import { logRequestEvent } from "../lib/request-events";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { createApproval } from "../lib/approval-engine";
 import { syncServiceRequestToTicket } from "../lib/ticket-sync";
+import { applyEscalationRules } from "../lib/apply-escalation-rules";
 import prisma from "../db";
 import type { Prisma, TicketPriority } from "../generated/prisma/client";
 
@@ -235,6 +236,7 @@ router.post(
         catalogItemId: data.catalogItemId ?? null,
         catalogItemName: data.catalogItemName ?? null,
         formData: data.formData as Prisma.InputJsonValue,
+        customFields: (data.customFields ?? {}) as Prisma.InputJsonValue,
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
         slaDueAt,
         createdById: req.user.id,
@@ -258,6 +260,31 @@ router.post(
       priority: request.priority,
       status: request.status,
       itemCount: data.items.length,
+    });
+
+    // Evaluate escalation rules (fire-and-forget; never blocks the response)
+    const cfSnapshot = Object.fromEntries(
+      Object.entries((data.customFields ?? {}) as Record<string, unknown>)
+        .map(([k, v]) => [k, v === null || v === undefined ? "" : String(v)])
+    );
+    void applyEscalationRules("request", {
+      priority:        data.priority,
+      status:          initialStatus,
+      approvalStatus:  initialApprovalStatus,
+      slaBreached:     "false",
+      catalogItemName: data.catalogItemName ?? "",
+      ...cfSnapshot,
+    }).then(async (escalation) => {
+      if (!escalation) return;
+      const update: { teamId?: number; assignedToId?: string } = {};
+      if (escalation.teamId && !data.teamId) update.teamId = escalation.teamId;
+      if (escalation.userId && !data.assignedToId) update.assignedToId = escalation.userId;
+      if (Object.keys(update).length === 0) return;
+      await prisma.serviceRequest.update({ where: { id: request.id }, data: update });
+      await logRequestEvent(request.id, null, "request.escalation_rule_applied", {
+        rule: escalation.ruleName,
+        ...update,
+      });
     });
 
     // Wire up the approval engine if approval is required
@@ -651,5 +678,34 @@ router.delete(
     res.json({ ok: true });
   }
 );
+
+// ─── Bulk Actions ──────────────────────────────────────────────────────────────
+
+import { z as zBulk } from "zod/v4";
+
+const requestsBulkSchema = zBulk.discriminatedUnion("action", [
+  zBulk.object({ action: zBulk.literal("delete"), ids: zBulk.array(zBulk.number().int().positive()).min(1).max(100) }),
+  zBulk.object({ action: zBulk.literal("assign"), ids: zBulk.array(zBulk.number().int().positive()).min(1).max(100), assignedToId: zBulk.string().nullable().optional(), teamId: zBulk.number().int().positive().nullable().optional() }),
+  zBulk.object({ action: zBulk.literal("status"), ids: zBulk.array(zBulk.number().int().positive()).min(1).max(100), status: zBulk.string() }),
+]);
+
+router.post("/bulk", requireAuth, requirePermission("requests.manage"), async (req, res) => {
+  const data = validate(requestsBulkSchema, req.body, res);
+  if (!data) return;
+  switch (data.action) {
+    case "delete": {
+      const { count } = await prisma.serviceRequest.deleteMany({ where: { id: { in: data.ids } } });
+      res.json({ affected: count }); return;
+    }
+    case "assign": {
+      await prisma.serviceRequest.updateMany({ where: { id: { in: data.ids } }, data: { ...(data.assignedToId !== undefined && { assignedToId: data.assignedToId }), ...(data.teamId !== undefined && { teamId: data.teamId }) } });
+      res.json({ affected: data.ids.length }); return;
+    }
+    case "status": {
+      const { count } = await prisma.serviceRequest.updateMany({ where: { id: { in: data.ids } }, data: { status: data.status as any } });
+      res.json({ affected: count }); return;
+    }
+  }
+});
 
 export default router;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useParams, Link } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
@@ -19,7 +19,8 @@ import {
 } from "core/schemas/incidents.ts";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
+import RichTextEditor from "@/components/RichTextEditor";
+import RichTextRenderer from "@/components/RichTextRenderer";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -106,28 +107,38 @@ interface UpdateTimelineProps {
 
 function UpdateTimeline({ updates = [], incidentId, status }: UpdateTimelineProps) {
   const queryClient = useQueryClient();
+  const [bodyHtml, setBodyHtml]   = useState("");
+  const [bodyText, setBodyText]   = useState("");
+  const [editorKey, setEditorKey] = useState(0);
+
   const {
-    register,
     handleSubmit,
     reset,
     control,
-    formState: { errors },
   } = useForm<CreateIncidentUpdateInput>({
     resolver: zodResolver(createIncidentUpdateSchema),
-    defaultValues: { updateType: "update" },
+    defaultValues: { updateType: "update", body: " " },
   });
 
+  const handleEditorChange = useCallback((html: string, text: string) => {
+    setBodyHtml(html);
+    setBodyText(text);
+  }, []);
+
   const addUpdate = useMutation({
-    mutationFn: async (data: CreateIncidentUpdateInput) => {
+    mutationFn: async (formData: CreateIncidentUpdateInput) => {
       const { data: result } = await axios.post(
         `/api/incidents/${incidentId}/updates`,
-        data
+        { updateType: formData.updateType, body: bodyText || " ", bodyHtml }
       );
       return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["incident", String(incidentId)] });
-      reset();
+      reset({ updateType: "update", body: " " });
+      setBodyHtml("");
+      setBodyText("");
+      setEditorKey((k) => k + 1);
     },
   });
 
@@ -159,7 +170,10 @@ function UpdateTimeline({ updates = [], incidentId, status }: UpdateTimelineProp
                       {u.author?.name ?? "System"} · {formatRelative(u.createdAt)}
                     </span>
                   </div>
-                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{u.body}</p>
+                  {u.bodyHtml
+                    ? <RichTextRenderer content={u.bodyHtml} />
+                    : <p className="text-sm whitespace-pre-wrap leading-relaxed">{u.body}</p>
+                  }
                 </div>
               </li>
             );
@@ -197,19 +211,21 @@ function UpdateTimeline({ updates = [], incidentId, status }: UpdateTimelineProp
             )}
           />
 
-          <Textarea
-            placeholder="What's the current status? Any workarounds? Impact updates?"
-            rows={3}
-            {...register("body")}
-            className="text-sm"
+          <RichTextEditor
+            key={editorKey}
+            content={bodyHtml}
+            onChange={handleEditorChange}
+            placeholder="What's the current status? Any workarounds? Impact updates? Use @ to mention someone"
+            minHeight="90px"
+            disabled={addUpdate.isPending}
+            enableMentions
           />
-          {errors.body && <ErrorMessage message={errors.body.message} />}
           {addUpdate.error && (
             <ErrorAlert error={addUpdate.error} fallback="Failed to post update" />
           )}
 
           <div className="flex justify-end">
-            <Button type="submit" size="sm" disabled={addUpdate.isPending}>
+            <Button type="submit" size="sm" disabled={addUpdate.isPending || !bodyText.trim()}>
               {addUpdate.isPending ? "Posting…" : "Post Update"}
             </Button>
           </div>

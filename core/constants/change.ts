@@ -1,5 +1,30 @@
 import type { TicketPriority } from "./ticket-priority.ts";
 
+// ── Change document type ──────────────────────────────────────────────────────
+
+export const changeDocumentTypes = [
+  "mop",
+  "rollback_document",
+  "test_evidence",
+  "change_communication",
+  "screenshot",
+  "technical_document",
+  "lessons_learned_doc",
+  "other",
+] as const;
+export type ChangeDocumentType = (typeof changeDocumentTypes)[number];
+
+export const changeDocumentTypeLabel: Record<ChangeDocumentType, string> = {
+  mop:                  "Method of Procedure (MOP)",
+  rollback_document:    "Rollback Document",
+  test_evidence:        "Test Evidence",
+  change_communication: "Change Communication",
+  screenshot:           "Screenshot / Visual Evidence",
+  technical_document:   "Technical Document",
+  lessons_learned_doc:  "Lessons Learned Report",
+  other:                "Other",
+};
+
 // ── Implementation outcome ────────────────────────────────────────────────────
 
 export const implementationOutcomes = [
@@ -185,9 +210,15 @@ export interface Change {
   prechecks?: string | null;
   postchecks?: string | null;
 
+  // Notification / Communication fields (detail only)
+  notificationRequired?: boolean | null;
+  impactedUsers?: string | null;
+  communicationNotes?: string | null;
+
   // Closure & PIR fields (detail only)
   implementationOutcome?: ImplementationOutcome | null;
   rollbackUsed?: boolean | null;
+  closureCode?: string | null;
   closureNotes?: string | null;
   reviewSummary?: string | null;
   lessonsLearned?: string | null;

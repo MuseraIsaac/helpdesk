@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth-client";
@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/table";
 import ErrorAlert from "@/components/ErrorAlert";
 import NewIncidentDialog from "@/components/NewIncidentDialog";
+import ModuleBulkActionsBar from "@/components/ModuleBulkActionsBar";
 import {
   AlertTriangle,
   Flame,
@@ -132,6 +133,15 @@ export default function IncidentsPage() {
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [majorOnly, setMajorOnly] = useState(false);
   const [assignedToMe, setAssignedToMe] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const clearSelection = useCallback(() => setSelectedIds([]), []);
+
+  function toggleRow(id: number) {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+  function toggleAll(ids: number[]) {
+    setSelectedIds((prev) => prev.length === ids.length && ids.every((id) => prev.includes(id)) ? [] : ids);
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["incidents", { statusFilter, priorityFilter, majorOnly, assignedToMe }],
@@ -241,6 +251,12 @@ export default function IncidentsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8 pl-3">
+                  <input type="checkbox" className="accent-primary h-3.5 w-3.5 cursor-pointer"
+                    checked={incidents.length > 0 && selectedIds.length === incidents.length}
+                    ref={(el) => { if (el) el.indeterminate = selectedIds.length > 0 && selectedIds.length < incidents.length; }}
+                    onChange={() => toggleAll(incidents.map((i) => i.id))} />
+                </TableHead>
                 <TableHead className="w-28">Number</TableHead>
                 <TableHead>Title</TableHead>
                 <TableHead className="w-20">Priority</TableHead>
@@ -253,7 +269,13 @@ export default function IncidentsPage() {
             </TableHeader>
             <TableBody>
               {incidents.map((incident) => (
-                <TableRow key={incident.id} className="group">
+                <TableRow key={incident.id} className={`group ${selectedIds.includes(incident.id) ? "bg-primary/5" : ""}`}>
+                  <TableCell className="pl-3">
+                    <input type="checkbox" className="accent-primary h-3.5 w-3.5 cursor-pointer"
+                      checked={selectedIds.includes(incident.id)}
+                      onChange={() => toggleRow(incident.id)}
+                      onClick={(e) => e.stopPropagation()} />
+                  </TableCell>
                   <TableCell className="font-mono text-xs font-medium text-muted-foreground">
                     <Link
                       to={`/incidents/${incident.id}`}
@@ -309,6 +331,21 @@ export default function IncidentsPage() {
           </Table>
         </div>
       )}
+
+      <ModuleBulkActionsBar
+        selectedIds={selectedIds}
+        onClearSelection={clearSelection}
+        endpoint="/api/incidents"
+        queryKey={["incidents"]}
+        entityLabel="incident"
+        statusOptions={[
+          { value: "new",          label: incidentStatusLabel.new },
+          { value: "acknowledged", label: incidentStatusLabel.acknowledged },
+          { value: "in_progress",  label: incidentStatusLabel.in_progress },
+          { value: "resolved",     label: incidentStatusLabel.resolved },
+          { value: "closed",       label: incidentStatusLabel.closed },
+        ]}
+      />
     </div>
   );
 }

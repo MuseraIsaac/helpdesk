@@ -5,7 +5,7 @@
  * run count. Provides create, edit, enable/disable, and delete controls.
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
@@ -14,7 +14,9 @@ import {
   createScenarioSchema,
   type CreateScenarioInput,
   type ScenarioAction,
+  type ScenarioVisibility,
 } from "core/schemas/scenarios.ts";
+import { useSession } from "@/lib/auth-client";
 import BackLink from "@/components/BackLink";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
@@ -48,23 +50,31 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Zap, Plus, Pencil, Trash2, X } from "lucide-react";
+import { Zap, Plus, Pencil, Trash2, X, Globe, Users, Lock } from "lucide-react";
+import {
+  SelectGroup,
+  SelectLabel,
+} from "@/components/ui/select";
 import { ticketTypes, ticketTypeLabel } from "core/constants/ticket-type.ts";
 import { ticketPriorities, priorityLabel } from "core/constants/ticket-priority.ts";
 import { ticketSeverities, severityLabel } from "core/constants/ticket-severity.ts";
 import { agentTicketStatuses, statusLabel } from "core/constants/ticket-status.ts";
 import { ticketCategories, categoryLabel } from "core/constants/ticket-category.ts";
+import { ticketImpacts, impactLabel } from "core/constants/ticket-impact.ts";
+import { ticketUrgencies, urgencyLabel } from "core/constants/ticket-urgency.ts";
+import { incidentPriorities, incidentPriorityLabel } from "core/constants/incident-priority.ts";
+import { incidentStatuses, incidentStatusLabel } from "core/constants/incident-status.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface AgentOption {
-  id: string;
-  name: string;
-}
+interface AgentOption { id: string; name: string }
+interface TeamOption  { id: number; name: string }
 
-interface TeamOption {
-  id: number;
-  name: string;
+interface CustomFieldDef {
+  key: string;
+  label: string;
+  fieldType: string;
+  options: string[];
 }
 
 interface ScenarioSummary {
@@ -74,7 +84,79 @@ interface ScenarioSummary {
   color: string | null;
   isEnabled: boolean;
   actions: ScenarioAction[];
+  visibility: ScenarioVisibility;
+  visibilityTeamId: number | null;
+  visibilityTeam: { id: number; name: string; color: string } | null;
+  createdById: string | null;
+  createdBy: { id: string; name: string } | null;
   _count: { executions: number };
+}
+
+const VISIBILITY_CONFIG: Record<ScenarioVisibility, { label: string; icon: React.ElementType; badge: string }> = {
+  public:  { label: "Public",  icon: Globe,  badge: "bg-green-500/10 text-green-700 dark:text-green-400" },
+  team:    { label: "Team",    icon: Users,  badge: "bg-blue-500/10 text-blue-700 dark:text-blue-400" },
+  private: { label: "Private", icon: Lock,   badge: "bg-muted text-muted-foreground" },
+};
+
+// ── Field group definitions for update_field ──────────────────────────────────
+
+interface FieldOption { value: string; label: string }
+interface FieldDef    { value: string; label: string; options: FieldOption[]; isText?: boolean }
+interface FieldGroup  { label: string; fields: FieldDef[] }
+
+const BOOL_OPTS: FieldOption[] = [{ value: "true", label: "Yes" }, { value: "false", label: "No" }];
+
+// ── Static field groups covering every field of an incident-type ticket ────────
+
+const STATIC_FIELD_GROUPS: FieldGroup[] = [
+  {
+    // The Ticket record that IS the incident (ticketType = "incident")
+    label: "Incident Ticket",
+    fields: [
+      { value: "subject",        label: "Subject / Title",   options: [], isText: true },
+      { value: "status",         label: "Status",            options: agentTicketStatuses.map((v) => ({ value: v, label: statusLabel[v] })) },
+      { value: "priority",       label: "Priority",          options: ticketPriorities.map((v) => ({ value: v, label: priorityLabel[v] })) },
+      { value: "severity",       label: "Severity",          options: ticketSeverities.map((v) => ({ value: v, label: severityLabel[v] })) },
+      { value: "impact",         label: "Impact",            options: ticketImpacts.map((v) => ({ value: v, label: impactLabel[v] })) },
+      { value: "urgency",        label: "Urgency",           options: ticketUrgencies.map((v) => ({ value: v, label: urgencyLabel[v] })) },
+      { value: "category",       label: "Category",          options: ticketCategories.map((v) => ({ value: v, label: categoryLabel[v] })) },
+      { value: "ticketType",     label: "Ticket Type",       options: ticketTypes.map((v) => ({ value: v, label: ticketTypeLabel[v] })) },
+      { value: "source",         label: "Source / Channel",  options: [{ value: "email", label: "Email" }, { value: "portal", label: "Portal" }, { value: "agent", label: "Agent (manual)" }] },
+      { value: "affectedSystem", label: "Affected System",   options: [], isText: true },
+    ],
+  },
+  {
+    // The linked Incident record (created/synced when ticketType = "incident")
+    label: "Incident Record",
+    fields: [
+      { value: "isMajor",            label: "Is Major Incident",    options: BOOL_OPTS },
+      { value: "incidentPriority",   label: "Priority (P1–P4)",     options: incidentPriorities.map((v) => ({ value: v, label: incidentPriorityLabel[v] })) },
+      { value: "incidentStatus",     label: "Status",               options: incidentStatuses.map((v) => ({ value: v, label: incidentStatusLabel[v] })) },
+      { value: "affectedUserCount",  label: "Affected User Count",  options: [], isText: true },
+    ],
+  },
+];
+
+function buildCustomFieldGroup(defs: CustomFieldDef[]): FieldDef[] {
+  return defs.map((cf) => {
+    if (cf.fieldType === "select" || cf.fieldType === "multiselect") {
+      return { value: cf.key, label: cf.label, options: cf.options.map((o) => ({ value: o, label: o })) };
+    }
+    if (cf.fieldType === "switch") {
+      return { value: cf.key, label: cf.label, options: BOOL_OPTS };
+    }
+    return { value: cf.key, label: cf.label, options: [], isText: true };
+  });
+}
+
+// Flatten all field groups + custom group into one lookup map
+function buildFieldMap(customDefs: CustomFieldDef[]): Map<string, FieldDef> {
+  const map = new Map<string, FieldDef>();
+  for (const group of STATIC_FIELD_GROUPS) {
+    for (const f of group.fields) map.set(f.value, f);
+  }
+  for (const f of buildCustomFieldGroup(customDefs)) map.set(f.value, f);
+  return map;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -87,24 +169,35 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   escalate:     "Escalate",
 };
 
-// Human-readable label for a field value used in the list view summary
-function fieldValueLabel(field: string, value: string): string {
-  switch (field) {
-    case "ticketType": return ticketTypeLabel[value as keyof typeof ticketTypeLabel] ?? value;
-    case "priority":   return priorityLabel[value as keyof typeof priorityLabel] ?? value;
-    case "severity":   return severityLabel[value as keyof typeof severityLabel] ?? value;
-    case "status":     return statusLabel[value as keyof typeof statusLabel] ?? value;
-    case "category":   return categoryLabel[value as keyof typeof categoryLabel] ?? value;
-    default:           return value;
+const FIELD_LABEL_MAP: Record<string, string> = {
+  // Incident Ticket fields
+  subject: "Subject / Title", status: "Ticket Status",
+  priority: "Ticket Priority", severity: "Severity",
+  impact: "Impact", urgency: "Urgency",
+  category: "Category", ticketType: "Ticket Type",
+  source: "Source / Channel", affectedSystem: "Affected System",
+  // Incident Record fields
+  isMajor: "Is Major Incident",
+  incidentPriority: "Incident Priority (P1–P4)",
+  incidentStatus: "Incident Status",
+  affectedUserCount: "Affected User Count",
+};
+
+function fieldValueLabel(field: string, value: string, fieldMap: Map<string, FieldDef>): string {
+  const def = fieldMap.get(field);
+  if (def) {
+    const opt = def.options.find((o) => o.value === value);
+    if (opt) return opt.label;
   }
+  return value;
 }
 
-function actionSummary(action: ScenarioAction): string {
+function actionSummary(action: ScenarioAction, fieldMap: Map<string, FieldDef>): string {
   switch (action.type) {
     case "update_field": {
       const a = action as any;
-      const fieldLabel = { priority: "Priority", severity: "Severity", status: "Status", category: "Category", ticketType: "Ticket Type" }[a.field as string] ?? a.field;
-      return `Set ${fieldLabel} → ${fieldValueLabel(a.field, a.value)}`;
+      const fl = FIELD_LABEL_MAP[a.field as string] ?? a.field;
+      return `Set ${fl} → ${fieldValueLabel(a.field, a.value, fieldMap)}`;
     }
     case "assign_user":
       return (action as any).agentId === "__me__"
@@ -121,53 +214,6 @@ function actionSummary(action: ScenarioAction): string {
   }
 }
 
-// ── Value picker — renders the right control based on which field is selected ──
-
-// Options for each update_field target
-const FIELD_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
-  ticketType: ticketTypes.map((v) => ({ value: v, label: ticketTypeLabel[v] })),
-  priority:   ticketPriorities.map((v) => ({ value: v, label: priorityLabel[v] })),
-  severity:   ticketSeverities.map((v) => ({ value: v, label: severityLabel[v] })),
-  // Only agent-visible statuses — "new" and "processing" are system-only
-  status:     agentTicketStatuses.map((v) => ({ value: v, label: statusLabel[v] })),
-  category:   ticketCategories.map((v) => ({ value: v, label: categoryLabel[v] })),
-};
-
-interface FieldValuePickerProps {
-  field: string;
-  value: string;
-  onChange: (v: string) => void;
-}
-
-function FieldValuePicker({ field, value, onChange }: FieldValuePickerProps) {
-  const options = FIELD_OPTIONS[field];
-  if (!options) {
-    // Fallback for unknown fields
-    return (
-      <Input
-        className="h-8 text-sm"
-        placeholder="Value"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    );
-  }
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-8 text-sm">
-        <SelectValue placeholder="Select value…" />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((opt) => (
-          <SelectItem key={opt.value} value={opt.value}>
-            {opt.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
 // ── Action editor ─────────────────────────────────────────────────────────────
 
 interface ActionEditorProps {
@@ -177,32 +223,27 @@ interface ActionEditorProps {
   onRemove: () => void;
   agents: AgentOption[];
   teams: TeamOption[];
+  customFieldDefs: CustomFieldDef[];
 }
 
-function ActionEditor({ index, value, onChange, onRemove, agents, teams }: ActionEditorProps) {
+function ActionEditor({ index, value, onChange, onRemove, agents, teams, customFieldDefs }: ActionEditorProps) {
   const selectedField = value.type === "update_field" ? (value as any).field as string ?? "" : "";
+  const fieldMap      = buildFieldMap(customFieldDefs);
+  const selectedDef   = selectedField ? fieldMap.get(selectedField) : undefined;
+  const customGroup   = buildCustomFieldGroup(customFieldDefs);
 
   return (
     <div className="rounded-md border p-3 space-y-2 bg-muted/30">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">Action {index + 1}</span>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="text-muted-foreground hover:text-destructive transition-colors"
-        >
+        <button type="button" onClick={onRemove} className="text-muted-foreground hover:text-destructive transition-colors">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      {/* Action type selector — resetting dependent fields when type changes */}
-      <Select
-        value={value.type}
-        onValueChange={(type) => onChange({ type } as ScenarioAction)}
-      >
-        <SelectTrigger className="h-8 text-sm">
-          <SelectValue placeholder="Select action type" />
-        </SelectTrigger>
+      {/* Action type */}
+      <Select value={value.type} onValueChange={(type) => onChange({ type } as ScenarioAction)}>
+        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select action type" /></SelectTrigger>
         <SelectContent>
           {Object.entries(ACTION_TYPE_LABELS).map(([t, label]) => (
             <SelectItem key={t} value={t}>{label}</SelectItem>
@@ -210,39 +251,66 @@ function ActionEditor({ index, value, onChange, onRemove, agents, teams }: Actio
         </SelectContent>
       </Select>
 
-      {/* update_field — field selector then context-aware value picker */}
+      {/* update_field — grouped field selector + value picker */}
       {value.type === "update_field" && (
         <div className="space-y-2">
+          {/* Grouped field selector */}
           <Select
-            value={selectedField}
-            onValueChange={(field) =>
-              // Clear the value whenever the field changes so stale values don't persist
-              onChange({ type: "update_field", field, value: "" } as any)
-            }
+            value={selectedField || "__none__"}
+            onValueChange={(field) => onChange({ type: "update_field", field: field === "__none__" ? "" : field, value: "" } as any)}
           >
-            <SelectTrigger className="h-8 text-sm">
-              <SelectValue placeholder="Select field…" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ticketType">Ticket Type</SelectItem>
-              <SelectItem value="priority">Priority</SelectItem>
-              <SelectItem value="severity">Severity</SelectItem>
-              <SelectItem value="status">Status</SelectItem>
-              <SelectItem value="category">Category</SelectItem>
+            <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select field…" /></SelectTrigger>
+            <SelectContent className="max-h-72">
+              {STATIC_FIELD_GROUPS.map((group) => (
+                <SelectGroup key={group.label}>
+                  <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 px-2">
+                    {group.label}
+                  </SelectLabel>
+                  {group.fields.map((f) => (
+                    <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+              {customGroup.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 px-2">
+                    Custom Fields
+                  </SelectLabel>
+                  {customGroup.map((f) => (
+                    <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
             </SelectContent>
           </Select>
 
-          {selectedField && (
-            <FieldValuePicker
-              field={selectedField}
-              value={(value as any).value ?? ""}
-              onChange={(v) => onChange({ ...value, value: v } as any)}
-            />
+          {/* Value picker for selected field */}
+          {selectedField && selectedDef && (
+            selectedDef.isText ? (
+              <Input
+                className="h-8 text-sm"
+                placeholder={`Enter ${selectedDef.label.toLowerCase()}…`}
+                value={(value as any).value ?? ""}
+                onChange={(e) => onChange({ ...value, value: e.target.value } as any)}
+              />
+            ) : (
+              <Select
+                value={(value as any).value ?? ""}
+                onValueChange={(v) => onChange({ ...value, value: v } as any)}
+              >
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select value…" /></SelectTrigger>
+                <SelectContent>
+                  {selectedDef.options.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )
           )}
         </div>
       )}
 
-      {/* assign_user — agent dropdown with special "Me" sentinel */}
+      {/* assign_user */}
       {value.type === "assign_user" && (
         <Select
           value={(value as any).agentId ?? ""}
@@ -255,33 +323,24 @@ function ActionEditor({ index, value, onChange, onRemove, agents, teams }: Actio
             }
           }}
         >
-          <SelectTrigger className="h-8 text-sm">
-            <SelectValue placeholder="Select agent…" />
-          </SelectTrigger>
+          <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select agent…" /></SelectTrigger>
           <SelectContent>
-            {/* "Me" sentinel — resolves to the invoking agent at run time */}
             <SelectItem value="__me__">
               <span className="flex items-center gap-1.5">
                 <span className="font-medium">Me</span>
                 <span className="text-muted-foreground text-[11px]">(whoever runs this scenario)</span>
               </span>
             </SelectItem>
-            {agents.length > 0 && (
-              <div className="mx-2 my-1 border-t" />
-            )}
-            {agents.length === 0 && (
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">Loading agents…</div>
-            )}
+            {agents.length > 0 && <div className="mx-2 my-1 border-t" />}
+            {agents.length === 0 && <div className="px-2 py-1.5 text-xs text-muted-foreground">Loading agents…</div>}
             {agents.map((agent) => (
-              <SelectItem key={agent.id} value={agent.id}>
-                {agent.name}
-              </SelectItem>
+              <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
       )}
 
-      {/* assign_team — team dropdown */}
+      {/* assign_team */}
       {value.type === "assign_team" && (
         <Select
           value={String((value as any).teamId ?? "")}
@@ -290,23 +349,17 @@ function ActionEditor({ index, value, onChange, onRemove, agents, teams }: Actio
             onChange({ type: "assign_team", teamId: Number(teamId), teamName: team?.name } as any);
           }}
         >
-          <SelectTrigger className="h-8 text-sm">
-            <SelectValue placeholder="Select team…" />
-          </SelectTrigger>
+          <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select team…" /></SelectTrigger>
           <SelectContent>
-            {teams.length === 0 && (
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">Loading teams…</div>
-            )}
+            {teams.length === 0 && <div className="px-2 py-1.5 text-xs text-muted-foreground">Loading teams…</div>}
             {teams.map((team) => (
-              <SelectItem key={team.id} value={String(team.id)}>
-                {team.name}
-              </SelectItem>
+              <SelectItem key={team.id} value={String(team.id)}>{team.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
       )}
 
-      {/* add_note — text area */}
+      {/* add_note */}
       {value.type === "add_note" && (
         <div className="space-y-1.5">
           <Textarea
@@ -327,7 +380,7 @@ function ActionEditor({ index, value, onChange, onRemove, agents, teams }: Actio
         </div>
       )}
 
-      {/* escalate — no extra config needed */}
+      {/* escalate */}
       {value.type === "escalate" && (
         <p className="text-xs text-muted-foreground">
           Marks the ticket as escalated and logs an escalation event.
@@ -348,7 +401,6 @@ interface ScenarioDialogProps {
 function ScenarioDialog({ open, onClose, existing }: ScenarioDialogProps) {
   const queryClient = useQueryClient();
 
-  // Fetch agents and teams — needed for assign_user / assign_team pickers
   const { data: agentsData } = useQuery({
     queryKey: ["agents-list"],
     queryFn: async () => {
@@ -367,26 +419,82 @@ function ScenarioDialog({ open, onClose, existing }: ScenarioDialogProps) {
     enabled: open,
   });
 
+  // Global ticket custom fields (ticketTypeId = null — apply to all ticket types)
+  const { data: globalCFData } = useQuery({
+    queryKey: ["custom-fields-ticket-global"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ fields: CustomFieldDef[] }>("/api/custom-fields?entityType=ticket");
+      return data.fields;
+    },
+    enabled: open,
+  });
+
+  // TicketTypeConfig entries — find any named/slugged "incident" for type-specific custom fields
+  const { data: ticketTypesData } = useQuery({
+    queryKey: ["ticket-types"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ ticketTypes: Array<{ id: number; slug: string; name: string }> }>("/api/ticket-types");
+      return data.ticketTypes;
+    },
+    enabled: open,
+  });
+
+  const incidentTypeConfigs = (ticketTypesData ?? []).filter(
+    (t) => t.slug.toLowerCase().includes("incident") || t.name.toLowerCase().includes("incident")
+  );
+
+  // Fetch custom fields for each incident-named TicketTypeConfig (usually 0 or 1)
+  const { data: typeCFData } = useQuery({
+    queryKey: ["custom-fields-incident-types", incidentTypeConfigs.map((t) => t.id)],
+    queryFn: async () => {
+      const results = await Promise.all(
+        incidentTypeConfigs.map((tc) =>
+          axios
+            .get<{ fields: CustomFieldDef[] }>(`/api/custom-fields?entityType=ticket&ticketTypeId=${tc.id}`)
+            .then((r) => r.data.fields)
+        )
+      );
+      return results.flat();
+    },
+    enabled: open && incidentTypeConfigs.length > 0,
+  });
+
   const agents: AgentOption[] = agentsData ?? [];
-  const teams: TeamOption[] = teamsData?.teams ?? [];
+  const teams: TeamOption[]   = teamsData?.teams ?? [];
+
+  // Merge global + type-specific custom fields, deduplicate by key
+  const customFieldDefs: CustomFieldDef[] = (() => {
+    const seen = new Set<string>();
+    const merged: CustomFieldDef[] = [];
+    for (const f of [...(globalCFData ?? []), ...(typeCFData ?? [])]) {
+      if (!seen.has(f.key)) { seen.add(f.key); merged.push(f); }
+    }
+    return merged;
+  })();
 
   const {
     register,
     control,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<CreateScenarioInput>({
     resolver: zodResolver(createScenarioSchema),
     defaultValues: existing
       ? {
-          name: existing.name,
-          description: existing.description ?? undefined,
-          color: existing.color ?? undefined,
-          actions: existing.actions,
+          name:             existing.name,
+          description:      existing.description ?? undefined,
+          color:            existing.color ?? undefined,
+          actions:          existing.actions,
+          visibility:       existing.visibility,
+          visibilityTeamId: existing.visibilityTeamId ?? undefined,
         }
-      : { name: "", actions: [{ type: "escalate" }] },
+      : { name: "", actions: [{ type: "escalate" }], visibility: "public" },
   });
+
+  const watchedVisibility = watch("visibility");
 
   const { fields, append, remove, update } = useFieldArray({
     control,
@@ -461,6 +569,62 @@ function ScenarioDialog({ open, onClose, existing }: ScenarioDialogProps) {
             {errors.color && <ErrorMessage message={errors.color.message} />}
           </div>
 
+          {/* Visibility */}
+          <div className="space-y-2">
+            <Label>Visibility</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {(["public", "team", "private"] as ScenarioVisibility[]).map((v) => {
+                const cfg = VISIBILITY_CONFIG[v];
+                const Icon = cfg.icon;
+                const active = watchedVisibility === v;
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => { setValue("visibility", v); if (v !== "team") setValue("visibilityTeamId", undefined); }}
+                    className={`flex flex-col items-center gap-1 rounded-lg border p-3 text-xs transition-colors ${
+                      active ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground hover:border-muted-foreground/40"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span className="font-medium">{cfg.label}</span>
+                    <span className="text-[10px] text-center leading-tight">
+                      {v === "public"  && "Everyone"}
+                      {v === "team"    && "Your team"}
+                      {v === "private" && "Only you"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Team selector — shown only when visibility = "team" */}
+            {watchedVisibility === "team" && (
+              <Controller
+                control={control}
+                name="visibilityTeamId"
+                render={({ field }) => (
+                  <Select
+                    value={field.value != null ? String(field.value) : ""}
+                    onValueChange={(v) => field.onChange(Number(v))}
+                  >
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Select team…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {teams.map((t) => (
+                        <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                      ))}
+                      {teams.length === 0 && (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground">No teams configured</div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            )}
+          </div>
+
           {/* Actions */}
           <div className="space-y-2">
             <Label>Actions</Label>
@@ -481,6 +645,7 @@ function ScenarioDialog({ open, onClose, existing }: ScenarioDialogProps) {
                       onRemove={() => remove(idx)}
                       agents={agents}
                       teams={teams}
+                      customFieldDefs={customFieldDefs}
                     />
                   )}
                 />
@@ -520,9 +685,14 @@ function ScenarioDialog({ open, onClose, existing }: ScenarioDialogProps) {
 
 export default function ScenariosPage() {
   const queryClient = useQueryClient();
+  const { data: session } = useSession();
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<ScenarioSummary | null>(null);
   const [deleting, setDeleting] = useState<ScenarioSummary | null>(null);
+
+  const currentUserId   = session?.user?.id;
+  const currentUserRole = (session?.user as any)?.role as string | undefined;
+  const isAdminOrSupervisor = currentUserRole === "admin" || currentUserRole === "supervisor";
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["scenarios"],
@@ -550,6 +720,10 @@ export default function ScenariosPage() {
   });
 
   const scenarios = data?.scenarios ?? [];
+
+  function canEdit(s: ScenarioSummary) {
+    return isAdminOrSupervisor || s.createdById === currentUserId;
+  }
 
   return (
     <div className="space-y-6">
@@ -615,6 +789,18 @@ export default function ScenariosPage() {
                   {!scenario.isEnabled && (
                     <Badge variant="outline" className="text-[10px]">Disabled</Badge>
                   )}
+                  {/* Visibility badge */}
+                  {(() => {
+                    const cfg = VISIBILITY_CONFIG[scenario.visibility];
+                    const Icon = cfg.icon;
+                    const teamName = scenario.visibilityTeam?.name;
+                    return (
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cfg.badge}`}>
+                        <Icon className="h-2.5 w-2.5" />
+                        {scenario.visibility === "team" && teamName ? teamName : cfg.label}
+                      </span>
+                    );
+                  })()}
                   <Badge variant="secondary" className="text-[10px]">
                     {scenario.actions.length} action{scenario.actions.length !== 1 ? "s" : ""}
                   </Badge>
@@ -625,11 +811,16 @@ export default function ScenariosPage() {
                 {scenario.description && (
                   <p className="text-xs text-muted-foreground mt-0.5">{scenario.description}</p>
                 )}
+                {scenario.createdBy && (
+                  <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                    By {scenario.createdById === currentUserId ? "you" : scenario.createdBy.name}
+                  </p>
+                )}
                 <ul className="mt-1.5 space-y-0.5">
                   {scenario.actions.map((action, idx) => (
                     <li key={idx} className="text-[11px] text-muted-foreground flex items-center gap-1.5">
                       <span className="text-muted-foreground/40">→</span>
-                      {actionSummary(action)}
+                      {actionSummary(action, buildFieldMap([]))}
                     </li>
                   ))}
                 </ul>
@@ -637,26 +828,32 @@ export default function ScenariosPage() {
 
               {/* Controls */}
               <div className="flex items-center gap-3 shrink-0">
-                <Switch
-                  checked={scenario.isEnabled}
-                  onCheckedChange={(checked) =>
-                    toggleMutation.mutate({ id: scenario.id, isEnabled: checked })
-                  }
-                />
-                <button
-                  type="button"
-                  onClick={() => setEditing(scenario)}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <Pencil className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDeleting(scenario)}
-                  className="text-muted-foreground hover:text-destructive transition-colors"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                {canEdit(scenario) && (
+                  <Switch
+                    checked={scenario.isEnabled}
+                    onCheckedChange={(checked) =>
+                      toggleMutation.mutate({ id: scenario.id, isEnabled: checked })
+                    }
+                  />
+                )}
+                {canEdit(scenario) && (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(scenario)}
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                )}
+                {canEdit(scenario) && (
+                  <button
+                    type="button"
+                    onClick={() => setDeleting(scenario)}
+                    className="text-muted-foreground hover:text-destructive transition-colors"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
               </div>
             </div>
           ))}

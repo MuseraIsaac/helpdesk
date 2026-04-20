@@ -1,10 +1,8 @@
 /**
  * RunScenarioButton — lets an agent invoke a scenario on the current ticket.
  *
- * Renders a "Run Scenario" dropdown. Each available (enabled) scenario appears
- * as a clickable item. Clicking one POSTs to /api/scenarios/:id/run, shows a
- * loading state, then invalidates the ticket query so the UI refreshes with
- * any field changes the scenario applied.
+ * variant="header"  → compact button for the ticket page top-right corner
+ * variant="sidebar" → full-width button for the right sidebar (legacy placement)
  */
 
 import { useState } from "react";
@@ -48,9 +46,13 @@ interface RunResult {
 
 interface RunScenarioButtonProps {
   ticketId: number;
+  variant?: "header" | "sidebar";
 }
 
-export default function RunScenarioButton({ ticketId }: RunScenarioButtonProps) {
+export default function RunScenarioButton({
+  ticketId,
+  variant = "sidebar",
+}: RunScenarioButtonProps) {
   const queryClient = useQueryClient();
   const [lastResult, setLastResult] = useState<RunResult | null>(null);
   const [runningId, setRunningId] = useState<number | null>(null);
@@ -76,7 +78,6 @@ export default function RunScenarioButton({ ticketId }: RunScenarioButtonProps) 
     onSuccess: (result) => {
       setLastResult(result);
       setRunningId(null);
-      // Refresh ticket to pick up any field changes
       void queryClient.invalidateQueries({ queryKey: ["ticket", String(ticketId)] });
     },
     onError: () => {
@@ -94,29 +95,38 @@ export default function RunScenarioButton({ ticketId }: RunScenarioButtonProps) 
 
   const appliedCount = lastResult?.results.filter((r) => r.applied).length ?? 0;
   const hasError = lastResult?.results.some((r) => r.errorMessage);
+  const isHeader = variant === "header";
 
   return (
-    <div className="space-y-2">
+    <div className={isHeader ? "flex flex-col items-end gap-1.5" : "space-y-2"}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
             size="sm"
-            className="w-full h-8 gap-1.5 text-xs justify-between"
+            className={
+              isHeader
+                ? "h-9 gap-2 px-3 text-sm font-medium"
+                : "w-full h-8 gap-1.5 text-xs justify-between"
+            }
             disabled={runMutation.isPending}
           >
             <span className="flex items-center gap-1.5">
               {runMutation.isPending ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <Zap className="h-3.5 w-3.5" />
+                <Zap className="h-3.5 w-3.5 text-amber-500" />
               )}
-              Run Scenario
+              {isHeader ? "Run Scenario" : "Run Scenario"}
             </span>
-            <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            <ChevronDown className={`h-3 w-3 text-muted-foreground ${isHeader ? "" : ""}`} />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent align="end" className="w-64">
+          <div className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+            Scenario Automations
+          </div>
+          <DropdownMenuSeparator />
           {scenarios.map((scenario, idx) => (
             <div key={scenario.id}>
               {idx > 0 && <DropdownMenuSeparator />}
@@ -126,16 +136,19 @@ export default function RunScenarioButton({ ticketId }: RunScenarioButtonProps) 
                 onClick={() => handleRun(scenario.id)}
               >
                 <div className="flex items-center gap-2 w-full">
-                  {scenario.color && (
-                    <span
-                      className="h-2 w-2 rounded-full shrink-0"
-                      style={{ backgroundColor: scenario.color }}
-                    />
-                  )}
+                  <span
+                    className="h-2 w-2 rounded-full shrink-0 border"
+                    style={{ backgroundColor: scenario.color ?? "hsl(var(--muted-foreground))" }}
+                  />
                   <span className="font-medium text-[13px] flex-1">{scenario.name}</span>
-                  <Badge variant="outline" className="text-[10px] shrink-0">
-                    {scenario.actions.length} action{scenario.actions.length !== 1 ? "s" : ""}
-                  </Badge>
+                  {runningId === scenario.id && (
+                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
+                  )}
+                  {runningId !== scenario.id && (
+                    <Badge variant="outline" className="text-[10px] shrink-0">
+                      {scenario.actions.length} action{scenario.actions.length !== 1 ? "s" : ""}
+                    </Badge>
+                  )}
                 </div>
                 {scenario.description && (
                   <p className="text-[11px] text-muted-foreground pl-4 leading-snug">
@@ -148,10 +161,10 @@ export default function RunScenarioButton({ ticketId }: RunScenarioButtonProps) 
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Inline result feedback */}
+      {/* Result feedback */}
       {lastResult && (
         <div
-          className={`flex items-start gap-1.5 rounded-md px-2.5 py-2 text-[11px] ${
+          className={`flex items-start gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] ${
             hasError
               ? "bg-destructive/10 text-destructive"
               : "bg-green-500/10 text-green-700 dark:text-green-400"
@@ -164,16 +177,16 @@ export default function RunScenarioButton({ ticketId }: RunScenarioButtonProps) 
           )}
           <span>
             {hasError
-              ? "Scenario completed with errors"
+              ? "Completed with errors"
               : appliedCount === 0
-              ? "No changes needed — all actions already applied"
+              ? "No changes needed"
               : `${appliedCount} action${appliedCount !== 1 ? "s" : ""} applied`}
           </span>
         </div>
       )}
 
       {runMutation.isError && (
-        <p className="text-[11px] text-destructive px-0.5">
+        <p className="text-[11px] text-destructive">
           {axios.isAxiosError(runMutation.error)
             ? (runMutation.error.response?.data as { error?: string })?.error ??
               "Failed to run scenario"

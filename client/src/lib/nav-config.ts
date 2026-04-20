@@ -27,10 +27,14 @@ import {
   Users,
   Wrench,
   UserCog,
+  Settings2,
+  ShieldCheck,
   CheckSquare,
   ShoppingBag,
   Contact,
   Building2,
+  Tag,
+  CircleDot,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { can, type Permission } from "core/constants/permission.ts";
@@ -239,6 +243,30 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Administration",
     roles: ["admin"],
     items: [
+      {
+        id: "ticket-types",
+        to: "/admin/ticket-types",
+        label: "Ticket Types",
+        icon: Tag,
+      },
+      {
+        id: "ticket-statuses",
+        to: "/admin/ticket-statuses",
+        label: "Ticket Statuses",
+        icon: CircleDot,
+      },
+      {
+        id: "form-builder",
+        to: "/admin/forms",
+        label: "Form Builder",
+        icon: Settings2,
+      },
+      {
+        id: "cab-groups",
+        to: "/admin/cab-groups",
+        label: "CAB Groups",
+        icon: ShieldCheck,
+      },
       {
         id: "automations",
         to: "/automations",

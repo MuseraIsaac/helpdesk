@@ -11,6 +11,11 @@ import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
 import UsersPage from "./pages/UsersPage";
 import MacrosPage from "./pages/MacrosPage";
+import TemplatesPage from "./pages/TemplatesPage";
+import FormBuilderPage from "./pages/FormBuilderPage";
+import CabGroupsPage from "./pages/CabGroupsPage";
+import TicketTypesPage from "./pages/TicketTypesPage";
+import TicketStatusConfigsPage from "./pages/TicketStatusConfigsPage";
 import KbPage from "./pages/KbPage";
 import KbArticleFormPage from "./pages/KbArticleFormPage";
 import TeamsPage from "./pages/TeamsPage";
@@ -30,6 +35,10 @@ import SettingsPage from "./pages/SettingsPage";
 import ScenariosPage from "./pages/ScenariosPage";
 import ChangesPage from "./pages/ChangesPage";
 import ChangeDetailPage from "./pages/ChangeDetailPage";
+import NewChangePage from "./pages/NewChangePage";
+import NewTicketPage from "./pages/NewTicketPage";
+import NewProblemPage from "./pages/NewProblemPage";
+import NewRequestPage from "./pages/NewRequestPage";
 import PortalLoginPage from "./pages/portal/PortalLoginPage";
 import PortalRegisterPage from "./pages/portal/PortalRegisterPage";
 import PortalTicketsPage from "./pages/portal/PortalTicketsPage";
@@ -83,15 +92,19 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/tickets" element={<TicketsPage />} />
+          <Route path="/tickets/new" element={<NewTicketPage />} />
           <Route path="/tickets/:id" element={<TicketDetailPage />} />
           {/* ITSM modules */}
           <Route path="/requests" element={<RequestsPage />} />
+          <Route path="/requests/new" element={<NewRequestPage />} />
           <Route path="/requests/:id" element={<RequestDetailPage />} />
           <Route path="/incidents" element={<IncidentsPage />} />
           <Route path="/incidents/:id" element={<IncidentDetailPage />} />
           <Route path="/problems" element={<ProblemsPage />} />
+          <Route path="/problems/new" element={<NewProblemPage />} />
           <Route path="/problems/:id" element={<ProblemDetailPage />} />
           <Route path="/changes" element={<ChangesPage />} />
+          <Route path="/changes/new" element={<NewChangePage />} />
           <Route path="/changes/:id" element={<ChangeDetailPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/cmdb" element={<CmdbPage />} />
@@ -113,7 +126,11 @@ function App() {
             <Route path="/users" element={<UsersPage />} />
             <Route path="/teams" element={<TeamsPage />} />
             <Route path="/macros" element={<MacrosPage />} />
-            <Route path="/templates" element={<PlaceholderPage title="Templates" description="Response templates will be available here." />} />
+            <Route path="/templates" element={<TemplatesPage />} />
+            <Route path="/admin/forms" element={<FormBuilderPage />} />
+            <Route path="/admin/cab-groups" element={<CabGroupsPage />} />
+            <Route path="/admin/ticket-types" element={<TicketTypesPage />} />
+            <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
             <Route path="/automations" element={<ScenariosPage />} />
             <Route path="/reports" element={<PlaceholderPage title="Reports" description="Advanced reporting and analytics is coming soon." />} />
             <Route path="/catalog/admin" element={<CatalogAdminPage />} />

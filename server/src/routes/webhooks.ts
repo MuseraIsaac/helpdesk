@@ -12,6 +12,9 @@ import { computeSlaDeadlines } from "../lib/sla";
 import { logAudit } from "../lib/audit";
 import { upsertCustomer } from "../lib/upsert-customer";
 import { generateTicketNumber } from "../lib/ticket-number";
+import { sendEmailJob } from "../lib/send-email";
+import { renderNotificationEmail } from "../lib/render-notification-email";
+import { getSection } from "../lib/settings";
 import {
   saveFile,
   ALLOWED_MIME_TYPES,
@@ -169,6 +172,37 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
 
   void logAudit(ticket.id, null, "ticket.created", { via: "email" });
   void saveInboundAttachments(files, ticket.id);
+
+  // Auto-response email to the customer who submitted the ticket
+  void (async () => {
+    try {
+      const integrations = await getSection("integrations");
+      const apiKey   = integrations.sendgridApiKey  || process.env.SENDGRID_API_KEY  || "";
+      const fromAddr = integrations.fromEmail        || process.env.SENDGRID_FROM_EMAIL || "";
+      if (!apiKey || !fromAddr) return;
+
+      const rendered = await renderNotificationEmail("ticket.created", {
+        entityNumber:  ticket.ticketNumber,
+        entityTitle:   ticket.subject,
+        entityUrl:     `/tickets/${ticket.id}`,
+        senderName:    ticket.senderName,
+        senderEmail:   ticket.senderEmail,
+        recipientName: ticket.senderName,
+      });
+      if (!rendered) return; // no active auto-response template configured
+
+      await sendEmailJob({
+        to:       ticket.senderEmail,
+        subject:  rendered.subject,
+        body:     rendered.bodyText,
+        bodyHtml: rendered.bodyHtml,
+        // Thread replies back to the original email
+        ...(ticket.emailMessageId && { inReplyTo: ticket.emailMessageId, references: ticket.emailMessageId }),
+      });
+    } catch (err) {
+      console.error(`[auto-response] Failed for ticket ${ticket.id}:`, err);
+    }
+  })();
 
   sendClassifyJob(ticket).catch((error) =>
     console.error(`Failed to enqueue classify job for ticket ${ticket.id}:`, error)

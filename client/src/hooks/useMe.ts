@@ -9,6 +9,7 @@ import type {
 export interface UserPreference {
   jobTitle: string | null;
   phone: string | null;
+  signature: string | null;
   language: string;
   timezone: string;
   dateFormat: string;

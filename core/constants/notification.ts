@@ -6,7 +6,10 @@
 // ── Event types ───────────────────────────────────────────────────────────────
 
 export type NotificationEvent =
+  | "ticket.created"
   | "ticket.assigned"
+  | "ticket.escalated"
+  | "user.mentioned"
   | "sla.first_response_warning"
   | "sla.resolution_warning"
   | "sla.breached"
@@ -14,12 +17,16 @@ export type NotificationEvent =
   | "approval.approved"
   | "approval.rejected"
   | "incident.major_flagged"
+  | "incident.escalated"
   | "request.approved"
   | "request.rejected"
   | "change.awaiting_approval";
 
 export const NOTIFICATION_EVENTS: NotificationEvent[] = [
+  "ticket.created",
   "ticket.assigned",
+  "ticket.escalated",
+  "user.mentioned",
   "sla.first_response_warning",
   "sla.resolution_warning",
   "sla.breached",
@@ -27,13 +34,17 @@ export const NOTIFICATION_EVENTS: NotificationEvent[] = [
   "approval.approved",
   "approval.rejected",
   "incident.major_flagged",
+  "incident.escalated",
   "request.approved",
   "request.rejected",
   "change.awaiting_approval",
 ];
 
 export const NOTIFICATION_EVENT_LABEL: Record<NotificationEvent, string> = {
-  "ticket.assigned":             "Ticket assigned",
+  "user.mentioned":              "Mentioned in a note or reply",
+  "ticket.created":              "Ticket submitted (auto-response to customer)",
+  "ticket.assigned":             "Ticket assigned to agent/team",
+  "ticket.escalated":            "Ticket escalated to agent/team",
   "sla.first_response_warning":  "SLA first response warning",
   "sla.resolution_warning":      "SLA resolution warning",
   "sla.breached":                "SLA breached",
@@ -41,10 +52,25 @@ export const NOTIFICATION_EVENT_LABEL: Record<NotificationEvent, string> = {
   "approval.approved":           "Approval approved",
   "approval.rejected":           "Approval rejected",
   "incident.major_flagged":      "Major incident declared",
+  "incident.escalated":          "Incident escalated to agent/team",
   "request.approved":            "Request approved",
   "request.rejected":            "Request rejected",
   "change.awaiting_approval":    "Change awaiting approval",
 };
+
+/** Events that send to external recipients (customers), not internal agents */
+export const CUSTOMER_FACING_EVENTS: NotificationEvent[] = [
+  "ticket.created",
+];
+
+/** Events that have default system email templates */
+export const SYSTEM_EMAIL_TEMPLATE_EVENTS: NotificationEvent[] = [
+  "ticket.created",
+  "ticket.assigned",
+  "ticket.escalated",
+  "sla.breached",
+  "incident.escalated",
+];
 
 // ── Channels ──────────────────────────────────────────────────────────────────
 

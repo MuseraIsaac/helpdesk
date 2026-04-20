@@ -7,8 +7,12 @@ const router = Router();
 
 router.get("/", requireAuth, async (_req, res) => {
   const agents = await prisma.user.findMany({
-    where: { deletedAt: null, id: { not: AI_AGENT_ID } },
-    select: { id: true, name: true },
+    where: {
+      deletedAt: null,
+      id:   { not: AI_AGENT_ID },
+      role: { not: "customer" },   // customers are portal users, not team agents
+    },
+    select: { id: true, name: true, email: true },
     orderBy: { name: "asc" },
   });
 

@@ -8,8 +8,46 @@ import {
   changePasswordSchema,
 } from "core/schemas/preferences.ts";
 import prisma from "../db";
+import { getSection } from "../lib/settings";
 
 const router = Router();
+
+// GET /api/me/ticket-scope — tells the UI whether this user's ticket view is team-scoped
+// Used by TicketsPage to show a contextual banner when team scoping is active.
+router.get("/ticket-scope", requireAuth, async (req, res) => {
+  const role = req.user.role;
+
+  // Admins and supervisors are never scoped
+  if (role === "admin" || role === "supervisor") {
+    res.json({ scoped: false, globalTicketView: true, teams: [] });
+    return;
+  }
+
+  const { teamScopedVisibility } = await getSection("tickets");
+  if (!teamScopedVisibility) {
+    res.json({ scoped: false, globalTicketView: false, teams: [] });
+    return;
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: {
+      globalTicketView: true,
+      teamMemberships: {
+        select: { team: { select: { id: true, name: true, color: true } } },
+      },
+    },
+  });
+
+  if (!user) { res.json({ scoped: false, globalTicketView: false, teams: [] }); return; }
+
+  const teams = user.teamMemberships.map((m) => m.team);
+  res.json({
+    scoped: !user.globalTicketView,
+    globalTicketView: user.globalTicketView,
+    teams,
+  });
+});
 
 // GET /api/me — current user + their preferences
 router.get("/", requireAuth, async (req, res) => {
@@ -32,7 +70,7 @@ router.patch("/profile", requireAuth, async (req, res) => {
   const data = validate(updateProfileSchema, req.body, res);
   if (!data) return;
 
-  const { name, jobTitle, phone } = data;
+  const { name, jobTitle, phone, signature } = data;
 
   await prisma.$transaction([
     prisma.user.update({
@@ -41,8 +79,8 @@ router.patch("/profile", requireAuth, async (req, res) => {
     }),
     prisma.userPreference.upsert({
       where: { userId: req.user.id },
-      create: { userId: req.user.id, jobTitle: jobTitle ?? null, phone: phone ?? null },
-      update: { jobTitle: jobTitle ?? null, phone: phone ?? null },
+      create: { userId: req.user.id, jobTitle: jobTitle ?? null, phone: phone ?? null, signature: signature ?? null },
+      update: { jobTitle: jobTitle ?? null, phone: phone ?? null, signature: signature ?? null },
     }),
   ]);
 

@@ -219,12 +219,16 @@ export async function decide(
 // ── All-mode advancement ───────────────────────────────────────────────────────
 
 async function advanceAllMode(
-  request: { id: number; steps: Array<{ id: number; stepOrder: number; status: string; approverId: string }> },
+  request: {
+    id: number;
+    requiredCount: number;
+    steps: Array<{ id: number; stepOrder: number; status: string; approverId: string }>;
+  },
   decidedStep: { id: number; stepOrder: number },
   decisionValue: "approved" | "rejected"
 ): Promise<DecideResult> {
   if (decisionValue === "rejected") {
-    // Reject the whole request; skip all remaining pending steps
+    // Any rejection immediately rejects the whole request; skip remaining steps
     const pendingStepIds = request.steps
       .filter((s) => s.id !== decidedStep.id && s.status === "pending")
       .map((s) => s.id);
@@ -246,14 +250,43 @@ async function advanceAllMode(
     return { outcome: "decision_recorded", requestStatus: "rejected" };
   }
 
-  // Approved — find next step to activate
+  // Approved — count how many have approved so far (re-fetch for accuracy)
+  const freshSteps = await prisma.approvalStep.findMany({
+    where: { approvalRequestId: request.id },
+    select: { id: true, stepOrder: true, status: true },
+  });
+  const approvedCount = freshSteps.filter((s) => s.status === "approved").length;
+
+  // If the required threshold is met, approve immediately and skip the rest
+  if (approvedCount >= request.requiredCount) {
+    const remainingIds = freshSteps
+      .filter((s) => s.status === "pending")
+      .map((s) => s.id);
+
+    await prisma.$transaction([
+      ...(remainingIds.length > 0
+        ? [prisma.approvalStep.updateMany({
+            where: { id: { in: remainingIds } },
+            data: { status: "skipped", isActive: false },
+          })]
+        : []),
+      prisma.approvalRequest.update({
+        where: { id: request.id },
+        data: { status: "approved", resolvedAt: new Date() },
+      }),
+    ]);
+
+    await logApprovalEvent(request.id, null, "approval.approved", { approvedCount });
+    return { outcome: "decision_recorded", requestStatus: "approved" };
+  }
+
+  // Threshold not yet met — activate the next step in sequence
   const nextOrder = decidedStep.stepOrder + 1;
-  const nextSteps = request.steps.filter(
+  const nextSteps = freshSteps.filter(
     (s) => s.stepOrder === nextOrder && s.status === "pending"
   );
 
   if (nextSteps.length > 0) {
-    // Activate next step(s)
     await prisma.approvalStep.updateMany({
       where: { id: { in: nextSteps.map((s) => s.id) } },
       data: { isActive: true },
@@ -265,12 +298,13 @@ async function advanceAllMode(
     return { outcome: "decision_recorded", requestStatus: "pending" };
   }
 
-  // No more steps — all approved
+  // No more steps to activate — all decided without meeting the threshold
+  // (shouldn't normally reach here after threshold check, but handle gracefully)
   await prisma.approvalRequest.update({
     where: { id: request.id },
     data: { status: "approved", resolvedAt: new Date() },
   });
-  await logApprovalEvent(request.id, null, "approval.approved", {});
+  await logApprovalEvent(request.id, null, "approval.approved", { approvedCount });
   return { outcome: "decision_recorded", requestStatus: "approved" };
 }
 

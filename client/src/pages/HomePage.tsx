@@ -833,25 +833,31 @@ const PRESET_LABELS: Record<TimePreset, string> = {
   custom:     "Custom range",
 };
 
+/** Returns today's date as YYYY-MM-DD in the user's local timezone. */
+function localToday(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Returns a Date offset by `days` from today (local), formatted as YYYY-MM-DD. */
+function localDaysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 /** Resolves a preset to a concrete date range (no-op for "custom" — use customRange state). */
 function resolvePreset(preset: Exclude<TimePreset, "custom">): DateRange {
-  const now   = new Date();
-  const today = now.toISOString().slice(0, 10);
+  const today = localToday();
+  const now = new Date();
   switch (preset) {
     case "today":     return { from: today, to: today };
-    case "yesterday": {
-      const d = new Date(now); d.setDate(d.getDate() - 1);
-      const s = d.toISOString().slice(0, 10);
-      return { from: s, to: s };
-    }
-    case "7d": {
-      const d = new Date(now); d.setDate(d.getDate() - 6);
-      return { from: d.toISOString().slice(0, 10), to: today };
-    }
-    case "30d": {
-      const d = new Date(now); d.setDate(d.getDate() - 29);
-      return { from: d.toISOString().slice(0, 10), to: today };
-    }
+    case "yesterday": { const s = localDaysAgo(1); return { from: s, to: s }; }
+    case "7d":        return { from: localDaysAgo(6),  to: today };
+    case "30d":       return { from: localDaysAgo(29), to: today };
     case "this_month": {
       const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
       return { from, to: today };
@@ -859,7 +865,8 @@ function resolvePreset(preset: Exclude<TimePreset, "custom">): DateRange {
     case "last_month": {
       const first   = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const lastDay = new Date(now.getFullYear(), now.getMonth(), 0);
-      return { from: first.toISOString().slice(0, 10), to: lastDay.toISOString().slice(0, 10) };
+      const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      return { from: fmt(first), to: fmt(lastDay) };
     }
   }
 }

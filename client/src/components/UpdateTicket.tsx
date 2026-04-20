@@ -26,6 +26,22 @@ interface Agent {
   name: string;
 }
 
+interface CustomStatusConfig {
+  id: number;
+  label: string;
+  color: string;
+  workflowState: string;
+  isActive: boolean;
+}
+
+interface CustomTicketTypeConfig {
+  id: number;
+  name: string;
+  slug: string;
+  color: string;
+  isActive: boolean;
+}
+
 interface Team {
   id: number;
   name: string;
@@ -94,6 +110,23 @@ export default function UpdateTicket({ ticket }: UpdateTicketProps) {
       return data.teams;
     },
   });
+
+  const { data: customStatusesData } = useQuery({
+    queryKey: ["ticket-status-configs"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ configs: CustomStatusConfig[] }>("/api/ticket-status-configs");
+      return data.configs;
+    },
+  });
+
+  const { data: customTicketTypesData } = useQuery({
+    queryKey: ["ticket-types"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ ticketTypes: CustomTicketTypeConfig[] }>("/api/ticket-types");
+      return data.ticketTypes;
+    },
+  });
+  const activeCustomTicketTypes = (customTicketTypesData ?? []).filter((t) => t.isActive);
 
   const updateMutation = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
@@ -272,10 +305,20 @@ export default function UpdateTicket({ ticket }: UpdateTicketProps) {
           <div className="space-y-1.5">
             <SidebarLabel>Type</SidebarLabel>
             <Select
-              value={ticket.ticketType ?? "none"}
-              onValueChange={(value) =>
-                updateMutation.mutate({ ticketType: value === "none" ? null : value })
+              value={
+                ticket.customTicketTypeId != null
+                  ? `custom_${ticket.customTicketTypeId}`
+                  : ticket.ticketType ?? "none"
               }
+              onValueChange={(value) => {
+                if (value === "none") {
+                  updateMutation.mutate({ ticketType: null, customTicketTypeId: null });
+                } else if (value.startsWith("custom_")) {
+                  updateMutation.mutate({ ticketType: null, customTicketTypeId: parseInt(value.replace("custom_", ""), 10) });
+                } else {
+                  updateMutation.mutate({ ticketType: value, customTicketTypeId: null });
+                }
+              }}
               disabled={updateMutation.isPending}
             >
               <SelectTrigger size="sm" className="w-full">
@@ -286,6 +329,11 @@ export default function UpdateTicket({ ticket }: UpdateTicketProps) {
                 {ticketTypes.map((t) => (
                   <SelectItem key={t} value={t}>
                     {ticketTypeLabel[t]}
+                  </SelectItem>
+                ))}
+                {activeCustomTicketTypes.map((t) => (
+                  <SelectItem key={`custom_${t.id}`} value={`custom_${t.id}`}>
+                    {t.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -302,8 +350,15 @@ export default function UpdateTicket({ ticket }: UpdateTicketProps) {
           <div className="space-y-1.5">
             <SidebarLabel>Status</SidebarLabel>
             <Select
-              value={ticket.status}
-              onValueChange={(value) => updateMutation.mutate({ status: value })}
+              value={ticket.customStatusId != null ? `custom_${ticket.customStatusId}` : ticket.status}
+              onValueChange={(value) => {
+                if (value.startsWith("custom_")) {
+                  const id = parseInt(value.replace("custom_", ""), 10);
+                  updateMutation.mutate({ customStatusId: id });
+                } else {
+                  updateMutation.mutate({ status: value, customStatusId: null });
+                }
+              }}
             >
               <SelectTrigger size="sm" className="w-full">
                 <SelectValue />
@@ -314,6 +369,13 @@ export default function UpdateTicket({ ticket }: UpdateTicketProps) {
                     {statusLabel[s]}
                   </SelectItem>
                 ))}
+                {(customStatusesData ?? [])
+                  .filter((cs) => cs.isActive)
+                  .map((cs) => (
+                    <SelectItem key={`custom_${cs.id}`} value={`custom_${cs.id}`}>
+                      {cs.label}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>

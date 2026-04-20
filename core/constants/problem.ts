@@ -9,6 +9,17 @@
 import type { ProblemStatus } from "./problem-status.ts";
 import type { CiSummary } from "./cmdb.ts";
 
+export interface LinkedTicket {
+  id: number;
+  ticketNumber: string;
+  subject: string;
+  status: string;
+  priority: string | null;
+  createdAt: string;
+  linkedAt: string;
+  linkedBy: { id: string; name: string } | null;
+}
+
 export interface LinkedIncident {
   id: number;
   incidentNumber: string;
@@ -76,6 +87,7 @@ export interface Problem {
 
   // Detail view only
   linkedIncidents?: LinkedIncident[];
+  linkedTickets?: LinkedTicket[];
   notes?: ProblemNote[];
   events?: ProblemEvent[];
   ciLinks?: Array<{ ci: CiSummary; linkedAt: string }>;

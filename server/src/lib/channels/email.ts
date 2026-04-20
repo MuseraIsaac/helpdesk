@@ -1,15 +1,17 @@
 /**
- * email channel — delivers a notification via email.
+ * email channel — delivers a notification email to an internal agent/user.
  *
- * Currently a stub. To enable:
- *  1. Set SMTP_FROM, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env
- *  2. Look up the recipient's email address from the DB
- *  3. Call the existing sendEmail helper (lib/send-email.ts) or nodemailer directly
+ * Looks up the recipient's email address, renders the notification email
+ * template for the event (if one exists), then enqueues via send-email job.
+ * Falls back to a plain-text email when no template is configured.
  *
- * Returns "skipped" when SMTP is not configured so the delivery log reflects
- * intent without requiring config changes to run the system.
+ * Skipped when SendGrid API key is not configured.
  */
 
+import prisma from "../../db";
+import { getSection } from "../settings";
+import { sendEmailJob } from "../send-email";
+import { renderNotificationEmail } from "../render-notification-email";
 import type { NotifyPayload } from "../notify";
 
 interface ChannelResult {
@@ -18,27 +20,52 @@ interface ChannelResult {
 }
 
 export async function deliverEmail(
-  _userId: string,
-  _payload: NotifyPayload
+  userId: string,
+  payload: NotifyPayload
 ): Promise<ChannelResult> {
-  const smtpConfigured = !!(
-    process.env.SMTP_HOST &&
-    process.env.SMTP_FROM
-  );
+  try {
+    // Respect the global email notifications toggle
+    const notifSettings = await getSection("notifications");
+    if (!notifSettings.emailNotificationsEnabled) {
+      return { status: "skipped" };
+    }
 
-  if (!smtpConfigured) {
-    return { status: "skipped" };
+    // Require SendGrid to be configured
+    const integrations = await getSection("integrations");
+    const apiKey   = integrations.sendgridApiKey  || process.env.SENDGRID_API_KEY  || "";
+    const fromAddr = integrations.fromEmail        || process.env.SENDGRID_FROM_EMAIL || "";
+    if (!apiKey || !fromAddr) {
+      return { status: "skipped" };
+    }
+
+    // Look up recipient
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, name: true },
+    });
+    if (!user) return { status: "skipped" };
+
+    // Render notification email template for this event
+    const rendered = await renderNotificationEmail(payload.event, {
+      entityNumber:   payload.entityId,
+      entityTitle:    payload.title,
+      entityUrl:      payload.entityUrl,
+      recipientName:  user.name,
+      recipientEmail: user.email,
+    });
+
+    // Fall back to a minimal plain-text email when no template is configured
+    const subject  = rendered?.subject  ?? payload.title;
+    const bodyText = rendered?.bodyText ?? (payload.body ?? payload.title);
+    const bodyHtml = rendered?.bodyHtml;
+
+    await sendEmailJob({ to: user.email, subject, body: bodyText, bodyHtml });
+
+    return { status: "sent" };
+  } catch (err) {
+    return {
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
-
-  // TODO: implement email delivery
-  // 1. Look up user email from DB
-  // 2. Render an email template using payload.title, payload.body, payload.entityUrl
-  // 3. Call sendEmail() from lib/send-email.ts
-  // Example:
-  //   const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, name: true } });
-  //   if (!user) return { status: "skipped" };
-  //   await sendEmail({ to: user.email, subject: payload.title, html: `<p>${payload.body}</p>` });
-  //   return { status: "sent" };
-
-  return { status: "skipped" };
 }

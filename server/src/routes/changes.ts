@@ -24,13 +24,16 @@ import {
   listChangesQuerySchema,
 } from "core/schemas/changes.ts";
 import { generateChangeNumber } from "../lib/change-number";
+import { getSection } from "../lib/settings";
 import {
   requestChangeApproval,
   getChangeApproval,
+  getAllChangeApprovals,
   assertChangeApproved,
   ApprovalRequiredError,
 } from "../lib/change-approval";
 import { detectChangeConflicts } from "../lib/change-conflicts";
+import { notify } from "../lib/notify";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -50,6 +53,8 @@ const LIST_SELECT = {
   changeModel:  true,
   risk:         true,
   priority:     true,
+  impact:       true,
+  urgency:      true,
   changePurpose: true,
   categorizationTier1: true,
   serviceName:  true,
@@ -86,8 +91,12 @@ const DETAIL_SELECT = {
   riskAssessmentAndMitigation: true,
   prechecks:   true,
   postchecks:  true,
+  notificationRequired: true,
+  impactedUsers:        true,
+  communicationNotes:   true,
   implementationOutcome: true,
   rollbackUsed:   true,
+  closureCode:    true,
   closureNotes:   true,
   reviewSummary:  true,
   lessonsLearned: true,
@@ -247,6 +256,8 @@ router.post(
         risk:         data.risk,
         changePurpose: data.changePurpose ?? null,
         priority:     data.priority,
+        impact:       data.impact,
+        urgency:      data.urgency,
         categorizationTier1: data.categorizationTier1 ?? null,
         categorizationTier2: data.categorizationTier2 ?? null,
         categorizationTier3: data.categorizationTier3 ?? null,
@@ -267,6 +278,10 @@ router.post(
         riskAssessmentAndMitigation: data.riskAssessmentAndMitigation ?? null,
         prechecks:     data.prechecks  ?? null,
         postchecks:    data.postchecks ?? null,
+        notificationRequired: data.notificationRequired ?? null,
+        impactedUsers:        data.impactedUsers        ?? null,
+        communicationNotes:   data.communicationNotes   ?? null,
+        customFields:         (data.customFields ?? {}) as any,
         createdById:   req.user.id,
       },
       select: DETAIL_SELECT,
@@ -349,6 +364,8 @@ router.patch(
     if (data.risk !== undefined)         updateData.risk         = data.risk;
     if (data.changePurpose !== undefined) updateData.changePurpose = data.changePurpose;
     if (data.priority !== undefined)     updateData.priority     = data.priority;
+    if (data.impact !== undefined)       updateData.impact       = data.impact;
+    if (data.urgency !== undefined)      updateData.urgency      = data.urgency;
     if (data.categorizationTier1 !== undefined) updateData.categorizationTier1 = data.categorizationTier1;
     if (data.categorizationTier2 !== undefined) updateData.categorizationTier2 = data.categorizationTier2;
     if (data.categorizationTier3 !== undefined) updateData.categorizationTier3 = data.categorizationTier3;
@@ -394,12 +411,17 @@ router.patch(
     if (data.riskAssessmentAndMitigation !== undefined) updateData.riskAssessmentAndMitigation = data.riskAssessmentAndMitigation;
     if (data.prechecks !== undefined)    updateData.prechecks    = data.prechecks;
     if (data.postchecks !== undefined)   updateData.postchecks   = data.postchecks;
+    // Notification / Communication fields — writable in any non-terminal state
+    if (data.notificationRequired !== undefined) updateData.notificationRequired = data.notificationRequired;
+    if (data.impactedUsers        !== undefined) updateData.impactedUsers        = data.impactedUsers;
+    if (data.communicationNotes   !== undefined) updateData.communicationNotes   = data.communicationNotes;
 
     // Closure & PIR fields — only writable in terminal/closure-eligible states
     const closureEligibleStates = ["implement", "review", "closed", "failed", "cancelled"];
     const closureFieldsPresent = (
       data.implementationOutcome !== undefined ||
       data.rollbackUsed         !== undefined ||
+      data.closureCode          !== undefined ||
       data.closureNotes         !== undefined ||
       data.reviewSummary        !== undefined ||
       data.lessonsLearned       !== undefined
@@ -414,6 +436,7 @@ router.patch(
       }
       if (data.implementationOutcome !== undefined) updateData.implementationOutcome = data.implementationOutcome;
       if (data.rollbackUsed          !== undefined) updateData.rollbackUsed          = data.rollbackUsed;
+      if (data.closureCode           !== undefined) updateData.closureCode           = data.closureCode;
       if (data.closureNotes          !== undefined) updateData.closureNotes          = data.closureNotes;
       if (data.reviewSummary         !== undefined) updateData.reviewSummary         = data.reviewSummary;
       if (data.lessonsLearned        !== undefined) updateData.lessonsLearned        = data.lessonsLearned;
@@ -568,7 +591,9 @@ router.patch(
           meta: {
             outcome:      data.implementationOutcome ?? null,
             rollbackUsed: data.rollbackUsed ?? null,
+            closureCode:  data.closureCode ?? null,
             fields: [
+              data.closureCode     !== undefined ? "Closure Code"    : null,
               data.closureNotes    !== undefined ? "Closure Notes"   : null,
               data.reviewSummary   !== undefined ? "Review Summary"  : null,
               data.lessonsLearned  !== undefined ? "Lessons Learned" : null,
@@ -597,8 +622,38 @@ router.get(
     const change = await prisma.change.findUnique({ where: { id }, select: { id: true } });
     if (!change) { res.status(404).json({ error: "Change not found" }); return; }
 
-    const approval = await getChangeApproval(id);
-    res.json({ approval });
+    const approvals = await getAllChangeApprovals(id);
+    res.json({ approvals });
+  }
+);
+
+// ── GET /api/changes/:id/resend-counts ───────────────────────────────────────
+// Returns how many times each approver has been sent an approval request for
+// this change, plus the configured maxApprovalResends limit.
+
+router.get(
+  "/:id/resend-counts",
+  requireAuth,
+  requirePermission("changes.view"),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+    const [sendCounts, { maxApprovalResends, minCabApprovers, cabApprovalSequential }] = await Promise.all([
+      prisma.approvalStep.groupBy({
+        by: ["approverId"],
+        where: {
+          approvalRequest: { subjectType: "change_request", subjectId: String(id) },
+        },
+        _count: { approverId: true },
+      }),
+      getSection("changes"),
+    ]);
+
+    const counts: Record<string, number> = {};
+    for (const row of sendCounts) counts[row.approverId] = row._count.approverId;
+
+    res.json({ counts, maxApprovalResends, minCabApprovers, cabApprovalSequential });
   }
 );
 
@@ -632,12 +687,88 @@ router.post(
       return;
     }
 
-    // Block if there is already a pending approval for this change
+    // Handle existing pending approval:
+    // - No rejections yet → block (the round is still active, nothing to resend)
+    // - Has rejections → re-activate only the rejected steps for the chosen approvers;
+    //   other members' pending steps are left completely untouched so their votes
+    //   still count. If the caller also lists approvers not yet in this round,
+    //   add them as new active steps in the same request.
     const existing = await getChangeApproval(id);
+    const isResend = existing !== null;
     if (existing && existing.status === "pending") {
-      res.status(422).json({
-        error: "There is already a pending approval request for this change. Resolve it before requesting a new one.",
+      const hasRejection = existing.steps.some((s) => s.status === "rejected");
+      if (!hasRejection) {
+        res.status(422).json({
+          error: "There is already a pending approval request for this change with no rejections yet. Resolve it before requesting a new one.",
+        });
+        return;
+      }
+
+      // Validate body early so we know which approverIds are being resent
+      const body = req.body as { approverIds?: unknown };
+      if (!Array.isArray(body.approverIds) || body.approverIds.length === 0) {
+        res.status(400).json({ error: "approverIds must be a non-empty array of user IDs" });
+        return;
+      }
+      const resendIds = body.approverIds as string[];
+
+      // Steps to re-activate: currently rejected AND chosen by the requester
+      const stepsToReset = existing.steps.filter(
+        (s) => s.status === "rejected" && resendIds.includes(s.approverId)
+      );
+      // Truly new approvers not in the current round at all
+      const existingApproverSet = new Set(existing.steps.map((s) => s.approverId));
+      const brandNewIds = resendIds.filter((aid) => !existingApproverSet.has(aid));
+      const maxOrder = Math.max(...existing.steps.map((s) => s.stepOrder), 0);
+
+      // Load settings so we can update requiredCount
+      const { minCabApprovers: min } = await getSection("changes");
+
+      await prisma.$transaction([
+        // Re-activate rejected steps without touching any pending ones
+        ...(stepsToReset.length > 0
+          ? [prisma.approvalStep.updateMany({
+              where: { id: { in: stepsToReset.map((s) => s.id) } },
+              data: { status: "pending", isActive: true },
+            })]
+          : []),
+        // Add new approvers as extra steps in the same round
+        ...brandNewIds.map((approverId, idx) =>
+          prisma.approvalStep.create({
+            data: {
+              approvalRequestId: existing.id,
+              approverId,
+              stepOrder: maxOrder + idx + 1,
+              isActive: true,
+              status: "pending",
+            },
+          })
+        ),
+        // Keep requiredCount aligned with the current setting
+        prisma.approvalRequest.update({
+          where: { id: existing.id },
+          data: { requiredCount: min },
+        }),
+      ]);
+
+      // Notify re-invited approvers
+      void notify({
+        event: "approval.requested",
+        recipientIds: resendIds,
+        title: `Re-sent for approval: CAB Approval — ${change.changeNumber} — ${change.title}`,
+        entityType: "approval",
+        entityId: String(existing.id),
+        entityUrl: `/approvals`,
       });
+
+      await logChangeApprovalEvent(id, req.user.id, "change.approval_requested", {
+        approvalRequestId: existing.id,
+        approverCount: resendIds.length,
+        isResend: true,
+      });
+
+      const approvals = await getAllChangeApprovals(id);
+      res.status(201).json({ approvalRequestId: existing.id, approvals });
       return;
     }
 
@@ -673,8 +804,97 @@ router.post(
       return;
     }
 
+    // ── CAB membership enforcement ─────────────────────────────────────────────
+    // If the changes settings require CAB review for this change type and a
+    // default CAB group is configured, every approver must be a member.
+    const changeSettings = await getSection("changes");
+    const {
+      defaultCabGroupId, requireCabForNormal, requireCabForEmergency,
+      cabApprovalSequential, minCabApprovers, maxApprovalResends,
+    } = changeSettings;
+
+    // Only enforce minimum approvers on a fresh (first-ever) request.
+    // Resends after rejection may legitimately target fewer approvers.
+    if (!isResend && approverIds.length < minCabApprovers) {
+      res.status(422).json({
+        error: `At least ${minCabApprovers} CAB approver${minCabApprovers !== 1 ? "s" : ""} must be selected. You selected ${approverIds.length}.`,
+      });
+      return;
+    }
+
+    const changeForCab = await prisma.change.findUnique({
+      where: { id },
+      select: { changeType: true },
+    });
+
+    const needsCab =
+      defaultCabGroupId !== null &&
+      changeForCab !== null &&
+      ((changeForCab.changeType === "normal"    && requireCabForNormal) ||
+       (changeForCab.changeType === "emergency" && requireCabForEmergency));
+
+    if (needsCab && defaultCabGroupId) {
+      const cabMembers = await prisma.cabMember.findMany({
+        where: { cabGroupId: defaultCabGroupId },
+        select: { userId: true },
+      });
+      const cabMemberIds = new Set(cabMembers.map((m) => m.userId));
+      const nonCab = approverIds.filter((aid) => !cabMemberIds.has(aid));
+      if (nonCab.length > 0) {
+        const nonCabUsers = await prisma.user.findMany({
+          where: { id: { in: nonCab } },
+          select: { name: true },
+        });
+        const names = nonCabUsers.map((u) => u.name).join(", ");
+        res.status(422).json({
+          error: `CAB approval is required for this change type. The following approvers are not members of the designated CAB group: ${names}. Please select only CAB members as approvers.`,
+        });
+        return;
+      }
+    }
+
+    // ── Resend-limit enforcement ───────────────────────────────────────────────
+    // Count how many times each approver has already been sent an approval
+    // request for this change. Exceeding maxApprovalResends blocks the approver.
+    const sendCounts = await prisma.approvalStep.groupBy({
+      by: ["approverId"],
+      where: {
+        approvalRequest: { subjectType: "change_request", subjectId: String(id) },
+      },
+      _count: { approverId: true },
+    });
+    const countByApprover = new Map(sendCounts.map((r) => [r.approverId, r._count.approverId]));
+    const exceeded = approverIds.filter((aid) => (countByApprover.get(aid) ?? 0) >= maxApprovalResends);
+    if (exceeded.length > 0) {
+      const exceededUsers = await prisma.user.findMany({
+        where: { id: { in: exceeded } },
+        select: { name: true },
+      });
+      const names = exceededUsers.map((u) => u.name).join(", ");
+      res.status(422).json({
+        error: `Max Approval Sends (${maxApprovalResends}) reached for: ${names}. Increase the limit in Settings → Changes or choose different approvers.`,
+      });
+      return;
+    }
+
+    // Rule: a change is approved as soon as minCabApprovers members have approved,
+    // regardless of how many approvers were invited and regardless of order setting.
+    //  - Parallel (default): all approvers notified at once; first minCabApprovers
+    //    to approve resolve the request ("any" mode, requiredCount = minCabApprovers).
+    //  - Sequential: approvers are activated one at a time in order; once
+    //    minCabApprovers have approved the request resolves ("all" mode with
+    //    threshold — remaining steps are skipped once the threshold is reached).
+    //
+    // For resends (isResend=true) we cap the threshold at the number of approvers
+    // actually submitted, so a targeted resend to e.g. 1 rejected member can still
+    // succeed without requiring the full minimum count from a fresh round.
+    const effectiveMode: "all" | "any" = cabApprovalSequential ? "all" : "any";
+    const effectiveRequired = isResend
+      ? Math.min(minCabApprovers, approverIds.length)
+      : minCabApprovers;
+
     const { approvalRequestId } = await requestChangeApproval(
-      { changeId: id, approverIds, approvalMode, requiredCount, expiresAt },
+      { changeId: id, approverIds, approvalMode: effectiveMode, requiredCount: effectiveRequired, expiresAt },
       req.user.id
     );
 
@@ -817,5 +1037,29 @@ router.delete(
     res.status(204).send();
   }
 );
+
+// ─── Bulk Actions ──────────────────────────────────────────────────────────────
+
+import { z as zBulk } from "zod/v4";
+
+const changesBulkSchema = zBulk.discriminatedUnion("action", [
+  zBulk.object({ action: zBulk.literal("delete"), ids: zBulk.array(zBulk.number().int().positive()).min(1).max(100) }),
+  zBulk.object({ action: zBulk.literal("assign"), ids: zBulk.array(zBulk.number().int().positive()).min(1).max(100), assignedToId: zBulk.string().nullable().optional(), teamId: zBulk.number().int().positive().nullable().optional() }),
+]);
+
+router.post("/bulk", requireAuth, requirePermission("changes.manage"), async (req, res) => {
+  const data = validate(changesBulkSchema, req.body, res);
+  if (!data) return;
+  switch (data.action) {
+    case "delete": {
+      const { count } = await prisma.change.deleteMany({ where: { id: { in: data.ids } } });
+      res.json({ affected: count }); return;
+    }
+    case "assign": {
+      await prisma.change.updateMany({ where: { id: { in: data.ids } }, data: { ...(data.assignedToId !== undefined && { assignedToId: data.assignedToId }), ...(data.teamId !== undefined && { coordinatorGroupId: data.teamId }) } });
+      res.json({ affected: data.ids.length }); return;
+    }
+  }
+});
 
 export default router;

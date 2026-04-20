@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "react-router";
+import { useState, useCallback } from "react";
+import { Link, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth-client";
 import axios from "axios";
@@ -25,8 +25,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import ErrorAlert from "@/components/ErrorAlert";
-import NewProblemDialog from "@/components/NewProblemDialog";
-import { AlertCircle, ChevronRight, BookMarked, User } from "lucide-react";
+import ModuleBulkActionsBar from "@/components/ModuleBulkActionsBar";
+import { AlertCircle, ChevronRight, BookMarked, User, Plus } from "lucide-react";
 
 // ── Badges ────────────────────────────────────────────────────────────────────
 
@@ -81,6 +81,7 @@ function formatRelative(iso: string) {
 // ── ProblemsPage ──────────────────────────────────────────────────────────────
 
 export default function ProblemsPage() {
+  const navigate = useNavigate();
   const { data: session } = useSession();
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -88,6 +89,15 @@ export default function ProblemsPage() {
   const [knownErrorOnly, setKnownErrorOnly] = useState(false);
   const [assignedToMe, setAssignedToMe] = useState(false);
   const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const clearSelection = useCallback(() => setSelectedIds([]), []);
+
+  function toggleRow(id: number) {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+  function toggleAll(ids: number[]) {
+    setSelectedIds((prev) => prev.length === ids.length && ids.every((id) => prev.includes(id)) ? [] : ids);
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["problems", { statusFilter, priorityFilter, knownErrorOnly, assignedToMe, search }],
@@ -128,7 +138,10 @@ export default function ProblemsPage() {
             )}
           </p>
         </div>
-        <NewProblemDialog />
+        <Button size="sm" className="gap-1.5" onClick={() => navigate("/problems/new")}>
+          <Plus className="h-4 w-4" />
+          New Problem
+        </Button>
       </div>
 
       {/* Filters */}
@@ -207,6 +220,12 @@ export default function ProblemsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8 pl-3">
+                  <input type="checkbox" className="accent-primary h-3.5 w-3.5 cursor-pointer"
+                    checked={problems.length > 0 && selectedIds.length === problems.length}
+                    ref={(el) => { if (el) el.indeterminate = selectedIds.length > 0 && selectedIds.length < problems.length; }}
+                    onChange={() => toggleAll(problems.map((p) => p.id))} />
+                </TableHead>
                 <TableHead className="w-28">Number</TableHead>
                 <TableHead>Problem</TableHead>
                 <TableHead className="w-20">Priority</TableHead>
@@ -219,7 +238,13 @@ export default function ProblemsPage() {
             </TableHeader>
             <TableBody>
               {problems.map((problem) => (
-                <TableRow key={problem.id} className="group">
+                <TableRow key={problem.id} className={`group ${selectedIds.includes(problem.id) ? "bg-primary/5" : ""}`}>
+                  <TableCell className="pl-3">
+                    <input type="checkbox" className="accent-primary h-3.5 w-3.5 cursor-pointer"
+                      checked={selectedIds.includes(problem.id)}
+                      onChange={() => toggleRow(problem.id)}
+                      onClick={(e) => e.stopPropagation()} />
+                  </TableCell>
                   <TableCell className="font-mono text-xs font-medium text-muted-foreground">
                     <Link
                       to={`/problems/${problem.id}`}
@@ -293,6 +318,15 @@ export default function ProblemsPage() {
           </Table>
         </div>
       )}
+
+      <ModuleBulkActionsBar
+        selectedIds={selectedIds}
+        onClearSelection={clearSelection}
+        endpoint="/api/problems"
+        queryKey={["problems"]}
+        entityLabel="problem"
+        statusOptions={problemStatuses.map((s) => ({ value: s, label: problemStatusLabel[s] }))}
+      />
     </div>
   );
 }

@@ -54,6 +54,17 @@ export interface Ticket {
   slaStatus: SlaStatus | null;
   minutesUntilBreach: number | null;
 
+  // Custom ticket type — set when a user-defined ticket type is selected
+  customTicketTypeId: number | null;
+  customTicketType: { id: number; name: string; slug: string; color: string } | null;
+
+  // Custom status — overrides built-in status display when set
+  customStatusId: number | null;
+  customStatus: { id: number; label: string; color: string } | null;
+  // SLA pause — set when ticket is in an on_hold custom status
+  slaPausedAt: string | null;
+  slaPausedMinutes: number;
+
   // Escalation
   isEscalated: boolean;
   escalatedAt: string | null;

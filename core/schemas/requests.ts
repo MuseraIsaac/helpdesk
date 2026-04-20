@@ -49,6 +49,7 @@ export const createRequestSchema = z.object({
       })
     )
     .default([]),
+  customFields: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
 export type CreateRequestInput = z.infer<typeof createRequestSchema>;

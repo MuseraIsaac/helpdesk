@@ -20,6 +20,8 @@ import { logIncidentEvent } from "../lib/incident-events";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { notify } from "../lib/notify";
 import { syncIncidentToTicket } from "../lib/ticket-sync";
+import { applyEscalationRules, sendEscalationNotifications } from "../lib/apply-escalation-rules";
+import { notifyMentions } from "../lib/mentions";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -232,6 +234,65 @@ router.post(
     if (data.isMajor) {
       await logIncidentEvent(incident.id, req.user.id, "incident.major_declared", {});
     }
+
+    // Evaluate escalation rules (fire-and-forget; never blocks the response)
+    void (async () => {
+      // Try to fetch the source ticket for richer snapshot data (only present when
+      // this incident was promoted from a ticket — null for direct agent creation)
+      const sourceTicket = await prisma.ticket.findFirst({
+        where: { linkedIncidentId: incident.id },
+        select: {
+          priority: true, severity: true, impact: true, urgency: true,
+          category: true, source: true, isEscalated: true, slaBreached: true,
+          customFields: true,
+        },
+      });
+
+      const cfEntries = sourceTicket
+        ? Object.entries(sourceTicket.customFields as Record<string, unknown>)
+            .map(([k, v]) => [k, v === null || v === undefined ? "" : String(v)])
+        : [];
+
+      const escalation = await applyEscalationRules("incident", {
+        priority:         data.priority,
+        status:           "new",
+        isMajor:          String(data.isMajor ?? false),
+        slaBreached:      "false",
+        affectedSystem:   data.affectedSystem ?? "",
+        affectedUserCount: data.affectedUserCount !== null ? String(data.affectedUserCount) : "",
+        // Source ticket fields (populated only when promoted from a ticket)
+        ticketPriority:    sourceTicket?.priority  ?? "",
+        severity:          sourceTicket?.severity  ?? "",
+        impact:            sourceTicket?.impact    ?? "",
+        urgency:           sourceTicket?.urgency   ?? "",
+        category:          sourceTicket?.category  ?? "",
+        source:            sourceTicket?.source    ?? "",
+        ticketIsEscalated: sourceTicket ? String(sourceTicket.isEscalated) : "",
+        ticketSlaBreached: sourceTicket ? String(sourceTicket.slaBreached) : "",
+        ...Object.fromEntries(cfEntries),
+      });
+
+      if (!escalation) return;
+      const update: { teamId?: number; assignedToId?: string } = {};
+      if (escalation.teamId && !data.teamId) update.teamId = escalation.teamId;
+      if (escalation.userId && !data.assignedToId) update.assignedToId = escalation.userId;
+      if (Object.keys(update).length > 0) {
+        await prisma.incident.update({ where: { id: incident.id }, data: update });
+        await logIncidentEvent(incident.id, null, "incident.escalation_rule_applied", {
+          rule: escalation.ruleName,
+          ...update,
+        });
+      }
+
+      await sendEscalationNotifications({
+        escalation,
+        event:        "incident.escalated",
+        entityId:     String(incident.id),
+        entityUrl:    `/incidents/${incident.id}`,
+        entityTitle:  incident.title,
+        entityNumber: incident.incidentNumber,
+      });
+    })();
 
     res.status(201).json(withIncidentSlaInfo(incident));
   }
@@ -456,10 +517,17 @@ router.post(
       return;
     }
 
+    // Fetch incident title for mention notifications
+    const incidentMeta = await prisma.incident.findUnique({
+      where: { id },
+      select: { incidentNumber: true, title: true },
+    });
+
     const update = await prisma.incidentUpdate.create({
       data: {
         incidentId: id,
         body: data.body,
+        bodyHtml: data.bodyHtml ?? null,
         updateType: data.updateType,
         authorId: req.user.id,
       },
@@ -467,9 +535,20 @@ router.post(
         id: true,
         updateType: true,
         body: true,
+        bodyHtml: true,
         author: { select: { id: true, name: true } },
         createdAt: true,
       },
+    });
+
+    // Notify @mentioned users (fire-and-forget)
+    void notifyMentions(data.bodyHtml, {
+      authorId:     req.user.id,
+      entityNumber: incidentMeta?.incidentNumber ?? `INC-${id}`,
+      entityTitle:  incidentMeta?.title ?? "Incident",
+      entityUrl:    `/incidents/${id}`,
+      entityType:   "incident_update",
+      entityId:     String(update.id),
     });
 
     await logIncidentEvent(id, req.user.id, "incident.update_added", {
@@ -525,5 +604,34 @@ router.delete(
     res.json({ ok: true });
   }
 );
+
+// ─── Bulk Actions ──────────────────────────────────────────────────────────────
+
+import { z as zBulk } from "zod/v4";
+
+const incidentsBulkSchema = zBulk.discriminatedUnion("action", [
+  zBulk.object({ action: zBulk.literal("delete"), ids: zBulk.array(zBulk.number().int().positive()).min(1).max(100) }),
+  zBulk.object({ action: zBulk.literal("assign"), ids: zBulk.array(zBulk.number().int().positive()).min(1).max(100), assignedToId: zBulk.string().nullable().optional(), teamId: zBulk.number().int().positive().nullable().optional() }),
+  zBulk.object({ action: zBulk.literal("status"), ids: zBulk.array(zBulk.number().int().positive()).min(1).max(100), status: zBulk.string() }),
+]);
+
+router.post("/bulk", requireAuth, requirePermission("incidents.manage"), async (req, res) => {
+  const data = validate(incidentsBulkSchema, req.body, res);
+  if (!data) return;
+  switch (data.action) {
+    case "delete": {
+      const { count } = await prisma.incident.deleteMany({ where: { id: { in: data.ids } } });
+      res.json({ affected: count }); return;
+    }
+    case "assign": {
+      await prisma.incident.updateMany({ where: { id: { in: data.ids } }, data: { ...(data.assignedToId !== undefined && { assignedToId: data.assignedToId }), ...(data.teamId !== undefined && { teamId: data.teamId }) } });
+      res.json({ affected: data.ids.length }); return;
+    }
+    case "status": {
+      const { count } = await prisma.incident.updateMany({ where: { id: { in: data.ids } }, data: { status: data.status as any } });
+      res.json({ affected: count }); return;
+    }
+  }
+});
 
 export default router;

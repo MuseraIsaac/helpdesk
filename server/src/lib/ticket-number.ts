@@ -28,22 +28,22 @@ import type { TicketType } from "../generated/prisma/client";
 
 // ── Series mapping ────────────────────────────────────────────────────────────
 
-export type TicketSeries =
-  | "incident"
-  | "service_request"
-  | "change_request"
-  | "problem"
-  | "generic";
+export type TicketSeries = "ticket" | "change_request" | "problem";
 
+/**
+ * Maps a Prisma TicketType to its counter series.
+ *
+ * Incidents, service requests, and untyped tickets all share the "ticket"
+ * series so their numbers are interleaved (TKT0001, TKT0002, …) rather than
+ * counted separately. Change requests and problems keep dedicated series.
+ */
 export function ticketTypeToSeries(
   ticketType: TicketType | null | undefined
 ): TicketSeries {
   switch (ticketType) {
-    case "incident":        return "incident";
-    case "service_request": return "service_request";
-    case "change_request":  return "change_request";
-    case "problem":         return "problem";
-    default:                return "generic";
+    case "change_request": return "change_request";
+    case "problem":        return "problem";
+    default:               return "ticket"; // incident, service_request, generic
   }
 }
 

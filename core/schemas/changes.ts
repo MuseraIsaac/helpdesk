@@ -1,6 +1,8 @@
 import { z } from "zod/v4";
 import { changeTypes, changeModels, changeStates, changeRisks, changePurposes, implementationOutcomes } from "../constants/change.ts";
 import { ticketPriorities } from "../constants/ticket-priority.ts";
+import { ticketImpacts } from "../constants/ticket-impact.ts";
+import { ticketUrgencies } from "../constants/ticket-urgency.ts";
 
 export const createChangeSchema = z.object({
   title:               z.string().trim().min(1, "Title is required").max(255),
@@ -10,6 +12,8 @@ export const createChangeSchema = z.object({
   risk:                z.enum(changeRisks).default("medium"),
   changePurpose:       z.enum(changePurposes).optional(),
   priority:            z.enum(ticketPriorities).default("medium"),
+  impact:              z.enum(ticketImpacts).default("medium"),
+  urgency:             z.enum(ticketUrgencies).default("medium"),
   categorizationTier1: z.string().trim().max(100).optional(),
   categorizationTier2: z.string().trim().max(100).optional(),
   categorizationTier3: z.string().trim().max(100).optional(),
@@ -30,6 +34,11 @@ export const createChangeSchema = z.object({
   riskAssessmentAndMitigation: z.string().trim().max(10000).optional(),
   prechecks:            z.string().trim().max(5000).optional(),
   postchecks:           z.string().trim().max(5000).optional(),
+  // Notification / Communication
+  notificationRequired: z.boolean().optional(),
+  impactedUsers:        z.string().trim().max(2000).optional(),
+  communicationNotes:   z.string().trim().max(10000).optional(),
+  customFields: z.record(z.string(), z.unknown()).optional().default({}),
 });
 export type CreateChangeInput = z.infer<typeof createChangeSchema>;
 
@@ -45,6 +54,7 @@ export const updateChangeSchema = createChangeSchema
     // Closure & PIR fields — validated server-side against state eligibility
     implementationOutcome: z.enum(implementationOutcomes).nullable().optional(),
     rollbackUsed:   z.boolean().nullable().optional(),
+    closureCode:    z.string().trim().max(100).nullable().optional(),
     closureNotes:   z.string().trim().max(10000).nullable().optional(),
     reviewSummary:  z.string().trim().max(10000).nullable().optional(),
     lessonsLearned: z.string().trim().max(10000).nullable().optional(),

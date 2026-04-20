@@ -9,6 +9,7 @@ import { htmlToText } from "../lib/html-to-text";
 import prisma from "../db";
 import { sendEmailJob } from "../lib/send-email";
 import { logAudit } from "../lib/audit";
+import { notifyMentions } from "../lib/mentions";
 
 const router = Router({ mergeParams: true });
 
@@ -130,6 +131,16 @@ router.post("/", requireAuth, async (req, res) => {
   await logAudit(ticketId, req.user.id, "reply.created", {
     replyId: reply.id,
     senderType: "agent",
+  });
+
+  // Notify @mentioned users (fire-and-forget)
+  void notifyMentions(htmlBody, {
+    authorId:     req.user.id,
+    entityNumber: ticket.ticketNumber,
+    entityTitle:  ticket.subject,
+    entityUrl:    `/tickets/${ticketId}`,
+    entityType:   "ticket_reply",
+    entityId:     String(reply.id),
   });
 
   // Build email threading headers from the ticket's message history.

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { hashPassword } from "better-auth/crypto";
-import { createUserSchema, updateUserSchema } from "core/schemas/users.ts";
+import { createUserSchema, updateUserSchema, patchUserSchema } from "core/schemas/users.ts";
 import { Role } from "core/constants/role.ts";
 import { requireAuth } from "../middleware/require-auth";
 import { requireAdmin } from "../middleware/require-admin";
@@ -10,10 +10,15 @@ import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 
 const router = Router();
 
+const USER_SELECT = {
+  id: true, name: true, email: true, role: true,
+  globalTicketView: true, createdAt: true,
+} as const;
+
 router.get("/", requireAuth, requireAdmin, async (req, res) => {
   const users = await prisma.user.findMany({
     where: { deletedAt: null, id: { not: AI_AGENT_ID } },
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    select: USER_SELECT,
     orderBy: { createdAt: "asc" },
   });
   res.json({ users });
@@ -89,6 +94,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       email,
       updatedAt: new Date(),
       ...(role !== undefined && { role: role as Role }),
+      ...(data.globalTicketView !== undefined && { globalTicketView: data.globalTicketView }),
     },
   });
 
@@ -102,7 +108,26 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 
   const user = await prisma.user.findUnique({
     where: { id: id },
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    select: USER_SELECT,
+  });
+
+  res.json({ user });
+});
+
+// PATCH /:id/global-view — quick toggle for global ticket visibility (admin only)
+router.patch("/:id/global-view", requireAuth, requireAdmin, async (req, res) => {
+  const id = req.params.id as string;
+
+  const data = validate(patchUserSchema, req.body, res);
+  if (!data) return;
+
+  const target = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true } });
+  if (!target) { res.status(404).json({ error: "User not found" }); return; }
+
+  const user = await prisma.user.update({
+    where: { id },
+    data: { globalTicketView: data.globalTicketView, updatedAt: new Date() },
+    select: USER_SELECT,
   });
 
   res.json({ user });

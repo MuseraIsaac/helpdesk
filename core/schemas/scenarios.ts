@@ -9,8 +9,9 @@ import { z } from "zod/v4";
 
 export const scenarioActionSchema = z.discriminatedUnion("type", [
   z.object({
-    type: z.literal("update_field"),
-    field: z.enum(["category", "priority", "severity", "status", "ticketType"]),
+    type:  z.literal("update_field"),
+    // Accepts any ticket/incident built-in field or a custom_* key
+    field: z.string().min(1).max(100),
     value: z.string().min(1),
   }),
   z.object({
@@ -35,6 +36,9 @@ export type ScenarioAction = z.infer<typeof scenarioActionSchema>;
 
 // ── CRUD schemas ───────────────────────────────────────────────────────────────
 
+export const scenarioVisibilitySchema = z.enum(["public", "team", "private"]);
+export type ScenarioVisibility = z.infer<typeof scenarioVisibilitySchema>;
+
 export const createScenarioSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
@@ -44,6 +48,8 @@ export const createScenarioSchema = z.object({
     .regex(/^#[0-9a-fA-F]{6}$/, "Must be a 6-digit hex colour e.g. #3b82f6")
     .optional(),
   actions: z.array(scenarioActionSchema).min(1, "At least one action is required").max(20),
+  visibility: scenarioVisibilitySchema.default("public"),
+  visibilityTeamId: z.number().int().positive().nullable().optional(),
 });
 
 export type CreateScenarioInput = z.infer<typeof createScenarioSchema>;

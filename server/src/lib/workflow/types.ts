@@ -48,7 +48,8 @@ export type WorkflowAction =
   // ── New canonical actions ────────────────────────────────────────────────
   | {
       type: "update_field";
-      field: "category" | "priority" | "severity" | "status" | "ticketType";
+      /** Any ticket/incident built-in field, or a custom_* key for custom fields. */
+      field: string;
       value: string;
     }
   | {
@@ -111,9 +112,15 @@ export interface TicketWorkflowSnapshot {
   priority: string | null;
   severity: string | null;
   ticketType: string | null;
+  impact?: string | null;
+  urgency?: string | null;
+  source?: string | null;
+  affectedSystem?: string | null;
   senderEmail: string;
   assignedToId: string | null;
   teamId: number | null;
+  linkedIncidentId?: number | null;
+  customFields?: Record<string, unknown>;
   createdAt: Date;
 }
 

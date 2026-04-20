@@ -16,7 +16,13 @@ function parseDateRange(from: unknown, to: unknown) {
     const d = new Date(v);
     return isNaN(d.getTime()) ? null : d;
   };
-  return { fromDate: parseDate(from), toDate: parseDate(to) };
+  const fromDate = parseDate(from);
+  const toDate   = parseDate(to);
+  // "YYYY-MM-DD" strings parse as midnight UTC, so the `to` date would exclude
+  // anything created after 00:00 UTC on that day.  Advance to end-of-day so the
+  // full calendar day is included regardless of when tickets were created.
+  if (toDate) toDate.setUTCHours(23, 59, 59, 999);
+  return { fromDate, toDate };
 }
 
 /** Build a Prisma `createdAt` where clause from optional from/to dates. */
@@ -91,6 +97,8 @@ type ExcludedStatus = (typeof EXCLUDED_STATUSES)[number];
 
 router.get("/overview", async (req, res) => {
   const { fromDate, toDate } = parseDateRange(req.query.from, req.query.to);
+  // Anchor fromDate to start-of-day so "YYYY-MM-DD" strings include the full day.
+  if (fromDate) fromDate.setUTCHours(0, 0, 0, 0);
 
   // Build WHERE clause dynamically to avoid NULL timestamptz casting issues
   let where = `WHERE TRUE`;
@@ -934,7 +942,7 @@ router.get("/top-open-tickets", async (_req, res) => {
   const rows = await prisma.$queryRaw<OpenTicketRow[]>`
     SELECT
       t.id,
-      t."ticketNumber",
+      t.ticket_number                         AS "ticketNumber",
       t.subject,
       t.priority::text                        AS priority,
       t."slaBreached",

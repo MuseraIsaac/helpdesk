@@ -14,7 +14,9 @@ import {
   cancelApproval,
 } from "../lib/approval-engine";
 import { fireApprovalHook } from "../lib/approval-hooks";
+import { getSection } from "../lib/settings";
 import prisma from "../db";
+import Sentry from "../lib/sentry";
 
 const router = Router();
 
@@ -211,6 +213,73 @@ router.post(
     if (result.outcome === "error") {
       res.status(422).json({ error: result.message });
       return;
+    }
+
+    // For change_request approvals: if the stored requiredCount is stale (higher
+    // than the current minCabApprovers setting) and the threshold is already met,
+    // approve the request immediately rather than waiting for the old count.
+    if (
+      result.outcome === "decision_recorded" &&
+      result.requestStatus === "pending" &&
+      approvalMeta?.subjectType === "change_request"
+    ) {
+      try {
+        const { minCabApprovers } = await getSection("changes");
+        const freshSteps = await prisma.approvalStep.findMany({
+          where: { approvalRequestId: id },
+          select: { id: true, status: true },
+        });
+        const approvedCount = freshSteps.filter((s) => s.status === "approved").length;
+        if (approvedCount >= minCabApprovers) {
+          const remainingIds = freshSteps.filter((s) => s.status === "pending").map((s) => s.id);
+          await prisma.$transaction([
+            ...(remainingIds.length > 0
+              ? [prisma.approvalStep.updateMany({
+                  where: { id: { in: remainingIds } },
+                  data: { status: "skipped", isActive: false },
+                })]
+              : []),
+            prisma.approvalRequest.update({
+              where: { id },
+              data: { status: "approved", requiredCount: minCabApprovers, resolvedAt: new Date() },
+            }),
+          ]);
+          // Patch result so hook fires below
+          (result as { requestStatus: string }).requestStatus = "approved";
+        }
+      } catch (err) {
+        Sentry.captureException(err, { tags: { context: "recheck_min_cab_approvers", approvalId: id } });
+      }
+    }
+
+    // Log individual CAB member decision to the change activity stream
+    if (approvalMeta?.subjectType === "change_request") {
+      const changeId = parseInt(approvalMeta.subjectId, 10);
+      if (!isNaN(changeId)) {
+        const actor = await prisma.user.findUnique({
+          where: { id: req.user.id },
+          select: { name: true },
+        });
+        const action = input.decision === "approved"
+          ? "change.step_approved"
+          : "change.step_rejected";
+        prisma.changeEvent.create({
+          data: {
+            changeId,
+            actorId: req.user.id,
+            action,
+            meta: {
+              approverName: actor?.name ?? req.user.id,
+              decision: input.decision,
+              comment: input.comment ?? null,
+              approvalRequestId: id,
+            },
+          },
+        }).catch((err) => {
+          Sentry.captureException(err, { tags: { context: "log_step_decision", changeId } });
+          console.error("[approvals] Failed to log step decision for change:", err);
+        });
+      }
     }
 
     // Fire subject-specific hook when the request reaches a final state
