@@ -9,6 +9,11 @@ export type NotificationEvent =
   | "ticket.created"
   | "ticket.assigned"
   | "ticket.escalated"
+  | "ticket.followed_status_changed"
+  | "incident.followed_status_changed"
+  | "change.followed_status_changed"
+  | "request.followed_status_changed"
+  | "problem.followed_status_changed"
   | "user.mentioned"
   | "sla.first_response_warning"
   | "sla.resolution_warning"
@@ -26,6 +31,11 @@ export const NOTIFICATION_EVENTS: NotificationEvent[] = [
   "ticket.created",
   "ticket.assigned",
   "ticket.escalated",
+  "ticket.followed_status_changed",
+  "incident.followed_status_changed",
+  "change.followed_status_changed",
+  "request.followed_status_changed",
+  "problem.followed_status_changed",
   "user.mentioned",
   "sla.first_response_warning",
   "sla.resolution_warning",
@@ -41,21 +51,26 @@ export const NOTIFICATION_EVENTS: NotificationEvent[] = [
 ];
 
 export const NOTIFICATION_EVENT_LABEL: Record<NotificationEvent, string> = {
-  "user.mentioned":              "Mentioned in a note or reply",
-  "ticket.created":              "Ticket submitted (auto-response to customer)",
-  "ticket.assigned":             "Ticket assigned to agent/team",
-  "ticket.escalated":            "Ticket escalated to agent/team",
-  "sla.first_response_warning":  "SLA first response warning",
-  "sla.resolution_warning":      "SLA resolution warning",
-  "sla.breached":                "SLA breached",
-  "approval.requested":          "Approval requested",
-  "approval.approved":           "Approval approved",
-  "approval.rejected":           "Approval rejected",
-  "incident.major_flagged":      "Major incident declared",
-  "incident.escalated":          "Incident escalated to agent/team",
-  "request.approved":            "Request approved",
-  "request.rejected":            "Request rejected",
-  "change.awaiting_approval":    "Change awaiting approval",
+  "user.mentioned":                   "Mentioned in a note or reply",
+  "ticket.created":                   "Ticket submitted (auto-response to customer)",
+  "ticket.assigned":                  "Ticket assigned to agent/team",
+  "ticket.escalated":                 "Ticket escalated to agent/team",
+  "ticket.followed_status_changed":    "Followed ticket status changed",
+  "incident.followed_status_changed":  "Followed incident status changed",
+  "change.followed_status_changed":    "Followed change status changed",
+  "request.followed_status_changed":   "Followed service request status changed",
+  "problem.followed_status_changed":   "Followed problem status changed",
+  "sla.first_response_warning":       "SLA first response warning",
+  "sla.resolution_warning":           "SLA resolution warning",
+  "sla.breached":                     "SLA breached",
+  "approval.requested":               "Approval requested",
+  "approval.approved":                "Approval approved",
+  "approval.rejected":                "Approval rejected",
+  "incident.major_flagged":           "Major incident declared",
+  "incident.escalated":               "Incident escalated to agent/team",
+  "request.approved":                 "Request approved",
+  "request.rejected":                 "Request rejected",
+  "change.awaiting_approval":         "Change awaiting approval",
 };
 
 /** Events that send to external recipients (customers), not internal agents */

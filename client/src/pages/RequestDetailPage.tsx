@@ -53,7 +53,10 @@ import {
   ClipboardList,
   Activity,
   Link2,
+  BookmarkPlus,
 } from "lucide-react";
+import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
+import FollowButton from "@/components/FollowButton";
 
 // ── Event label map ───────────────────────────────────────────────────────────
 
@@ -510,6 +513,7 @@ function ItemsList({ items }: { items: ServiceRequest["items"] }) {
 export default function RequestDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const [templateDialog, setTemplateDialog] = useState(false);
 
   const { data: request, isLoading, error, refetch } = useQuery({
     queryKey: ["request", id],
@@ -593,7 +597,20 @@ export default function RequestDetailPage() {
             )}
           </div>
 
-          {/* Status transitions */}
+          {/* Follow + Save as Template + status transitions */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <FollowButton entityPath="requests" entityId={request.id} />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-8"
+              onClick={() => setTemplateDialog(true)}
+            >
+              <BookmarkPlus className="h-3.5 w-3.5" />
+              Save as Template
+            </Button>
+
           {!isTerminal && availableTransitions.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
               {availableTransitions.map((nextStatus) => (
@@ -615,8 +632,17 @@ export default function RequestDetailPage() {
               ))}
             </div>
           )}
+          </div>
         </div>
       </div>
+
+      <SaveAsTemplateDialog
+        open={templateDialog}
+        onOpenChange={setTemplateDialog}
+        type="request"
+        defaultTitle={request.title}
+        defaultBody={request.description ?? ""}
+      />
 
       {patchMutation.error && (
         <ErrorAlert error={patchMutation.error} fallback="Failed to update request" />

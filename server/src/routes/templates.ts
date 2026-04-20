@@ -25,7 +25,8 @@ const TEMPLATE_SELECT = {
   updatedAt: true,
 } as const;
 
-router.get("/", requireAuth, requirePermission("templates.manage"), async (req, res) => {
+// GET — any authenticated non-customer (agents included)
+router.get("/", requireAuth, requirePermission("templates.view"), async (req, res) => {
   const query = listTemplatesQuerySchema.safeParse(req.query);
   const typeFilter = query.success && query.data.type ? query.data.type : undefined;
 
@@ -37,7 +38,8 @@ router.get("/", requireAuth, requirePermission("templates.manage"), async (req, 
   res.json({ templates });
 });
 
-router.post("/", requireAuth, requirePermission("templates.manage"), async (req, res) => {
+// POST — agents with templates.create can save templates (admins have it too)
+router.post("/", requireAuth, requirePermission("templates.create"), async (req, res) => {
   const data = validate(createTemplateSchema, req.body, res);
   if (!data) return;
 
@@ -56,21 +58,16 @@ router.post("/", requireAuth, requirePermission("templates.manage"), async (req,
   res.status(201).json(template);
 });
 
+// PUT — full manage permission (admin / supervisor only)
 router.put("/:id", requireAuth, requirePermission("templates.manage"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) {
-    res.status(400).json({ error: "Invalid template ID" });
-    return;
-  }
+  if (!id) { res.status(400).json({ error: "Invalid template ID" }); return; }
 
   const data = validate(updateTemplateSchema, req.body, res);
   if (!data) return;
 
   const existing = await prisma.template.findUnique({ where: { id } });
-  if (!existing) {
-    res.status(404).json({ error: "Template not found" });
-    return;
-  }
+  if (!existing) { res.status(404).json({ error: "Template not found" }); return; }
 
   const template = await prisma.template.update({
     where: { id },
@@ -86,18 +83,13 @@ router.put("/:id", requireAuth, requirePermission("templates.manage"), async (re
   res.json(template);
 });
 
+// DELETE — full manage permission (admin / supervisor only)
 router.delete("/:id", requireAuth, requirePermission("templates.manage"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) {
-    res.status(400).json({ error: "Invalid template ID" });
-    return;
-  }
+  if (!id) { res.status(400).json({ error: "Invalid template ID" }); return; }
 
   const existing = await prisma.template.findUnique({ where: { id } });
-  if (!existing) {
-    res.status(404).json({ error: "Template not found" });
-    return;
-  }
+  if (!existing) { res.status(404).json({ error: "Template not found" }); return; }
 
   await prisma.template.delete({ where: { id } });
   res.status(204).send();

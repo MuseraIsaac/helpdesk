@@ -3,11 +3,21 @@ import type { IncidentStatus } from "./incident-status";
 import type { IncidentUpdateType } from "./incident-update-type";
 import type { CiSummary } from "./cmdb";
 
+export interface IncidentAttachmentSummary {
+  id: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  virusScanStatus: string;
+}
+
 export interface IncidentUpdate {
   id: number;
   updateType: IncidentUpdateType;
   body: string;
+  bodyHtml?: string | null;
   author: { id: string; name: string } | null;
+  attachments?: IncidentAttachmentSummary[];
   createdAt: string;
 }
 
@@ -53,6 +63,10 @@ export interface Incident extends IncidentSlaInfo {
   updates?: IncidentUpdate[];
   events?: IncidentEvent[];
   ciLinks?: Array<{ ci: CiSummary; linkedAt: string }>;
+  // Video bridge call
+  bridgeCallUrl:       string | null;
+  bridgeCallProvider:  string | null;
+  bridgeCallCreatedAt: string | null;
   /** Linked source ticket — present in detail response when incident was created from a ticket */
   sourceTicket?: {
     id: number;

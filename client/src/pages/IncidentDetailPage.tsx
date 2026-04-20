@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams, Link } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
@@ -7,7 +7,7 @@ import axios from "axios";
 import { type Incident } from "core/constants/incident.ts";
 import { incidentStatusLabel, incidentStatusTransitions } from "core/constants/incident-status.ts";
 import type { IncidentStatus } from "core/constants/incident-status.ts";
-import { incidentPriorityLabel, incidentPriorityShortLabel } from "core/constants/incident-priority.ts";
+import { incidentPriorityLabel, incidentPriorityShortLabel, incidentPriorities } from "core/constants/incident-priority.ts";
 import type { IncidentPriority } from "core/constants/incident-priority.ts";
 import {
   incidentUpdateTypes,
@@ -25,17 +25,9 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import SearchableSelect from "@/components/SearchableSelect";
 import BackLink from "@/components/BackLink";
 import ErrorAlert from "@/components/ErrorAlert";
-import ErrorMessage from "@/components/ErrorMessage";
 import {
   IncidentPriorityBadge,
   IncidentStatusBadge,
@@ -43,6 +35,12 @@ import {
 } from "./IncidentsPage";
 import NewProblemDialog from "@/components/NewProblemDialog";
 import CiLinksPanel from "@/components/CiLinksPanel";
+import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
+import IncidentPresenceIndicator from "@/components/IncidentPresenceIndicator";
+import FollowButton from "@/components/FollowButton";
+import BridgeCallButton from "@/components/BridgeCallButton";
+import { useIncidentPresence } from "@/hooks/useIncidentPresence";
+import { useSession } from "@/lib/auth-client";
 import {
   Flame,
   Users,
@@ -57,88 +55,188 @@ import {
   X,
   GitMerge,
   Link2,
+  BookmarkPlus,
+  Activity,
+  ArrowRight,
+  AlertTriangle,
+  Database,
+  Paperclip,
+  Image,
+  FileText,
 } from "lucide-react";
+
+// ── Palette helpers ───────────────────────────────────────────────────────────
+
+const STATUS_COLORS: Record<string, string> = {
+  open:          "bg-blue-50     text-blue-700   border-blue-200",
+  acknowledged:  "bg-purple-50   text-purple-700 border-purple-200",
+  in_progress:   "bg-orange-50   text-orange-700 border-orange-200",
+  resolved:      "bg-emerald-50  text-emerald-700 border-emerald-200",
+  closed:        "bg-muted       text-muted-foreground border-muted-foreground/20",
+};
+
+const UPDATE_TYPE_STYLES: Record<string, string> = {
+  update:     "bg-muted/60      text-muted-foreground",
+  workaround: "bg-amber-500/15  text-amber-700 dark:text-amber-400",
+  resolution: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  escalation: "bg-red-500/15    text-destructive",
+  all_clear:  "bg-blue-500/15   text-blue-700 dark:text-blue-400",
+};
+
+const UPDATE_TYPE_DOT: Record<string, string> = {
+  update:     "bg-muted-foreground/40",
+  workaround: "bg-amber-500",
+  resolution: "bg-emerald-500",
+  escalation: "bg-destructive",
+  all_clear:  "bg-blue-500",
+};
+
+const EVENT_LABELS: Record<string, (meta: Record<string, unknown>) => string> = {
+  "incident.created":           ()    => "Incident declared",
+  "incident.major_declared":    ()    => "Flagged as major incident",
+  "incident.major_cleared":     ()    => "Major incident flag removed",
+  "incident.status_changed":    (m)   => `Status: ${incidentStatusLabel[m.from as IncidentStatus] ?? m.from} → ${incidentStatusLabel[m.to as IncidentStatus] ?? m.to}`,
+  "incident.priority_changed":  (m)   => `Priority: ${incidentPriorityShortLabel[m.from as IncidentPriority] ?? m.from} → ${incidentPriorityShortLabel[m.to as IncidentPriority] ?? m.to}`,
+  "incident.commander_changed": (m)   => m.to ? "Commander assigned" : "Commander removed",
+  "incident.assigned":          (m)   => m.to ? "Assignee changed" : "Assignee removed",
+  "incident.update_added":      (m)   => `Update added (${incidentUpdateTypeLabel[m.updateType as string] ?? m.updateType})`,
+  "incident.promoted_to_problem": (m) => `Promoted to problem ${m.problemNumber ?? ""}`,
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric", month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", timeZoneName: "short",
+  }).format(new Date(iso));
 }
 
-function formatRelative(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.round(diff / 60_000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(diff / 3_600_000);
-  if (hrs < 24) return `${hrs}h ago`;
-  return formatDate(iso);
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const UPDATE_TYPE_STYLES: Record<string, string> = {
-  update:     "bg-muted text-muted-foreground",
-  workaround: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  resolution: "bg-green-500/15 text-green-700 dark:text-green-400",
-  escalation: "bg-red-500/15 text-destructive",
-  all_clear:  "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-};
+// ── Shared section card ───────────────────────────────────────────────────────
 
-const EVENT_LABELS: Record<string, (meta: Record<string, unknown>) => string> = {
-  "incident.created":        ()    => "Incident declared",
-  "incident.major_declared": ()    => "Flagged as major incident",
-  "incident.major_cleared":  ()    => "Major incident flag removed",
-  "incident.status_changed": (m)   => `Status: ${incidentStatusLabel[m.from as IncidentStatus] ?? m.from} → ${incidentStatusLabel[m.to as IncidentStatus] ?? m.to}`,
-  "incident.priority_changed": (m) => `Priority: ${incidentPriorityShortLabel[m.from as IncidentPriority] ?? m.from} → ${incidentPriorityShortLabel[m.to as IncidentPriority] ?? m.to}`,
-  "incident.commander_changed": (m) => m.to ? `Commander assigned` : `Commander removed`,
-  "incident.assigned":       (m)   => m.to ? `Assignee changed` : `Assignee removed`,
-  "incident.update_added":   (m)   => `Update added (${incidentUpdateTypeLabel[m.updateType as string] ?? m.updateType})`,
-  "incident.promoted_to_problem": (m) => `Promoted to problem ${m.problemNumber ?? ""}`,
-};
+function SectionCard({
+  icon: Icon, title, children, noPad = false,
+}: {
+  icon?: React.ElementType; title: string; children: React.ReactNode; noPad?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border/50 bg-muted/20">
+        {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">{title}</span>
+      </div>
+      <div className={noPad ? "" : "p-4"}>{children}</div>
+    </div>
+  );
+}
 
 // ── Update timeline ───────────────────────────────────────────────────────────
 
-interface UpdateTimelineProps {
-  updates: Incident["updates"];
+const UPDATE_TYPE_OPTIONS = incidentUpdateTypes.map((t) => ({
+  value: t,
+  label: incidentUpdateTypeLabel[t],
+}));
+
+interface StagedFile { id: number; filename: string; size: number; mimeType: string; }
+
+function AttachmentList({ attachments, incidentId }: {
+  attachments: { id: number; filename: string; mimeType: string; size: number }[];
   incidentId: number;
-  status: string;
+}) {
+  if (!attachments || attachments.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {attachments.map((a) => {
+        const isImage = a.mimeType.startsWith("image/");
+        const url = `/api/incidents/${incidentId}/attachments/${a.id}/download`;
+        return (
+          <a key={a.id} href={url} target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+            {isImage
+              ? <Image className="h-3.5 w-3.5 shrink-0" />
+              : <FileText className="h-3.5 w-3.5 shrink-0" />}
+            <span className="max-w-[140px] truncate">{a.filename}</span>
+            <span className="opacity-60">({formatBytes(a.size)})</span>
+          </a>
+        );
+      })}
+    </div>
+  );
 }
 
-function UpdateTimeline({ updates = [], incidentId, status }: UpdateTimelineProps) {
+function UpdateTimeline({ updates = [], incidentId, status }: {
+  updates: Incident["updates"]; incidentId: number; status: string;
+}) {
   const queryClient = useQueryClient();
-  const [bodyHtml, setBodyHtml]   = useState("");
-  const [bodyText, setBodyText]   = useState("");
+  const [bodyHtml, setBodyHtml] = useState("");
+  const [bodyText, setBodyText] = useState("");
   const [editorKey, setEditorKey] = useState(0);
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const {
-    handleSubmit,
-    reset,
-    control,
-  } = useForm<CreateIncidentUpdateInput>({
+  const { handleSubmit, reset, control, setValue } = useForm<CreateIncidentUpdateInput>({
     resolver: zodResolver(createIncidentUpdateSchema),
-    defaultValues: { updateType: "update", body: " " },
+    defaultValues: { updateType: "update", body: "" },
   });
 
   const handleEditorChange = useCallback((html: string, text: string) => {
     setBodyHtml(html);
     setBodyText(text);
-  }, []);
+    setValue("body", text, { shouldValidate: false });
+  }, [setValue]);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      const uploaded: StagedFile[] = [];
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const { data } = await axios.post<StagedFile>(
+          `/api/incidents/${incidentId}/attachments/upload`,
+          fd,
+          { headers: { "Content-Type": "multipart/form-data" } }
+        );
+        uploaded.push(data);
+      }
+      setStagedFiles((prev) => [...prev, ...uploaded]);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function removeStaged(id: number) {
+    setStagedFiles((prev) => prev.filter((f) => f.id !== id));
+  }
 
   const addUpdate = useMutation({
     mutationFn: async (formData: CreateIncidentUpdateInput) => {
       const { data: result } = await axios.post(
         `/api/incidents/${incidentId}/updates`,
-        { updateType: formData.updateType, body: bodyText || " ", bodyHtml }
+        {
+          updateType: formData.updateType,
+          body: bodyText || " ",
+          bodyHtml,
+          attachmentIds: stagedFiles.map((f) => f.id),
+        }
       );
       return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["incident", String(incidentId)] });
       reset({ updateType: "update", body: " " });
-      setBodyHtml("");
-      setBodyText("");
-      setEditorKey((k) => k + 1);
+      setBodyHtml(""); setBodyText(""); setEditorKey((k) => k + 1);
+      setStagedFiles([]);
     },
   });
 
@@ -146,34 +244,37 @@ function UpdateTimeline({ updates = [], incidentId, status }: UpdateTimelineProp
 
   return (
     <div className="space-y-4">
-      {/* Existing updates */}
       {updates.length === 0 ? (
-        <p className="text-sm text-muted-foreground italic">
-          No updates posted yet. Be the first to add a status update.
-        </p>
+        <div className="flex flex-col items-center py-10 gap-2 text-center">
+          <MessageSquare className="h-8 w-8 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">No updates posted yet.</p>
+          <p className="text-xs text-muted-foreground/60">Post the first status update to keep stakeholders informed.</p>
+        </div>
       ) : (
-        <ol className="space-y-3">
+        <ol className="space-y-0">
           {updates.map((u) => {
             const cls = UPDATE_TYPE_STYLES[u.updateType] ?? UPDATE_TYPE_STYLES.update;
+            const dot = UPDATE_TYPE_DOT[u.updateType] ?? "bg-border";
             return (
               <li key={u.id} className="flex gap-3">
-                <div className="flex flex-col items-center pt-1">
-                  <span className={`h-2 w-2 rounded-full border ${cls.replace("bg-", "border-")}`} />
-                  <div className="w-px flex-1 bg-border mt-1" />
+                <div className="flex flex-col items-center pt-2">
+                  <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${dot}`} />
+                  <div className="w-px flex-1 bg-border/60 mt-1 mb-1" />
                 </div>
-                <div className="flex-1 pb-3 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Badge variant="outline" className={`text-[11px] px-1.5 py-0 ${cls}`}>
+                <div className="flex-1 pb-4 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`}>
                       {incidentUpdateTypeLabel[u.updateType] ?? u.updateType}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">
-                      {u.author?.name ?? "System"} · {formatRelative(u.createdAt)}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {u.author?.name ?? "System"} · {formatDate(u.createdAt)}
                     </span>
                   </div>
                   {u.bodyHtml
                     ? <RichTextRenderer content={u.bodyHtml} />
                     : <p className="text-sm whitespace-pre-wrap leading-relaxed">{u.body}</p>
                   }
+                  <AttachmentList attachments={u.attachments ?? []} incidentId={incidentId} />
                 </div>
               </li>
             );
@@ -181,36 +282,23 @@ function UpdateTimeline({ updates = [], incidentId, status }: UpdateTimelineProp
         </ol>
       )}
 
-      {/* Add update form */}
       {!isClosed && (
-        <form
-          onSubmit={handleSubmit((d) => addUpdate.mutate(d))}
-          className="space-y-2 pt-2 border-t"
-        >
-          <div className="flex gap-2 items-center">
+        <form onSubmit={handleSubmit((d) => addUpdate.mutate(d))}
+          className="rounded-xl border border-border/60 bg-card p-4 space-y-3">
+          <div className="flex items-center gap-2">
             <MessageSquare className="h-4 w-4 text-muted-foreground shrink-0" />
             <span className="text-sm font-medium">Post update</span>
           </div>
-
-          <Controller
-            name="updateType"
-            control={control}
+          <Controller name="updateType" control={control}
             render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger className="w-44 h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {incidentUpdateTypes.map((t) => (
-                    <SelectItem key={t} value={t} className="text-xs">
-                      {incidentUpdateTypeLabel[t]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={field.value}
+                onChange={field.onChange}
+                options={UPDATE_TYPE_OPTIONS}
+                className="w-48 h-8 text-xs"
+              />
             )}
           />
-
           <RichTextEditor
             key={editorKey}
             content={bodyHtml}
@@ -220,13 +308,50 @@ function UpdateTimeline({ updates = [], incidentId, status }: UpdateTimelineProp
             disabled={addUpdate.isPending}
             enableMentions
           />
-          {addUpdate.error && (
-            <ErrorAlert error={addUpdate.error} fallback="Failed to post update" />
+
+          {/* Staged attachments */}
+          {stagedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {stagedFiles.map((f) => {
+                const isImage = f.mimeType.startsWith("image/");
+                return (
+                  <span key={f.id}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+                    {isImage ? <Image className="h-3.5 w-3.5 shrink-0" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}
+                    <span className="max-w-[120px] truncate">{f.filename}</span>
+                    <span className="opacity-60">({formatBytes(f.size)})</span>
+                    <button type="button" onClick={() => removeStaged(f.id)}
+                      className="ml-0.5 text-muted-foreground hover:text-destructive transition-colors">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
           )}
 
-          <div className="flex justify-end">
-            <Button type="submit" size="sm" disabled={addUpdate.isPending || !bodyText.trim()}>
-              {addUpdate.isPending ? "Posting…" : "Post Update"}
+          {addUpdate.error && <ErrorAlert error={addUpdate.error} fallback="Failed to post update" />}
+
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"
+                className="hidden"
+                onChange={handleFileChange}
+                disabled={uploading || addUpdate.isPending}
+              />
+              <Button type="button" variant="ghost" size="sm" className="gap-1.5 h-8 text-muted-foreground"
+                disabled={uploading || addUpdate.isPending}
+                onClick={() => fileInputRef.current?.click()}>
+                <Paperclip className="h-3.5 w-3.5" />
+                {uploading ? "Uploading…" : "Attach"}
+              </Button>
+            </div>
+            <Button type="submit" size="sm" className="gap-1.5" disabled={addUpdate.isPending || uploading || !bodyText.trim()}>
+              {addUpdate.isPending ? "Posting…" : <><MessageSquare className="h-3.5 w-3.5" />Post Update</>}
             </Button>
           </div>
         </form>
@@ -235,13 +360,9 @@ function UpdateTimeline({ updates = [], incidentId, status }: UpdateTimelineProp
   );
 }
 
-// ── Commander / Assignment panel ───────────────────────────────────────────────
+// ── Assignment panel ──────────────────────────────────────────────────────────
 
-interface AssignmentPanelProps {
-  incident: Incident;
-}
-
-function AssignmentPanel({ incident }: AssignmentPanelProps) {
+function AssignmentPanel({ incident }: { incident: Incident }) {
   const queryClient = useQueryClient();
   const [editingCommander, setEditingCommander] = useState(false);
   const [commanderValue, setCommanderValue] = useState(incident.commander?.id ?? "none");
@@ -267,67 +388,50 @@ function AssignmentPanel({ incident }: AssignmentPanelProps) {
 
   const isClosed = incident.status === "closed";
 
+  const agentOptions = [
+    { value: "none", label: "Unassigned" },
+    ...(agentsData?.agents ?? []).map((a) => ({ value: a.id, label: a.name })),
+  ];
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {/* Commander */}
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
-          Incident Commander
-        </p>
+      <div className="space-y-1.5">
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Incident Commander</p>
         {editingCommander ? (
           <div className="flex items-center gap-2">
-            <Select value={commanderValue} onValueChange={setCommanderValue}>
-              <SelectTrigger className="flex-1 h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Unassigned</SelectItem>
-                {agentsData?.agents.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 px-2"
-              onClick={() => {
-                updateMutation.mutate({
-                  commanderId: commanderValue === "none" ? null : commanderValue,
-                });
-              }}
-              disabled={updateMutation.isPending}
-            >
+            <SearchableSelect
+              value={commanderValue}
+              onChange={setCommanderValue}
+              options={agentOptions}
+              className="flex-1 h-8 text-sm"
+            />
+            <Button size="sm" variant="ghost" className="h-8 px-2 shrink-0"
+              onClick={() => updateMutation.mutate({ commanderId: commanderValue === "none" ? null : commanderValue })}
+              disabled={updateMutation.isPending}>
               <Save className="h-3.5 w-3.5" />
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 px-2"
-              onClick={() => setEditingCommander(false)}
-            >
+            <Button size="sm" variant="ghost" className="h-8 px-2 shrink-0" onClick={() => setEditingCommander(false)}>
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm">
-              <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+            <div className="flex items-center gap-2">
               {incident.commander ? (
-                <span className="font-medium">{incident.commander.name}</span>
+                <>
+                  <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary shrink-0">
+                    {incident.commander.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
+                  <span className="text-sm font-medium">{incident.commander.name}</span>
+                </>
               ) : (
-                <span className="text-muted-foreground italic">Unassigned</span>
+                <span className="text-sm text-muted-foreground italic">Unassigned</span>
               )}
             </div>
             {!isClosed && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 text-xs text-muted-foreground"
-                onClick={() => setEditingCommander(true)}
-              >
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1 text-muted-foreground"
+                onClick={() => setEditingCommander(true)}>
                 <Pencil className="h-3 w-3" />
               </Button>
             )}
@@ -336,62 +440,84 @@ function AssignmentPanel({ incident }: AssignmentPanelProps) {
       </div>
 
       {/* Assigned agent */}
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
-          Assigned Agent
-        </p>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm">
-            <UserCog className="h-3.5 w-3.5 text-muted-foreground" />
+      <div className="space-y-1.5">
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Assigned Agent</p>
+        {isClosed ? (
+          <div className="flex items-center gap-2">
             {incident.assignedTo ? (
-              <span>{incident.assignedTo.name}</span>
+              <>
+                <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center text-[10px] font-semibold text-muted-foreground shrink-0">
+                  {incident.assignedTo.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                </div>
+                <span className="text-sm">{incident.assignedTo.name}</span>
+              </>
             ) : (
-              <span className="text-muted-foreground italic">Unassigned</span>
+              <span className="text-sm text-muted-foreground italic">Unassigned</span>
             )}
           </div>
-          {!isClosed && (
-            <Select
-              value={incident.assignedTo?.id ?? "none"}
-              onValueChange={(val) =>
-                updateMutation.mutate({ assignedToId: val === "none" ? null : val })
-              }
-            >
-              <SelectTrigger className="h-6 w-auto text-xs border-0 shadow-none text-muted-foreground">
-                <Pencil className="h-3 w-3" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Unassigned</SelectItem>
-                {agentsData?.agents.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
+        ) : (
+          <SearchableSelect
+            value={incident.assignedTo?.id ?? "none"}
+            onChange={(val) => updateMutation.mutate({ assignedToId: val === "none" ? null : val })}
+            options={agentOptions}
+            className="h-9 text-sm"
+          />
+        )}
       </div>
     </div>
   );
 }
 
-// ── Lifecycle action buttons ───────────────────────────────────────────────────
+// ── Major incident toggle ─────────────────────────────────────────────────────
+
+function MajorIncidentToggle({ incident }: { incident: Incident }) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: async (isMajor: boolean) => {
+      const { data } = await axios.patch(`/api/incidents/${incident.id}`, { isMajor });
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["incident", String(incident.id)] }),
+  });
+
+  if (incident.status === "closed") {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Flame className={`h-3.5 w-3.5 ${incident.isMajor ? "text-destructive" : ""}`} />
+        {incident.isMajor ? "Was major incident" : "Not a major incident"}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2.5">
+      <Switch
+        id="major-toggle"
+        checked={incident.isMajor}
+        onCheckedChange={(v) => mutation.mutate(v)}
+        disabled={mutation.isPending}
+      />
+      <Label htmlFor="major-toggle" className="cursor-pointer flex items-center gap-1.5 text-sm">
+        <Flame className={`h-3.5 w-3.5 ${incident.isMajor ? "text-destructive" : "text-muted-foreground"}`} />
+        {incident.isMajor ? "Major incident" : "Mark as major"}
+      </Label>
+    </div>
+  );
+}
+
+// ── Lifecycle action buttons ──────────────────────────────────────────────────
 
 function LifecycleActions({ incident }: { incident: Incident }) {
   const queryClient = useQueryClient();
-
   const transitionMutation = useMutation({
     mutationFn: async (status: IncidentStatus) => {
       const { data } = await axios.patch(`/api/incidents/${incident.id}`, { status });
       return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["incident", String(incident.id)] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["incident", String(incident.id)] }),
   });
 
   const validNext = incidentStatusTransitions[incident.status as IncidentStatus] ?? [];
-
   const LABELS: Partial<Record<IncidentStatus, string>> = {
     acknowledged: "Acknowledge",
     in_progress:  "Mark In Progress",
@@ -404,14 +530,12 @@ function LifecycleActions({ incident }: { incident: Incident }) {
   return (
     <div className="flex flex-wrap gap-2">
       {validNext.map((next) => (
-        <Button
-          key={next}
-          size="sm"
+        <Button key={next} size="sm"
           variant={next === "closed" ? "outline" : "default"}
+          className="h-8 gap-1.5"
           disabled={transitionMutation.isPending}
-          onClick={() => transitionMutation.mutate(next)}
-        >
-          <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+          onClick={() => transitionMutation.mutate(next)}>
+          <ArrowRight className="h-3.5 w-3.5" />
           {LABELS[next] ?? next}
         </Button>
       ))}
@@ -419,65 +543,32 @@ function LifecycleActions({ incident }: { incident: Incident }) {
   );
 }
 
-// ── Major incident toggle ────────────────────────────────────────────────────
+// ── Event audit trail ─────────────────────────────────────────────────────────
 
-function MajorIncidentToggle({ incident }: { incident: Incident }) {
-  const queryClient = useQueryClient();
-
-  const mutation = useMutation({
-    mutationFn: async (isMajor: boolean) => {
-      const { data } = await axios.patch(`/api/incidents/${incident.id}`, { isMajor });
-      return data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["incident", String(incident.id)] });
-    },
-  });
-
-  if (incident.status === "closed") {
+function EventTrail({ events = [] }: { events: Incident["events"] }) {
+  if (!events || events.length === 0) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Flame className="h-3.5 w-3.5" />
-        {incident.isMajor ? "Was major incident" : "Not major"}
+      <div className="flex flex-col items-center py-8 gap-2 text-center">
+        <Activity className="h-8 w-8 text-muted-foreground/30" />
+        <p className="text-sm text-muted-foreground">No activity yet.</p>
       </div>
     );
   }
-
   return (
-    <div className="flex items-center gap-2">
-      <Switch
-        id="major-toggle"
-        checked={incident.isMajor}
-        onCheckedChange={(v) => mutation.mutate(v)}
-        disabled={mutation.isPending}
-      />
-      <Label htmlFor="major-toggle" className="cursor-pointer flex items-center gap-1.5 text-sm">
-        <Flame className={`h-3.5 w-3.5 ${incident.isMajor ? "text-destructive" : "text-muted-foreground"}`} />
-        Major incident
-      </Label>
-    </div>
-  );
-}
-
-// ── Event audit trail ────────────────────────────────────────────────────────
-
-function EventTrail({ events = [] }: { events: Incident["events"] }) {
-  if (!events || events.length === 0) return null;
-
-  return (
-    <ol className="space-y-1.5">
+    <ol className="space-y-3">
       {events.map((ev) => {
         const labelFn = EVENT_LABELS[ev.action];
         const label = labelFn ? labelFn(ev.meta) : ev.action.replace("incident.", "").replace(/_/g, " ");
         return (
-          <li key={ev.id} className="flex items-start gap-2 text-xs text-muted-foreground">
-            <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-border" />
-            <span>
-              <span className="text-foreground capitalize">{label}</span>
-              {ev.actor && <> by {ev.actor.name}</>}
-              {" · "}
-              {formatDate(ev.createdAt)}
-            </span>
+          <li key={ev.id} className="flex items-start gap-3">
+            <div className="mt-1.5 h-2 w-2 rounded-full bg-border shrink-0" />
+            <div>
+              <p className="text-sm capitalize">{label}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {ev.actor && <>{ev.actor.name} · </>}
+                {formatDate(ev.createdAt)}
+              </p>
+            </div>
           </li>
         );
       })}
@@ -485,60 +576,46 @@ function EventTrail({ events = [] }: { events: Incident["events"] }) {
   );
 }
 
-// ── Inline editable field ────────────────────────────────────────────────────
+// ── Inline editable field ─────────────────────────────────────────────────────
 
 function InlineField({
-  label,
-  value,
-  onSave,
-  placeholder,
+  label, value, onSave, placeholder,
 }: {
-  label: string;
-  value: string | number | null | undefined;
-  onSave: (val: string | number | null) => void;
-  placeholder?: string;
+  label: string; value: string | number | null | undefined;
+  onSave: (val: string | number | null) => void; placeholder?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value ?? ""));
 
   return (
-    <div>
-      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-        {label}
-      </p>
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">{label}</p>
       {editing ? (
         <div className="flex items-center gap-1.5">
-          <Input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            className="h-7 text-sm"
-            placeholder={placeholder}
-            autoFocus
+          <Input value={draft} onChange={(e) => setDraft(e.target.value)}
+            className="h-8 text-sm" placeholder={placeholder} autoFocus
             onKeyDown={(e) => {
               if (e.key === "Enter") { onSave(draft || null); setEditing(false); }
               if (e.key === "Escape") { setDraft(String(value ?? "")); setEditing(false); }
             }}
           />
-          <Button size="sm" variant="ghost" className="h-7 px-2"
-            onClick={() => { onSave(draft || null); setEditing(false); }}>
+          <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => { onSave(draft || null); setEditing(false); }}>
             <Save className="h-3 w-3" />
           </Button>
-          <Button size="sm" variant="ghost" className="h-7 px-2"
-            onClick={() => { setDraft(String(value ?? "")); setEditing(false); }}>
+          <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => { setDraft(String(value ?? "")); setEditing(false); }}>
             <X className="h-3 w-3" />
           </Button>
         </div>
       ) : (
         <button
-          className="text-sm text-left hover:text-foreground/70 transition-colors group flex items-center gap-1.5"
-          onClick={() => setEditing(true)}
-        >
+          className="flex items-center gap-1.5 text-sm text-left hover:text-foreground/70 transition-colors group w-full"
+          onClick={() => setEditing(true)}>
           {value !== null && value !== undefined && value !== "" ? (
             <span>{value}</span>
           ) : (
             <span className="text-muted-foreground italic">{placeholder ?? "—"}</span>
           )}
-          <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+          <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-40 transition-opacity shrink-0" />
         </button>
       )}
     </div>
@@ -547,9 +624,16 @@ function InlineField({
 
 // ── IncidentDetailPage ────────────────────────────────────────────────────────
 
+const PRIORITY_OPTIONS = incidentPriorities.map((p) => ({
+  value: p,
+  label: incidentPriorityLabel[p],
+}));
+
 export default function IncidentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const [templateDialog, setTemplateDialog] = useState(false);
+  const { data: session } = useSession();
 
   const { data: incident, isLoading, error } = useQuery({
     queryKey: ["incident", id],
@@ -557,306 +641,280 @@ export default function IncidentDetailPage() {
       const { data } = await axios.get<Incident>(`/api/incidents/${id}`);
       return data;
     },
-    refetchInterval: 30_000, // refresh every 30s — incidents are live
+    refetchInterval: 30_000,
   });
+
+  const incidentIdNum = incident?.id ?? 0;
+  const viewers = useIncidentPresence(incidentIdNum, incidentIdNum > 0);
 
   const updateMutation = useMutation({
     mutationFn: async (patch: Record<string, unknown>) => {
       const { data } = await axios.patch(`/api/incidents/${id}`, patch);
       return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["incident", id] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["incident", id] }),
   });
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-64 w-full" />
+      <div className="space-y-4 p-2">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-8 w-80" />
+        <Skeleton className="h-4 w-48" />
+        <Skeleton className="h-64 w-full rounded-xl" />
       </div>
     );
   }
 
-  if (error || !incident) {
-    return <ErrorAlert error={error} fallback="Incident not found" />;
-  }
+  if (error || !incident) return <ErrorAlert error={error} fallback="Incident not found" />;
+
+  const statusPalette = STATUS_COLORS[incident.status] ?? STATUS_COLORS.open;
+  const isClosed = incident.status === "closed";
 
   return (
-    <div className="space-y-6">
-      <BackLink to="/incidents">Back to incidents</BackLink>
+    <div className="flex flex-col min-h-full bg-muted/20">
 
-      {/* Header */}
-      <div>
-        <div className="flex items-start gap-3 flex-wrap mb-2">
-          <div className="flex-1 min-w-0">
-            <p className="font-mono text-xs font-semibold text-muted-foreground mb-1">
-              {incident.incidentNumber}
-            </p>
-            <h1 className="text-2xl font-semibold tracking-tight leading-snug">
+      {/* ── Header ── */}
+      <div className="border-b bg-background shadow-sm">
+        <div className="px-6 pt-3 pb-0">
+          <BackLink to="/incidents">Back to Incidents</BackLink>
+        </div>
+
+        <div className="px-6 py-4">
+          {/* Number + action row */}
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted px-2 py-0.5 font-mono text-xs font-semibold text-muted-foreground">
+                <AlertTriangle className="h-3 w-3" />
+                {incident.incidentNumber}
+              </span>
               {incident.isMajor && (
-                <Flame className="inline-block h-5 w-5 text-destructive mr-1.5 -mt-0.5" />
+                <span className="inline-flex items-center gap-1 rounded-full border border-destructive/30 bg-destructive/10 px-2.5 py-0.5 text-[11px] font-semibold text-destructive">
+                  <Flame className="h-3 w-3" />
+                  Major Incident
+                </span>
               )}
-              {incident.title}
-            </h1>
-          </div>
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            <IncidentPriorityBadge priority={incident.priority} />
-            <IncidentStatusBadge status={incident.status} />
-            {incident.slaStatus !== "completed" && (
-              <SlaBadgeInline
-                slaStatus={incident.slaStatus}
-                minutesUntilBreach={incident.minutesUntilBreach}
-              />
-            )}
-          </div>
-        </div>
+            </div>
 
-        {/* Description */}
-        {incident.description && (
-          <p className="text-sm text-muted-foreground leading-relaxed mt-1">
-            {incident.description}
-          </p>
-        )}
-      </div>
-
-      {/* Lifecycle actions */}
-      <LifecycleActions incident={incident} />
-
-      {/* Two-column layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
-        {/* Main: update timeline */}
-        <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Incident Timeline</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <UpdateTimeline
-                updates={incident.updates}
+            <div className="flex items-center gap-2 flex-wrap justify-end shrink-0">
+              {/* Live presence: blinking eye shows who else is viewing */}
+              {session?.user && (
+                <IncidentPresenceIndicator
+                  viewers={viewers}
+                  currentUserId={session.user.id}
+                />
+              )}
+              <FollowButton entityPath="incidents" entityId={incident.id} />
+              <BridgeCallButton
                 incidentId={incident.id}
-                status={incident.status}
-              />
-            </CardContent>
-          </Card>
-
-          {/* Event audit trail (collapsed by default) */}
-          {incident.events && incident.events.length > 0 && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Activity Log</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <EventTrail events={incident.events} />
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {/* Sidebar */}
-        <div className="space-y-4">
-          {/* Commander + assignment */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Ownership</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <AssignmentPanel incident={incident} />
-            </CardContent>
-          </Card>
-
-          {/* Incident metadata */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Major toggle */}
-              <MajorIncidentToggle incident={incident} />
-
-              {/* Priority */}
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                  Priority
-                </p>
-                <Select
-                  value={incident.priority}
-                  onValueChange={(val) =>
-                    updateMutation.mutate({ priority: val as IncidentPriority })
-                  }
-                  disabled={incident.status === "closed"}
-                >
-                  <SelectTrigger className="h-8 text-sm w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(["p1", "p2", "p3", "p4"] as const).map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {incidentPriorityLabel[p]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Affected system */}
-              <InlineField
-                label="Affected System"
-                value={incident.affectedSystem}
-                placeholder="e.g. Payment gateway"
-                onSave={(val) => updateMutation.mutate({ affectedSystem: val })}
-              />
-
-              {/* Affected user count */}
-              <InlineField
-                label="Affected Users"
-                value={incident.affectedUserCount}
-                placeholder="0"
-                onSave={(val) =>
-                  updateMutation.mutate({
-                    affectedUserCount: val !== null ? Number(val) : null,
-                  })
+                bridgeCallUrl={incident.bridgeCallUrl ?? null}
+                bridgeCallProvider={incident.bridgeCallProvider ?? null}
+                bridgeCallCreatedAt={incident.bridgeCallCreatedAt ?? null}
+                canManage={
+                  session?.user?.role === "admin" ||
+                  session?.user?.role === "supervisor" ||
+                  session?.user?.role === "agent"
                 }
               />
+              <Button type="button" variant="outline" size="sm" className="gap-1.5 h-8"
+                onClick={() => setTemplateDialog(true)}>
+                <BookmarkPlus className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Save as Template</span>
+              </Button>
+              <LifecycleActions incident={incident} />
+            </div>
+          </div>
 
-              {/* Team */}
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                  Team
-                </p>
-                <div className="flex items-center gap-2 text-sm">
-                  <Users className="h-3.5 w-3.5 text-muted-foreground" />
-                  {incident.team ? (
-                    <span>{incident.team.name}</span>
-                  ) : (
-                    <span className="text-muted-foreground italic">No team</span>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Title */}
+          <h1 className="mt-2 text-xl font-semibold leading-snug">{incident.title}</h1>
 
-          {/* SLA timeline */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-1.5">
-                <Clock className="h-3.5 w-3.5" />
-                SLA
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-xs">
-              <div className="flex justify-between text-muted-foreground">
-                <span>Response deadline</span>
-                <span className="text-foreground font-medium">
-                  {incident.responseDeadline ? formatDate(incident.responseDeadline) : "—"}
-                </span>
-              </div>
-              <div className="flex justify-between text-muted-foreground">
-                <span>Resolution deadline</span>
-                <span className="text-foreground font-medium">
-                  {incident.resolutionDeadline ? formatDate(incident.resolutionDeadline) : "—"}
-                </span>
-              </div>
-              {incident.acknowledgedAt && (
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Acknowledged</span>
-                  <span className="text-foreground">{formatDate(incident.acknowledgedAt)}</span>
-                </div>
-              )}
-              {incident.resolvedAt && (
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Resolved</span>
-                  <span className="text-foreground">{formatDate(incident.resolvedAt)}</span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {/* Status chips */}
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold ${statusPalette}`}>
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+              {incidentStatusLabel[incident.status as IncidentStatus] ?? incident.status}
+            </span>
+            <IncidentPriorityBadge priority={incident.priority} />
+            {incident.slaStatus !== "completed" && (
+              <SlaBadgeInline slaStatus={incident.slaStatus} minutesUntilBreach={incident.minutesUntilBreach} />
+            )}
+            {incident.assignedTo && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-[11px] text-muted-foreground bg-muted/30">
+                <UserCog className="h-3 w-3" />
+                {incident.assignedTo.name}
+              </span>
+            )}
+            {incident.affectedSystem && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-[11px] text-muted-foreground bg-muted/30">
+                <Server className="h-3 w-3" />
+                {incident.affectedSystem}
+              </span>
+            )}
+          </div>
 
-          {/* Affected CIs */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Affected CIs</CardTitle>
-            </CardHeader>
-            <CardContent>
+          {/* Description */}
+          {incident.description && (
+            <p className="mt-3 text-sm text-muted-foreground leading-relaxed border-t border-border/40 pt-3">
+              {incident.description}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* ── Body ── */}
+      <div className="flex-1 px-6 py-5">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5">
+
+          {/* ── Main content ── */}
+          <div className="space-y-4 min-w-0">
+            <SectionCard icon={MessageSquare} title="Incident Timeline">
+              <UpdateTimeline updates={incident.updates} incidentId={incident.id} status={incident.status} />
+            </SectionCard>
+
+            {incident.events && incident.events.length > 0 && (
+              <SectionCard icon={Activity} title="Activity Log">
+                <EventTrail events={incident.events} />
+              </SectionCard>
+            )}
+          </div>
+
+          {/* ── Sidebar ── */}
+          <div className="space-y-4">
+
+            {/* Ownership */}
+            <SectionCard icon={Users} title="Ownership">
+              <AssignmentPanel incident={incident} />
+            </SectionCard>
+
+            {/* Details */}
+            <SectionCard icon={AlertTriangle} title="Details">
+              <div className="space-y-4">
+                <MajorIncidentToggle incident={incident} />
+
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Priority</p>
+                  <SearchableSelect
+                    value={incident.priority}
+                    onChange={(val) => updateMutation.mutate({ priority: val as IncidentPriority })}
+                    disabled={isClosed}
+                    options={PRIORITY_OPTIONS}
+                    className="h-9 text-sm"
+                  />
+                </div>
+
+                <InlineField
+                  label="Affected System"
+                  value={incident.affectedSystem}
+                  placeholder="e.g. Payment gateway"
+                  onSave={(val) => updateMutation.mutate({ affectedSystem: val })}
+                />
+
+                <InlineField
+                  label="Affected Users"
+                  value={incident.affectedUserCount}
+                  placeholder="0"
+                  onSave={(val) => updateMutation.mutate({ affectedUserCount: val !== null ? Number(val) : null })}
+                />
+
+                {incident.team && (
+                  <div className="space-y-1.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Team</p>
+                    <div className="flex items-center gap-2 text-sm">
+                      <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span>{incident.team.name}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </SectionCard>
+
+            {/* SLA */}
+            <SectionCard icon={Clock} title="SLA">
+              <div className="space-y-2.5">
+                {[
+                  { label: "Response deadline", value: incident.responseDeadline },
+                  { label: "Resolution deadline", value: incident.resolutionDeadline },
+                  { label: "Acknowledged", value: incident.acknowledgedAt },
+                  { label: "Resolved", value: incident.resolvedAt },
+                ].filter((r) => r.value).map((row) => (
+                  <div key={row.label} className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">{row.label}</span>
+                    <span className="font-medium">{formatDate(row.value!)}</span>
+                  </div>
+                ))}
+                {!incident.responseDeadline && !incident.resolutionDeadline && (
+                  <p className="text-sm text-muted-foreground/60 italic">No SLA configured</p>
+                )}
+              </div>
+            </SectionCard>
+
+            {/* Affected CIs */}
+            <SectionCard icon={Database} title="Affected CIs">
               <CiLinksPanel
                 entityType="incidents"
                 entityId={incident.id}
                 linkedCis={incident.ciLinks ?? []}
                 onChanged={() => queryClient.invalidateQueries({ queryKey: ["incident", id] })}
               />
-            </CardContent>
-          </Card>
+            </SectionCard>
 
-          {/* Problem Management */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-1.5">
-                <GitMerge className="h-3.5 w-3.5" />
-                Problem Management
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground mb-3">
-                If this incident has a recurring root cause, promote it to a problem record for investigation.
-              </p>
-              <NewProblemDialog
-                initialIncidentId={incident.id}
-                initialTitle={incident.title}
-                trigger={
-                  <button className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors w-full justify-center">
-                    <GitMerge className="h-3.5 w-3.5" />
-                    Promote to Problem
-                  </button>
-                }
-              />
-            </CardContent>
-          </Card>
-
-          {/* Source Ticket panel */}
-          {incident.sourceTicket && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-[13px] font-medium text-muted-foreground flex items-center gap-1.5">
-                  <Link2 className="h-3.5 w-3.5" />
-                  Source Ticket
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <Link
-                  to={`/tickets/${incident.sourceTicket.id}`}
-                  className="font-medium text-primary hover:underline block"
-                >
-                  {incident.sourceTicket.ticketNumber}
-                </Link>
-                <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
-                  {incident.sourceTicket.subject}
+            {/* Problem Management */}
+            <SectionCard icon={GitMerge} title="Problem Management">
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  If this incident has a recurring root cause, promote it to a problem record for investigation.
                 </p>
-                <div className="flex flex-wrap gap-1 pt-0.5">
-                  <Badge variant="outline" className="text-[11px]">
-                    {incident.sourceTicket.status}
-                  </Badge>
-                  {incident.sourceTicket.priority && (
-                    <Badge variant="outline" className="text-[11px]">
-                      {incident.sourceTicket.priority}
-                    </Badge>
-                  )}
+                <NewProblemDialog
+                  initialIncidentId={incident.id}
+                  initialTitle={incident.title}
+                  trigger={
+                    <button className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
+                      <GitMerge className="h-3.5 w-3.5" />
+                      Promote to Problem
+                    </button>
+                  }
+                />
+              </div>
+            </SectionCard>
+
+            {/* Source Ticket */}
+            {incident.sourceTicket && (
+              <SectionCard icon={Link2} title="Source Ticket">
+                <div className="space-y-2">
+                  <Link to={`/tickets/${incident.sourceTicket.id}`}
+                    className="font-medium text-primary hover:underline block text-sm">
+                    {incident.sourceTicket.ticketNumber}
+                  </Link>
+                  <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
+                    {incident.sourceTicket.subject}
+                  </p>
+                  <div className="flex gap-1 flex-wrap">
+                    <Badge variant="outline" className="text-[10px]">{incident.sourceTicket.status}</Badge>
+                    {incident.sourceTicket.priority && (
+                      <Badge variant="outline" className="text-[10px]">{incident.sourceTicket.priority}</Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">From: {incident.sourceTicket.senderName}</p>
                 </div>
-                <p className="text-[11px] text-muted-foreground">
-                  From: {incident.sourceTicket.senderName}
-                </p>
-              </CardContent>
-            </Card>
-          )}
+              </SectionCard>
+            )}
 
-          {/* Created info */}
-          <div className="text-xs text-muted-foreground space-y-1 px-1">
-            <p>Created by {incident.createdBy?.name ?? "System"}</p>
-            <p>{formatDate(incident.createdAt)}</p>
+            {/* Created info */}
+            <div className="text-xs text-muted-foreground space-y-1 px-1">
+              <p>Created by {incident.createdBy?.name ?? "System"}</p>
+              <p>{formatDate(incident.createdAt)}</p>
+            </div>
           </div>
         </div>
       </div>
+
+      <SaveAsTemplateDialog
+        open={templateDialog}
+        onOpenChange={setTemplateDialog}
+        type="ticket"
+        defaultTitle={incident.title}
+        defaultBody={incident.description ?? ""}
+      />
     </div>
   );
 }

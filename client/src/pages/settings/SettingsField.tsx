@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 
 interface SettingsFieldProps {
   label: string;
-  description?: string;
+  description?: ReactNode;
   htmlFor?: string;
   children: ReactNode;
 }
@@ -34,7 +34,7 @@ export function SettingsField({ label, description, htmlFor, children }: Setting
  */
 interface SettingsSwitchRowProps {
   label: string;
-  description?: string;
+  description?: ReactNode;
   children: ReactNode;
 }
 

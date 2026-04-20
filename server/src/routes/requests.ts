@@ -22,6 +22,7 @@ import { logRequestEvent } from "../lib/request-events";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { createApproval } from "../lib/approval-engine";
 import { syncServiceRequestToTicket } from "../lib/ticket-sync";
+import { notifyEntityFollowers } from "../lib/notify-entity-followers";
 import { applyEscalationRules } from "../lib/apply-escalation-rules";
 import prisma from "../db";
 import type { Prisma, TicketPriority } from "../generated/prisma/client";
@@ -443,6 +444,21 @@ router.patch(
     }
 
     await Promise.all(auditTasks);
+
+    // Notify followers on status change (fire-and-forget)
+    if (data.status && data.status !== current.status) {
+      void notifyEntityFollowers({
+        entityType:   "service_request",
+        entityId:     id,
+        actorUserId:  req.user.id,
+        event:        "request.followed_status_changed",
+        entityNumber: updated.requestNumber,
+        entityTitle:  updated.title,
+        fromStatus:   current.status,
+        toStatus:     data.status,
+        entityUrl:    `/requests/${id}`,
+      });
+    }
 
     // Back-sync relevant changes to the linked source ticket (fire-and-forget)
     const backSyncChanges: { status?: string; assignedToId?: string | null; teamId?: number | null } = {};

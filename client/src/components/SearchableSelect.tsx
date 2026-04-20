@@ -1,10 +1,11 @@
 import { useState, useRef } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ChevronsUpDown, Search } from "lucide-react";
+import { ChevronsUpDown, Search, Check } from "lucide-react";
 
 export interface SelectOption {
   value: string;
   label: string;
+  prefix?: React.ReactNode;
 }
 
 interface SearchableSelectProps {
@@ -41,11 +42,8 @@ export default function SearchableSelect({
 
   function handleOpenChange(v: boolean) {
     setOpen(v);
-    if (v) {
-      setTimeout(() => inputRef.current?.focus(), 0);
-    } else {
-      setSearch("");
-    }
+    if (v) setTimeout(() => inputRef.current?.focus(), 0);
+    else setSearch("");
   }
 
   return (
@@ -57,32 +55,35 @@ export default function SearchableSelect({
           className={[
             "flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs",
             "ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-            "disabled:cursor-not-allowed disabled:opacity-50",
+            "disabled:cursor-not-allowed disabled:opacity-50 transition-colors hover:border-ring/50",
             className,
           ].join(" ")}
         >
-          <span className={current ? "" : "text-muted-foreground"}>
-            {current?.label ?? placeholder}
+          <span className="flex items-center gap-2 min-w-0">
+            {current?.prefix && <span className="shrink-0">{current.prefix}</span>}
+            <span className={`truncate ${current ? "" : "text-muted-foreground"}`}>
+              {current?.label ?? placeholder}
+            </span>
           </span>
-          <ChevronsUpDown className="h-3.5 w-3.5 opacity-50 shrink-0 ml-2" />
+          <ChevronsUpDown className="h-3.5 w-3.5 opacity-40 shrink-0 ml-2" />
         </button>
       </PopoverTrigger>
       <PopoverContent
         align="start"
         sideOffset={4}
-        className="p-0 w-[var(--radix-popover-trigger-width)]"
+        className="p-0 w-[var(--radix-popover-trigger-width)] shadow-lg"
       >
-        <div className="flex items-center border-b px-2">
-          <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground mr-1.5" />
+        <div className="flex items-center border-b px-2.5 py-1">
+          <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground mr-2" />
           <input
             ref={inputRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search…"
-            className="flex h-8 w-full bg-transparent py-1 text-sm outline-none placeholder:text-muted-foreground"
+            className="flex h-8 w-full bg-transparent py-1 text-sm outline-none placeholder:text-muted-foreground/60"
           />
         </div>
-        <div className="max-h-52 overflow-y-auto p-1">
+        <div className="max-h-56 overflow-y-auto p-1">
           {filtered.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">No results</p>
           ) : (
@@ -92,12 +93,14 @@ export default function SearchableSelect({
                 type="button"
                 onClick={() => handleSelect(o.value)}
                 className={[
-                  "flex w-full items-center rounded-sm px-2 py-1.5 text-sm cursor-pointer",
+                  "flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm cursor-pointer transition-colors",
                   "hover:bg-accent hover:text-accent-foreground",
                   o.value === value ? "bg-accent/60 font-medium" : "",
                 ].join(" ")}
               >
-                {o.label}
+                {o.prefix && <span className="shrink-0">{o.prefix}</span>}
+                <span className="flex-1 text-left">{o.label}</span>
+                {o.value === value && <Check className="h-3.5 w-3.5 opacity-60 shrink-0" />}
               </button>
             ))
           )}

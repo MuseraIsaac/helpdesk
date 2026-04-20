@@ -3,12 +3,23 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { type Ticket } from "core/constants/ticket.ts";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import ErrorAlert from "@/components/ErrorAlert";
 import MacroPicker from "@/components/MacroPicker";
 import RichTextEditor from "@/components/RichTextEditor";
 import { useSession } from "@/lib/auth-client";
 import { useMe } from "@/hooks/useMe";
-import { BookOpen, Paperclip, X } from "lucide-react";
+import { useSettings } from "@/hooks/useSettings";
+import { BookOpen, Paperclip, X, ChevronDown, Send, Sparkles, Quote } from "lucide-react";
+import RichTextRenderer from "@/components/RichTextRenderer";
+
+export type ReplyType = "reply_all" | "reply_sender" | "forward";
+
+export interface QuoteData {
+  bodyHtml: string;
+  senderName: string;
+  createdAt: string;
+}
 
 interface StagedFile {
   id: number;
@@ -23,56 +34,145 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-interface ReplyFormProps {
-  ticket: Ticket;
+function parseEmails(raw: string): string[] {
+  return raw.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
 }
 
-export default function ReplyForm({ ticket }: ReplyFormProps) {
+// ── Quoted trail ──────────────────────────────────────────────────────────────
+
+function QuotedTrail({ quote, replyType }: { quote: QuoteData; replyType: ReplyType }) {
+  const [open, setOpen] = useState(false);
+
+  const headerLine = replyType === "forward"
+    ? `Forwarded message from ${quote.senderName}`
+    : `On ${new Date(quote.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}, ${quote.senderName} wrote`;
+
+  return (
+    <div className="mx-4 mb-1">
+      {/* Toggle pill */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`
+          inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium
+          border transition-all duration-150
+          ${open
+            ? "bg-muted text-foreground border-border"
+            : "bg-transparent text-muted-foreground border-border/50 hover:bg-muted/60 hover:text-foreground hover:border-border"
+          }
+        `}
+        title={open ? "Hide quoted message" : "Show quoted message"}
+      >
+        <Quote className="h-3 w-3" />
+        {open ? "Hide" : "Show"} quoted message
+        <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {/* Expanded content */}
+      {open && (
+        <div className="mt-2 rounded-lg border border-border/60 overflow-hidden">
+          {/* Header bar */}
+          <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border/40">
+            <Quote className="h-3 w-3 text-muted-foreground shrink-0" />
+            <span className="text-[11px] text-muted-foreground italic truncate">{headerLine}</span>
+          </div>
+          {/* Body */}
+          <div className="px-3 py-3 text-sm opacity-70 max-h-48 overflow-y-auto border-l-2 border-muted-foreground/20 ml-0">
+            <RichTextRenderer content={quote.bodyHtml} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main form ─────────────────────────────────────────────────────────────────
+
+interface ReplyFormProps {
+  ticket: Ticket;
+  replyType: ReplyType;
+  quote?: QuoteData | null;
+  onSent?: () => void;
+}
+
+export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFormProps) {
   const ticketId = ticket.id;
   const queryClient = useQueryClient();
+  const { data: session } = useSession();
+  const { data: meData } = useMe();
+  const { data: ticketSettings } = useSettings("tickets");
+
   const [macroPickerOpen, setMacroPickerOpen] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { data: session } = useSession();
-  const { data: meData } = useMe();
-  const [signatureInjected, setSignatureInjected] = useState(false);
 
-  // Rich-text state — html for storage, text for validation
+  // Addressing fields — "to" is editable and pre-seeded from the ticket
+  const [to, setTo] = useState(replyType === "forward" ? "" : ticket.senderEmail);
+  const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
+  const [showCcBcc, setShowCcBcc] = useState(false);
+
+  // Keep "to" in sync when replyType changes (parent switches mode)
+  useEffect(() => {
+    if (replyType !== "forward") setTo(ticket.senderEmail);
+    else setTo("");
+  }, [replyType, ticket.senderEmail]);
+
+  // Rich-text state
   const [bodyHtml, setBodyHtml] = useState("");
   const [bodyText, setBodyText] = useState("");
-
-  // External content injection (macros, AI polish, signature) — drives editor sync
   const [editorContent, setEditorContent] = useState("");
-
-  // Inject signature once when user data first loads
-  useEffect(() => {
-    if (signatureInjected) return;
-    const sig = meData?.user?.preference?.signature;
-    if (sig) {
-      setEditorContent(`<p><br></p>${sig}`);
-      setSignatureInjected(true);
-    }
-  }, [meData, signatureInjected]);
 
   const handleEditorChange = useCallback((html: string, text: string) => {
     setBodyHtml(html);
     setBodyText(text);
-    // Keep editorContent in sync so the clear signal (setEditorContent(""))
-    // after submit is actually a state change, not a no-op.
     setEditorContent(html);
   }, []);
 
+  // Inject greeting + signature + footer once on mount
+  const [draftInjected, setDraftInjected] = useState(false);
+
+  useEffect(() => {
+    if (draftInjected || !ticketSettings || !meData) return;
+
+    const { replyDraftEnabled, replyGreeting, replyFooter } = ticketSettings;
+    const sig = meData.user.preference?.signature ?? "";
+    const parts: string[] = [];
+
+    if (replyDraftEnabled && replyType !== "forward") {
+      const firstName = ticket.senderName.split(" ")[0] ?? ticket.senderName;
+      const greeting = (replyGreeting ?? "Hi {senderName},").replace(/\{senderName\}/g, firstName);
+      parts.push(`<p>${greeting}</p>`);
+    }
+
+    parts.push("<p><br></p>");
+
+    if (replyDraftEnabled && replyType !== "forward") {
+      const footer = (replyFooter ?? "Your Ticket number is {ticketNumber}.").replace(/\{ticketNumber\}/g, ticket.ticketNumber);
+      parts.push("<p><br></p>", `<p>${footer}</p>`);
+    }
+
+    if (sig) parts.push("<p><br></p>", sig);
+
+    setEditorContent(parts.join(""));
+    setDraftInjected(true);
+  }, [ticketSettings, meData, draftInjected, ticket, replyType]);
+
   const replyMutation = useMutation({
     mutationFn: async () => {
-      const { data: reply } = await axios.post(
-        `/api/tickets/${ticketId}/replies`,
-        {
-          body: bodyText,
-          bodyHtml,
-          attachmentIds: stagedFiles.map((f) => f.id),
-        }
-      );
+      if (!to.trim()) throw new Error("Please enter a recipient email address.");
+
+      const { data: reply } = await axios.post(`/api/tickets/${ticketId}/replies`, {
+        body: bodyText,
+        bodyHtml,
+        replyType,
+        attachmentIds: stagedFiles.map((f) => f.id),
+        ...(replyType === "forward" && { forwardTo: to.trim() }),
+        ...(replyType !== "reply_sender" && cc.trim() && { cc: parseEmails(cc) }),
+        ...(bcc.trim() && { bcc: parseEmails(bcc) }),
+        ...(quote && { quotedHtml: quote.bodyHtml }),
+      });
       return reply;
     },
     onSuccess: () => {
@@ -83,34 +183,27 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
       setEditorContent("");
       setStagedFiles([]);
       setUploadError(null);
+      onSent?.();
     },
   });
 
   const polishMutation = useMutation({
     mutationFn: async () => {
-      const { data } = await axios.post(`/api/tickets/${ticketId}/replies/polish`, {
-        body: bodyText,
-      });
+      const { data } = await axios.post(`/api/tickets/${ticketId}/replies/polish`, { body: bodyText });
       return data.body as string;
     },
-    onSuccess: (polishedText) => {
-      // Wrap plain-text response in a paragraph so the editor accepts it
-      setEditorContent(`<p>${polishedText}</p>`);
-    },
+    onSuccess: (polished) => setEditorContent(`<p>${polished}</p>`),
   });
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
-
     if (stagedFiles.length + files.length > 5) {
       setUploadError("Maximum 5 attachments per reply.");
       e.target.value = "";
       return;
     }
-
     setUploadError(null);
-
     for (const file of files) {
       try {
         const form = new FormData();
@@ -136,7 +229,6 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
   }
 
   function handleMacroInsert(resolvedBody: string) {
-    // Macros return plain text — wrap in <p> tags for the editor
     const html = resolvedBody
       .split("\n\n")
       .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
@@ -146,43 +238,110 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
 
   const isBusy = replyMutation.isPending || polishMutation.isPending;
   const canSubmit = bodyText.trim().length > 0 && !isBusy;
+  const sendLabel = replyType === "forward" ? "Forward" : "Send Reply";
 
   return (
     <>
-      <div className="space-y-3">
-        {replyMutation.error && (
-          <ErrorAlert error={replyMutation.error} fallback="Failed to send reply" />
-        )}
-        {polishMutation.error && (
-          <ErrorAlert error={polishMutation.error} fallback="Failed to polish reply" />
-        )}
-        {uploadError && <ErrorAlert message={uploadError} />}
+      {/* Composer card */}
+      <div className="rounded-xl border border-border/70 shadow-sm bg-background overflow-hidden">
 
-        <RichTextEditor
-          content={editorContent}
-          onChange={handleEditorChange}
-          placeholder="Type your reply… Use @ to mention a team member"
-          minHeight="120px"
-          disabled={isBusy}
-          enableMentions
-        />
+        {/* Addressing header */}
+        <div className="divide-y divide-border/60">
+          {/* To row */}
+          <div className="flex items-center px-4 py-2 gap-3">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-7 shrink-0 select-none">
+              To
+            </span>
+            <Input
+              type="email"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder={replyType === "forward" ? "Enter recipient email…" : ticket.senderEmail}
+              className="flex-1 border-0 shadow-none focus-visible:ring-0 h-8 px-1 text-sm bg-transparent"
+              disabled={isBusy}
+            />
+            <button
+              type="button"
+              onClick={() => setShowCcBcc((v) => !v)}
+              className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md transition-colors shrink-0
+                ${showCcBcc
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
+            >
+              CC / BCC
+              <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${showCcBcc ? "rotate-180" : ""}`} />
+            </button>
+          </div>
 
-        {/* Staged attachment chips */}
+          {/* CC row */}
+          {showCcBcc && (
+            <>
+              <div className="flex items-center px-4 py-2 gap-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-7 shrink-0 select-none">
+                  CC
+                </span>
+                <Input
+                  type="text"
+                  value={cc}
+                  onChange={(e) => setCc(e.target.value)}
+                  placeholder="Separate multiple emails with commas"
+                  className="flex-1 border-0 shadow-none focus-visible:ring-0 h-8 px-1 text-sm bg-transparent"
+                  disabled={isBusy}
+                />
+              </div>
+              <div className="flex items-center px-4 py-2 gap-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-7 shrink-0 select-none">
+                  BCC
+                </span>
+                <Input
+                  type="text"
+                  value={bcc}
+                  onChange={(e) => setBcc(e.target.value)}
+                  placeholder="Hidden recipients"
+                  className="flex-1 border-0 shadow-none focus-visible:ring-0 h-8 px-1 text-sm bg-transparent"
+                  disabled={isBusy}
+                />
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-border/60" />
+
+        {/* Editor area */}
+        <div className="px-1">
+          <RichTextEditor
+            content={editorContent}
+            onChange={handleEditorChange}
+            placeholder="Write your reply… Use @ to mention a team member"
+            minHeight="180px"
+            disabled={isBusy}
+            enableMentions
+            className="border-0 shadow-none rounded-none"
+          />
+        </div>
+
+        {/* Quoted mail trail */}
+        {quote && <QuotedTrail quote={quote} replyType={replyType} />}
+
+        {/* Attachment chips */}
         {stagedFiles.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className="px-4 pb-2 flex flex-wrap gap-2">
             {stagedFiles.map((f) => (
               <div
                 key={f.id}
-                className="inline-flex items-center gap-1.5 rounded-md border bg-muted/60 px-2.5 py-1.5 text-xs"
+                className="inline-flex items-center gap-1.5 rounded-full border bg-muted/60 px-3 py-1 text-xs"
               >
                 <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
-                <span className="truncate max-w-[140px]" title={f.filename}>{f.filename}</span>
-                <span className="text-muted-foreground">({formatBytes(f.size)})</span>
+                <span className="truncate max-w-[160px]" title={f.filename}>{f.filename}</span>
+                <span className="text-muted-foreground/60">· {formatBytes(f.size)}</span>
                 <button
                   type="button"
                   onClick={() => removeFile(f.id)}
                   className="ml-0.5 text-muted-foreground hover:text-destructive transition-colors"
-                  title="Remove attachment"
+                  title="Remove"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -191,7 +350,17 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
           </div>
         )}
 
-        <div className="flex gap-2 flex-wrap">
+        {/* Errors */}
+        {(replyMutation.error || polishMutation.error || uploadError) && (
+          <div className="px-4 pb-3 space-y-2">
+            {replyMutation.error && <ErrorAlert error={replyMutation.error} fallback="Failed to send reply" />}
+            {polishMutation.error && <ErrorAlert error={polishMutation.error} fallback="Failed to polish reply" />}
+            {uploadError && <ErrorAlert message={uploadError} />}
+          </div>
+        )}
+
+        {/* Toolbar */}
+        <div className="flex items-center gap-1.5 px-3 py-2.5 border-t border-border/60 bg-muted/30">
           <input
             ref={fileInputRef}
             type="file"
@@ -204,46 +373,55 @@ export default function ReplyForm({ ticket }: ReplyFormProps) {
 
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="gap-1.5"
+            className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
             onClick={() => fileInputRef.current?.click()}
             disabled={isBusy || stagedFiles.length >= 5}
-            title={stagedFiles.length >= 5 ? "Maximum 5 attachments reached" : "Attach a file"}
+            title={stagedFiles.length >= 5 ? "Maximum 5 attachments reached" : "Attach file"}
           >
-            <Paperclip className="h-3.5 w-3.5" />
-            {stagedFiles.length > 0
-              ? `${stagedFiles.length} file${stagedFiles.length > 1 ? "s" : ""}`
-              : "Attach"}
+            <Paperclip className="h-4 w-4" />
+            {stagedFiles.length > 0 ? `${stagedFiles.length} attached` : "Attach"}
           </Button>
 
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="gap-1.5"
+            className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
             onClick={() => setMacroPickerOpen(true)}
             disabled={isBusy}
           >
-            <BookOpen className="h-3.5 w-3.5" />
+            <BookOpen className="h-4 w-4" />
             Macros
           </Button>
 
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
             disabled={!bodyText.trim() || isBusy}
             onClick={() => polishMutation.mutate()}
           >
+            <Sparkles className="h-4 w-4" />
             {polishMutation.isPending ? "Polishing…" : "Polish"}
           </Button>
 
+          {/* Spacer */}
+          <div className="flex-1" />
+
           <Button
             type="button"
+            size="sm"
             disabled={!canSubmit}
             onClick={() => replyMutation.mutate()}
+            className="gap-2 px-5 h-8 font-medium shadow-sm"
           >
-            {replyMutation.isPending ? "Sending…" : "Send Reply"}
+            {replyMutation.isPending
+              ? <><span className="h-3.5 w-3.5 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground animate-spin" />Sending…</>
+              : <><Send className="h-3.5 w-3.5" />{sendLabel}</>
+            }
           </Button>
         </div>
       </div>

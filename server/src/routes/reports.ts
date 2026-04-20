@@ -972,4 +972,223 @@ router.get("/top-open-tickets", async (_req, res) => {
   });
 });
 
+// ── Change Analytics ──────────────────────────────────────────────────────────
+//
+// GET /api/reports/changes?period=7|30|90
+//
+// Change request volume, success/failure rate, avg approval time, and
+// breakdowns by state, type, and risk level.
+
+router.get("/changes", async (req, res) => {
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+
+  interface ChangeStatsRow {
+    total:          bigint;
+    failed:         bigint;
+    emergency:      bigint;
+    avgApprovalSec: number | null;
+  }
+
+  const [statsRows, byStateRaw, byTypeRaw, byRiskRaw, changeDates] = await Promise.all([
+    prisma.$queryRaw<ChangeStatsRow[]>`
+      SELECT
+        COUNT(*)                                                              AS total,
+        COUNT(*) FILTER (WHERE c.state = 'failed')                          AS failed,
+        COUNT(*) FILTER (WHERE c.change_type = 'emergency')                 AS emergency,
+        ROUND(AVG(EXTRACT(EPOCH FROM (ar."resolvedAt" - ar."createdAt")))
+              FILTER (WHERE ar."resolvedAt" IS NOT NULL))::int               AS "avgApprovalSec"
+      FROM change_request c
+      LEFT JOIN approval_request ar
+        ON ar.subject_type = 'change_request' AND ar.subject_id = c.id::text
+      WHERE c."createdAt" >= ${since} AND c."createdAt" <= ${until}
+    `,
+    prisma.$queryRaw<{ state: string; count: bigint }[]>`
+      SELECT COALESCE(state::text,'unknown') AS state, COUNT(*) AS count
+      FROM change_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+      GROUP BY state ORDER BY count DESC
+    `,
+    prisma.$queryRaw<{ change_type: string; count: bigint }[]>`
+      SELECT COALESCE(change_type::text,'unknown') AS change_type, COUNT(*) AS count
+      FROM change_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+      GROUP BY change_type ORDER BY count DESC
+    `,
+    prisma.$queryRaw<{ risk: string; count: bigint }[]>`
+      SELECT COALESCE(risk::text,'unset') AS risk, COUNT(*) AS count
+      FROM change_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+      GROUP BY risk ORDER BY count DESC
+    `,
+    prisma.$queryRaw<{ createdAt: Date }[]>`
+      SELECT "createdAt" FROM change_request
+      WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+    `,
+  ]);
+
+  const row   = statsRows[0];
+  const total = Number(row?.total ?? 0);
+  const failed = Number(row?.failed ?? 0);
+  const successRate = (total - failed === 0 && total === 0)
+    ? null
+    : total > 0 ? Math.round(((total - failed) / total) * 100) : null;
+
+  // Daily volume (gap-filled)
+  const countsByDate = new Map<string, number>();
+  for (const c of changeDates) {
+    const key = c.createdAt.toISOString().slice(0, 10);
+    countsByDate.set(key, (countsByDate.get(key) ?? 0) + 1);
+  }
+  const volume = fillDateRange(since, until, countsByDate, 0)
+    .map(e => ({ date: e.date, count: e.value }));
+
+  res.json({
+    total,
+    failed,
+    emergency:      Number(row?.emergency ?? 0),
+    successRate,
+    avgApprovalSec: row?.avgApprovalSec ?? null,
+    byState:  byStateRaw.map(r => ({ state: String(r.state), count: Number(r.count) })),
+    byType:   byTypeRaw.map(r => ({ type: String(r.change_type), count: Number(r.count) })),
+    byRisk:   byRiskRaw.map(r => ({ risk: String(r.risk), count: Number(r.count) })),
+    volume,
+  });
+});
+
+// ── CSAT Breakdown ────────────────────────────────────────────────────────────
+//
+// GET /api/reports/csat-breakdown?period=7|30|90
+//
+// Count of ratings at each star level (1–5) and their percentage share.
+// Visualised as a horizontal bar per star level, colored from red to green.
+
+router.get("/csat-breakdown", async (req, res) => {
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+
+  interface RatingRow { rating: number; count: bigint }
+
+  const rows = await prisma.$queryRaw<RatingRow[]>`
+    SELECT rating::int, COUNT(*) AS count
+    FROM csat_rating
+    WHERE "submittedAt" >= ${since} AND "submittedAt" <= ${until}
+    GROUP BY rating ORDER BY rating
+  `;
+
+  const lookup = new Map(rows.map(r => [r.rating, Number(r.count)]));
+  const total  = rows.reduce((s, r) => s + Number(r.count), 0);
+
+  res.json({
+    total,
+    breakdown: [1, 2, 3, 4, 5].map(n => ({
+      rating: n,
+      label:  `${n} star${n === 1 ? "" : "s"}`,
+      count:  lookup.get(n) ?? 0,
+      pct:    total > 0 ? Math.round(((lookup.get(n) ?? 0) / total) * 100) : 0,
+    })),
+  });
+});
+
+// ── Operational Health ────────────────────────────────────────────────────────
+//
+// GET /api/reports/operational-health
+//
+// Live snapshot of critical service-desk health indicators in a single query.
+// No date filter — always shows current state.
+// Designed for the "Live Operations" widget on the overview dashboard.
+
+router.get("/operational-health", async (_req, res) => {
+  interface HealthRow {
+    open:                 bigint;
+    unassigned:           bigint;
+    overdue:              bigint;
+    at_risk:              bigint;
+    assigned_not_replied: bigint;
+  }
+
+  const [row] = await prisma.$queryRaw<HealthRow[]>`
+    SELECT
+      COUNT(*) FILTER (WHERE status IN ('open','in_progress'))
+                                                                   AS open,
+      COUNT(*) FILTER (WHERE status IN ('open','in_progress')
+                         AND "assignedToId" IS NULL)               AS unassigned,
+      COUNT(*) FILTER (WHERE status IN ('open','in_progress')
+                         AND "slaBreached" = true)                 AS overdue,
+      COUNT(*) FILTER (
+        WHERE status IN ('open','in_progress')
+          AND "slaBreached" = false
+          AND "resolutionDueAt" IS NOT NULL
+          AND "resolutionDueAt" <= NOW() + INTERVAL '2 hours'
+          AND "resolutionDueAt" > NOW()
+      )                                                            AS at_risk,
+      (SELECT COUNT(*) FROM ticket t2
+       WHERE t2.status IN ('open','in_progress')
+         AND t2."assignedToId" IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM reply r
+           WHERE r."ticketId" = t2.id AND r."senderType" = 'agent'
+         ))                                                        AS assigned_not_replied
+    FROM ticket
+  `;
+
+  res.json({
+    open:               Number(row?.open ?? 0),
+    unassigned:         Number(row?.unassigned ?? 0),
+    overdue:            Number(row?.overdue ?? 0),
+    atRisk:             Number(row?.at_risk ?? 0),
+    assignedNotReplied: Number(row?.assigned_not_replied ?? 0),
+  });
+});
+
+// ── KB Search Stats ───────────────────────────────────────────────────────────
+//
+// GET /api/reports/kb-search-stats?period=7|30|90
+//
+// Aggregated KB search analytics: total searches, unique queries,
+// zero-result rate, and the top 20 most-searched terms.
+
+router.get("/kb-search-stats", async (req, res) => {
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+
+  interface SearchRow {
+    query: string;
+    count: bigint;
+    avgResultCount: number;
+    zeroResultsCount: bigint;
+  }
+
+  const [totalRow, queryRows] = await Promise.all([
+    prisma.$queryRaw<[{ total: bigint; zero: bigint }]>`
+      SELECT COUNT(*) AS total,
+             COUNT(*) FILTER (WHERE "result_count" = 0) AS zero
+      FROM kb_search_log
+      WHERE "created_at" >= ${since} AND "created_at" <= ${until}
+    `,
+    prisma.$queryRaw<SearchRow[]>`
+      SELECT
+        LOWER(TRIM(query))                                     AS query,
+        COUNT(*)                                               AS count,
+        ROUND(AVG("result_count")::numeric, 1)                AS "avgResultCount",
+        COUNT(*) FILTER (WHERE "result_count" = 0)            AS "zeroResultsCount"
+      FROM kb_search_log
+      WHERE "created_at" >= ${since} AND "created_at" <= ${until}
+        AND LENGTH(TRIM(query)) >= 2
+      GROUP BY LOWER(TRIM(query))
+      ORDER BY count DESC
+      LIMIT 20
+    `,
+  ]);
+
+  const total = Number(totalRow[0]?.total ?? 0);
+  const zero  = Number(totalRow[0]?.zero  ?? 0);
+
+  res.json({
+    totalSearches:  total,
+    uniqueQueries:  queryRows.length,
+    zeroResultRate: total > 0 ? Math.round((zero / total) * 100) : null,
+    topQueries: queryRows.map(r => ({
+      query:            r.query,
+      count:            Number(r.count),
+      avgResultCount:   Number(r.avgResultCount),
+      zeroResultsCount: Number(r.zeroResultsCount),
+    })),
+  });
+});
+
 export default router;

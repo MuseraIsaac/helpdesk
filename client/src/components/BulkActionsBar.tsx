@@ -10,7 +10,9 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { agentTicketStatuses, statusLabel } from "core/constants/ticket-status.ts";
-import { X, Trash2, UserPlus, Users, Zap, CircleDot, ChevronDown, Check } from "lucide-react";
+import { X, Trash2, UserPlus, Users, Zap, CircleDot, ChevronDown, Check, Merge } from "lucide-react";
+import MergeTicketDialog from "@/components/MergeTicketDialog";
+import { useSettings } from "@/hooks/useSettings";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -397,6 +399,7 @@ function RunScenarioPanel({
 
 type ActivePanel = "assign_agent" | "assign_team" | "status" | "scenario" | null;
 
+
 interface BulkActionsBarProps {
   selectedIds: number[];
   onClearSelection: () => void;
@@ -406,6 +409,9 @@ export default function BulkActionsBar({ selectedIds, onClearSelection }: BulkAc
   const queryClient = useQueryClient();
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
   const [deleteOpen, setDeleteOpen]   = useState(false);
+  const [mergeOpen, setMergeOpen]     = useState(false);
+  const { data: ticketSettings } = useSettings("tickets");
+  const mergeEnabled = ticketSettings?.mergeTicketsEnabled ?? true;
 
   // ── All data fetched here, at the top level ──────────────────────────────────
   const { data: agentsData } = useQuery({
@@ -555,6 +561,18 @@ export default function BulkActionsBar({ selectedIds, onClearSelection }: BulkAc
               />
             </ActionButton>
 
+            {mergeEnabled && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-8 gap-1.5 text-xs bg-white/10 hover:bg-white/20 text-white border-white/20 hover:text-white"
+                onClick={() => setMergeOpen(true)}
+              >
+                <Merge className="h-3.5 w-3.5" />
+                Merge Into…
+              </Button>
+            )}
+
             <div className="w-px h-5 bg-white/15 mx-0.5" />
 
             <Button
@@ -569,6 +587,17 @@ export default function BulkActionsBar({ selectedIds, onClearSelection }: BulkAc
           </div>
         </div>
       </div>
+
+      {/* Merge dialog */}
+      {mergeEnabled && mergeOpen && (
+        <MergeTicketDialog
+          open={mergeOpen}
+          onOpenChange={setMergeOpen}
+          sourceIds={selectedIds}
+          sourceLabel={`${selectedIds.length} ticket${selectedIds.length !== 1 ? "s" : ""}`}
+          onMerged={() => { onClearSelection(); }}
+        />
+      )}
 
       {/* Delete confirmation */}
       <AlertDialog

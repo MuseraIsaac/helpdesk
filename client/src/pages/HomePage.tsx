@@ -61,6 +61,7 @@ import {
 } from "@/components/ui/select";
 import ErrorAlert from "@/components/ErrorAlert";
 import DashboardCustomizer from "@/components/DashboardCustomizer";
+import DashboardTemplateDialog from "@/components/DashboardTemplateDialog";
 import DashboardSwitcher from "@/components/DashboardSwitcher";
 import {
   Dialog,
@@ -996,6 +997,7 @@ export default function HomePage() {
 
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [widgetPickerOpen, setWidgetPickerOpen] = useState(false);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [customRange, setCustomRange] = useState<DateRange | null>(null);
   const [editMode, setEditMode] = useState(false);
   // draftLayout holds the in-progress layout while editing; null = use config-derived layout
@@ -2286,6 +2288,15 @@ export default function HomePage() {
                   variant="outline"
                   size="sm"
                   className="gap-1.5"
+                  onClick={() => setTemplateDialogOpen(true)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  From Template
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
                   onClick={enterEditMode}
                 >
                   <PenLine className="h-3.5 w-3.5" />
@@ -2379,6 +2390,11 @@ export default function HomePage() {
           />
 
           {/* ── Customizer dialog ─────────────────────────────────────────── */}
+          <DashboardTemplateDialog
+            open={templateDialogOpen}
+            onOpenChange={setTemplateDialogOpen}
+          />
+
           {customizerOpen && (
             <DashboardCustomizer
               key={activeDashboard?.id ?? "system"}

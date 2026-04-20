@@ -87,11 +87,20 @@ export function redactSensitive(
   if (section === "integrations") {
     return {
       ...data,
+      // Email
       sendgridApiKey:  data.sendgridApiKey  ? "••••••••" : "",
       smtpPassword:    data.smtpPassword    ? "••••••••" : "",
+      // Slack / Webhook
       slackWebhookUrl: data.slackWebhookUrl ? "••••••••" : "",
       webhookSecret:   data.webhookSecret   ? "••••••••" : "",
+      // AI
       openaiApiKey:    data.openaiApiKey    ? "••••••••" : "",
+      // Video bridge secrets
+      teamsClientSecret:  data.teamsClientSecret  ? "••••••••" : "",
+      googleClientSecret: data.googleClientSecret ? "••••••••" : "",
+      googleRefreshToken: data.googleRefreshToken ? "••••••••" : "",
+      zoomClientSecret:   data.zoomClientSecret   ? "••••••••" : "",
+      webexBotToken:      data.webexBotToken      ? "••••••••" : "",
     };
   }
   return data;

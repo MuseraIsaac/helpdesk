@@ -49,6 +49,8 @@
  * │ replies.create               │   ✓   │     ✓      │   ✓   │          │
  * │ macros.view                  │   ✓   │     ✓      │   ✓   │    ✓     │
  * │ macros.manage                │   ✓   │            │       │          │
+ * │ templates.view               │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ templates.create             │   ✓   │     ✓      │   ✓   │          │
  * │ templates.manage             │   ✓   │            │       │          │
  * │ ── ITSM Modules ───────────────────────────────────────────────────── │
  * │ incidents.view               │   ✓   │     ✓      │   ✓   │    ✓     │
@@ -97,6 +99,10 @@
  * │ audit.view                   │   ✓   │     ✓      │       │    ✓     │
  * │ reports.view                 │   ✓   │     ✓      │   ✓   │    ✓     │
  * │ reports.advanced_view        │   ✓   │     ✓      │       │          │
+ * │ reports.manage               │   ✓   │     ✓      │       │          │
+ * │ reports.share                │   ✓   │     ✓      │       │          │
+ * │ reports.schedule             │   ✓   │     ✓      │       │          │
+ * │ reports.export               │   ✓   │     ✓      │   ✓   │          │
  * └──────────────────────────────┴───────┴────────────┴───────┴──────────┘
  *
  * Change Management permission semantics
@@ -133,6 +139,8 @@ export type Permission =
   | "replies.create"
   | "macros.view"
   | "macros.manage"
+  | "templates.view"
+  | "templates.create"
   | "templates.manage"
 
   // ── ITSM Modules ──────────────────────────────────────────────────────────
@@ -193,6 +201,10 @@ export type Permission =
   | "audit.view"
   | "reports.view"
   | "reports.advanced_view"
+  | "reports.manage"    // Create, edit, delete saved/custom reports
+  | "reports.share"     // Share reports with other users or teams
+  | "reports.schedule"  // Schedule report delivery via email
+  | "reports.export"    // Export report data as CSV / XLSX
   | "ticket_types.manage";
 
 // ── Role permission arrays ─────────────────────────────────────────────────────
@@ -216,6 +228,8 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "replies.create",
   "macros.view",
   "macros.manage",
+  "templates.view",
+  "templates.create",
   "templates.manage",
   // ITSM Modules
   "incidents.view",
@@ -267,6 +281,10 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "audit.view",
   "reports.view",
   "reports.advanced_view",
+  "reports.manage",
+  "reports.share",
+  "reports.schedule",
+  "reports.export",
   "ticket_types.manage",
 ];
 
@@ -290,6 +308,9 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "attachments.delete_any",
   "replies.create",
   "macros.view",
+  "templates.view",
+  "templates.create",
+  "templates.manage",
   // ITSM Modules
   "incidents.view",
   "incidents.manage",
@@ -332,9 +353,13 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "scenarios.manage",
   // Platform Administration
   "kb.manage",
-  "audit.view",        // Compliance and audit access
+  "audit.view",
   "reports.view",
   "reports.advanced_view",
+  "reports.manage",
+  "reports.share",
+  "reports.schedule",
+  "reports.export",
 ];
 
 /**
@@ -360,6 +385,8 @@ const AGENT_PERMISSIONS: Permission[] = [
   "notes.create",
   "replies.create",
   "macros.view",
+  "templates.view",
+  "templates.create",
   // ITSM Modules
   "incidents.view",
   "incidents.manage",  // Agents work and resolve incidents
@@ -389,6 +416,7 @@ const AGENT_PERMISSIONS: Permission[] = [
   "scenarios.run",     // Invoke scenarios on tickets
   // Platform Administration
   "reports.view",
+  "reports.export",
 ];
 
 /**
@@ -403,6 +431,7 @@ const READONLY_PERMISSIONS: Permission[] = [
   "tickets.view",
   "notes.view",
   "macros.view",
+  "templates.view",
   // ITSM Modules
   "incidents.view",
   "requests.view",

@@ -34,6 +34,7 @@ import {
 } from "../lib/change-approval";
 import { detectChangeConflicts } from "../lib/change-conflicts";
 import { notify } from "../lib/notify";
+import { notifyEntityFollowers } from "../lib/notify-entity-followers";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -603,6 +604,21 @@ router.patch(
       });
     }
 
+    // Notify followers on state change (fire-and-forget)
+    if (data.state && data.state !== existing.state) {
+      void notifyEntityFollowers({
+        entityType:   "change",
+        entityId:     id,
+        actorUserId:  req.user.id,
+        event:        "change.followed_status_changed",
+        entityNumber: updated.changeNumber,
+        entityTitle:  updated.title,
+        fromStatus:   existing.state,
+        toStatus:     data.state,
+        entityUrl:    `/changes/${id}`,
+      });
+    }
+
     res.json(updated);
   }
 );
@@ -714,10 +730,10 @@ router.post(
 
       // Steps to re-activate: currently rejected AND chosen by the requester
       const stepsToReset = existing.steps.filter(
-        (s) => s.status === "rejected" && resendIds.includes(s.approverId)
+        (s) => s.status === "rejected" && resendIds.includes(s.approver.id)
       );
       // Truly new approvers not in the current round at all
-      const existingApproverSet = new Set(existing.steps.map((s) => s.approverId));
+      const existingApproverSet = new Set(existing.steps.map((s) => s.approver.id));
       const brandNewIds = resendIds.filter((aid) => !existingApproverSet.has(aid));
       const maxOrder = Math.max(...existing.steps.map((s) => s.stepOrder), 0);
 
@@ -761,10 +777,13 @@ router.post(
         entityUrl: `/approvals`,
       });
 
-      await logChangeApprovalEvent(id, req.user.id, "change.approval_requested", {
-        approvalRequestId: existing.id,
-        approverCount: resendIds.length,
-        isResend: true,
+      await prisma.changeEvent.create({
+        data: {
+          changeId: id,
+          actorId: req.user.id,
+          action: "change.approval_requested",
+          meta: { approvalRequestId: existing.id, approverCount: resendIds.length, isResend: true },
+        },
       });
 
       const approvals = await getAllChangeApprovals(id);

@@ -84,7 +84,20 @@
       "Bash(bun --bun tsc --noEmit)",
       "Bash(taskkill *)",
       "Bash(pkill -f \"bun.*src/index.ts\")",
-      "Bash(grep -v \"\\\\.map\\\\|comment\\\\|//\")"
+      "Bash(grep -v \"\\\\.map\\\\|comment\\\\|//\")",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "Bash(grep -E \"\\\\.ts$\")",
+      "Bash(grep -v \"import\\\\|//\")",
+      "Bash(awk '{print $NF}')",
+      "Bash(grep -E \"\\\\.\\(tsx?|json\\)$\")",
+      "Bash(bun pm *)",
+      "Bash(timeout 20 bun vite build)",
+      "Bash(bun shadcn *)",
+      "Bash(timeout 30 bun vite build)",
+      "Bash(timeout 90 bun vite build)",
+      "Bash(ls bun.lockb)",
+      "Bash(ls bun.lock)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('ok' if 'user' in d else d\\)\")"
     ]
   }
 }

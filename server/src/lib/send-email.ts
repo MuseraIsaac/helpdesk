@@ -10,6 +10,8 @@ interface SendEmailJobData {
   subject: string;
   body: string;
   bodyHtml?: string;
+  cc?: string[];
+  bcc?: string[];
   /** Value for the In-Reply-To header, e.g. "<abc123@mail.example.com>" */
   inReplyTo?: string;
   /** Value for the References header — space-separated list of angle-bracketed IDs */
@@ -30,7 +32,7 @@ export async function registerSendEmailWorker(boss: PgBoss): Promise<void> {
   });
 
   await boss.work<SendEmailJobData>(QUEUE_NAME, async (jobs) => {
-    const { to, subject, body, bodyHtml, inReplyTo, references, attachmentIds } =
+    const { to, subject, body, bodyHtml, cc, bcc, inReplyTo, references, attachmentIds } =
       jobs[0]!.data;
 
     try {
@@ -91,6 +93,8 @@ export async function registerSendEmailWorker(boss: PgBoss): Promise<void> {
         from: fromAddr,
         subject,
         text: body,
+        ...(cc?.length && { cc }),
+        ...(bcc?.length && { bcc }),
         ...(bodyHtml && { html: bodyHtml }),
         ...(Object.keys(threadingHeaders).length && { headers: threadingHeaders }),
         ...(sgAttachments.length && { attachments: sgAttachments }),

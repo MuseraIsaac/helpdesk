@@ -8,9 +8,10 @@ import { Lock } from "lucide-react";
 
 interface NoteFormProps {
   ticketId: number;
+  onSent?: () => void;
 }
 
-export default function NoteForm({ ticketId }: NoteFormProps) {
+export default function NoteForm({ ticketId, onSent }: NoteFormProps) {
   const queryClient = useQueryClient();
 
   const [bodyHtml, setBodyHtml] = useState("");
@@ -34,6 +35,7 @@ export default function NoteForm({ ticketId }: NoteFormProps) {
       queryClient.invalidateQueries({ queryKey: ["conversation", ticketId] });
       setBodyHtml("");
       setBodyText("");
+      onSent?.();
     },
   });
 

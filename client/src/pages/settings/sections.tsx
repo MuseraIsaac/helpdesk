@@ -205,37 +205,96 @@ export function GeneralSection() {
 
 // ── 2. Branding ───────────────────────────────────────────────────────────────
 
+/** Reusable image-upload control used for both logo and favicon. */
+function ImageUploadField({
+  value,
+  onChange,
+  onRemove,
+  previewSize,
+  previewLabel,
+  uploadLabel,
+  accept = "image/png,image/svg+xml,image/jpeg,image/webp,image/x-icon",
+}: {
+  value: string;
+  onChange: (dataUrl: string) => void;
+  onRemove: () => void;
+  previewSize: string;   // Tailwind w-* h-* classes for preview box
+  previewLabel: string;
+  uploadLabel: string;
+  accept?: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onChange(reader.result as string);
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
+  return (
+    <div className="space-y-3">
+      {value ? (
+        <div className="flex items-center gap-4">
+          <div className={`${previewSize} relative rounded-lg border bg-muted/50 p-1.5 shrink-0 flex items-center justify-center overflow-hidden`}>
+            <img src={value} alt={previewLabel} className="max-w-full max-h-full object-contain" />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Button type="button" size="sm" variant="outline" onClick={() => ref.current?.click()}>
+              <Upload className="h-3.5 w-3.5 mr-1.5" />
+              Replace
+            </Button>
+            <Button
+              type="button" size="sm" variant="ghost"
+              className="text-destructive hover:text-destructive justify-start"
+              onClick={onRemove}
+            >
+              <X className="h-3.5 w-3.5 mr-1.5" />
+              Remove
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button type="button" variant="outline" size="sm" onClick={() => ref.current?.click()}>
+          <Upload className="h-4 w-4 mr-2" />
+          {uploadLabel}
+        </Button>
+      )}
+      <input ref={ref} type="file" accept={accept} className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
+/** Small "spec chip" — shows format and size requirements inline. */
+function SpecBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+      {children}
+    </span>
+  );
+}
+
 export function BrandingSection() {
   const { data, isLoading } = useSettings("branding");
   const update = useUpdateSettings("branding");
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { register, handleSubmit, reset, watch, setValue, formState: { isDirty } } =
     useForm<BrandingSettings>({ resolver: zodResolver(brandingSettingsSchema) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
-  const primaryColor = watch("primaryColor");
-  const logoDataUrl = watch("logoDataUrl");
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setValue("logoDataUrl", reader.result as string, { shouldDirty: true });
-    };
-    reader.readAsDataURL(file);
-    // Reset so the same file can be re-selected
-    e.target.value = "";
-  };
+  const primaryColor   = watch("primaryColor");
+  const logoDataUrl    = watch("logoDataUrl");
+  const faviconDataUrl = watch("faviconDataUrl");
 
   if (isLoading) return <SectionLoading />;
 
   return (
     <SettingsFormShell
       title="Branding"
-      description="Company identity shown in emails and the public help center."
+      description="Company identity shown in the app, emails, and the public help center."
       onSubmit={handleSubmit((d) => update.mutate(d))}
       isPending={update.isPending}
       isDirty={isDirty}
@@ -247,64 +306,98 @@ export function BrandingSection() {
           <Input id="companyName" placeholder="Acme Corp" {...register("companyName")} />
         </SettingsField>
 
+        {/* ── App logo ──────────────────────────────────────────────────── */}
         <SettingsField
-          label="Logo"
-          description="Used as the Zentra app logo and browser favicon. PNG or SVG recommended, square format."
+          label="App logo"
+          description={
+            <span className="space-y-1.5 block">
+              <span className="block">
+                Displayed in the sidebar and on outbound emails.
+                If no favicon is uploaded separately, this image is also used as the browser tab icon.
+              </span>
+              <span className="flex flex-wrap gap-1.5 mt-1">
+                <SpecBadge>SVG recommended</SpecBadge>
+                <SpecBadge>PNG accepted</SpecBadge>
+                <SpecBadge>min 200 × 200 px</SpecBadge>
+                <SpecBadge>square format</SpecBadge>
+                <SpecBadge>max 2 MB</SpecBadge>
+              </span>
+            </span>
+          }
+        >
+          <ImageUploadField
+            value={logoDataUrl}
+            onChange={v => setValue("logoDataUrl", v, { shouldDirty: true })}
+            onRemove={() => setValue("logoDataUrl", "", { shouldDirty: true })}
+            previewSize="h-16 w-16"
+            previewLabel="App logo preview"
+            uploadLabel="Upload logo"
+            accept="image/png,image/svg+xml,image/jpeg,image/webp"
+          />
+        </SettingsField>
+
+        {/* ── Browser favicon ───────────────────────────────────────────── */}
+        <SettingsField
+          label="Browser favicon"
+          description={
+            <span className="space-y-1.5 block">
+              <span className="block">
+                The small icon shown in the browser tab and bookmarks bar.
+                Upload a dedicated favicon for best results — the logo fallback
+                often renders poorly at 16 × 16 px.
+              </span>
+              <span className="flex flex-wrap gap-1.5 mt-1">
+                <SpecBadge>PNG preferred</SpecBadge>
+                <SpecBadge>ICO supported</SpecBadge>
+                <SpecBadge>SVG (modern browsers)</SpecBadge>
+                <SpecBadge>32 × 32 px ideal</SpecBadge>
+                <SpecBadge>16 × 16 px minimum</SpecBadge>
+                <SpecBadge>square only</SpecBadge>
+              </span>
+              {!faviconDataUrl && logoDataUrl && (
+                <span className="block text-amber-600 dark:text-amber-400 text-[11px] mt-1">
+                  Currently using the app logo as fallback — it may appear blurry at small sizes.
+                </span>
+              )}
+            </span>
+          }
         >
           <div className="space-y-3">
-            {logoDataUrl ? (
-              <div className="flex items-center gap-3">
-                <img
-                  src={logoDataUrl}
-                  alt="Logo preview"
-                  className="h-14 w-14 object-contain rounded-lg border bg-muted p-1 shrink-0"
-                />
-                <div className="flex flex-col gap-1.5">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Upload className="h-3.5 w-3.5 mr-1.5" />
-                    Replace
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive hover:text-destructive"
-                    onClick={() => setValue("logoDataUrl", "", { shouldDirty: true })}
-                  >
-                    <X className="h-3.5 w-3.5 mr-1.5" />
-                    Remove
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Upload className="h-4 w-4 mr-2" />
-                Upload logo
-              </Button>
-            )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleFileChange}
+            <ImageUploadField
+              value={faviconDataUrl}
+              onChange={v => setValue("faviconDataUrl", v, { shouldDirty: true })}
+              onRemove={() => setValue("faviconDataUrl", "", { shouldDirty: true })}
+              previewSize="h-10 w-10"
+              previewLabel="Favicon preview"
+              uploadLabel="Upload favicon"
+              accept="image/png,image/x-icon,image/svg+xml,image/vnd.microsoft.icon"
             />
+            {/* Side-by-side size comparison so users can see how it renders */}
+            {faviconDataUrl && (
+              <div className="flex items-end gap-4 pt-1">
+                <div className="flex flex-col items-center gap-1">
+                  <img src={faviconDataUrl} alt="" className="h-8 w-8 object-contain" />
+                  <span className="text-[10px] text-muted-foreground">32 px</span>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <img src={faviconDataUrl} alt="" className="h-4 w-4 object-contain" />
+                  <span className="text-[10px] text-muted-foreground">16 px</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground pb-5">
+                  Preview at actual browser-tab sizes
+                </p>
+              </div>
+            )}
           </div>
         </SettingsField>
 
         <SettingsField label="Primary color" description="Used for buttons and accents in emails.">
           <div className="flex items-center gap-2">
-            <input type="color" {...register("primaryColor")} className="h-9 w-14 rounded border bg-background cursor-pointer p-0.5" />
+            <input
+              type="color"
+              {...register("primaryColor")}
+              className="h-9 w-14 rounded border bg-background cursor-pointer p-0.5"
+            />
             <Input {...register("primaryColor")} className="font-mono" maxLength={7} />
             <span className="h-7 w-7 rounded-full border shrink-0" style={{ backgroundColor: primaryColor }} />
           </div>
@@ -418,6 +511,76 @@ export function TicketsSection() {
             <p className="text-xs text-destructive mt-1">{errors.autoCloseResolvedAfterDays.message}</p>
           )}
         </SettingsField>
+      </SettingsGroup>
+
+      <SettingsGroup title="Merge">
+        <SettingsSwitchRow
+          label="Allow ticket merging"
+          description="Agents can merge duplicate or related tickets into a single parent ticket. The source ticket is closed and linked to the parent."
+        >
+          <Controller name="mergeTicketsEnabled" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Live Collaboration">
+        <SettingsSwitchRow
+          label="Presence indicators"
+          description="Show agents who else is currently viewing or composing a reply on the same ticket, so they can coordinate without duplicating work."
+        >
+          <Controller name="presenceEnabled" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Reply Defaults">
+        <SettingsField label="Default reply mode" description="Which reply mode is pre-selected when an agent opens the compose area.">
+          <Controller name="replyDefaultMode" control={control} render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="reply_all">Reply to All</SelectItem>
+                <SelectItem value="reply_sender">Reply to Sender</SelectItem>
+              </SelectContent>
+            </Select>
+          )} />
+        </SettingsField>
+        <SettingsSwitchRow
+          label="Pre-fill reply draft"
+          description="Automatically insert a greeting and ticket number footer when agents open the reply composer."
+        >
+          <Controller name="replyDraftEnabled" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        {watch("replyDraftEnabled") && (
+          <>
+            <SettingsField
+              label="Greeting template"
+              description={<>Opening line of the reply draft. Use <code className="text-xs bg-muted px-1 py-0.5 rounded">{"{senderName}"}</code> to insert the customer's first name.</>}
+              htmlFor="replyGreeting"
+            >
+              <Input
+                id="replyGreeting"
+                placeholder="Hi {senderName},"
+                {...register("replyGreeting")}
+              />
+            </SettingsField>
+            <SettingsField
+              label="Footer template"
+              description={<>Closing line appended below the agent's signature. Use <code className="text-xs bg-muted px-1 py-0.5 rounded">{"{ticketNumber}"}</code> to insert the ticket number.</>}
+              htmlFor="replyFooter"
+            >
+              <Input
+                id="replyFooter"
+                placeholder="Your Ticket number is {ticketNumber}."
+                {...register("replyFooter")}
+              />
+            </SettingsField>
+          </>
+        )}
       </SettingsGroup>
     </SettingsFormShell>
   );
@@ -1180,6 +1343,215 @@ export function AppearanceSection() {
 
 // ── 11. Integrations ──────────────────────────────────────────────────────────
 
+// ── Video Bridge sub-component ────────────────────────────────────────────────
+
+const PROVIDER_INFO = {
+  none:       { label: "Disabled",        icon: "—",   color: "text-muted-foreground" },
+  teams:      { label: "Microsoft Teams", icon: "🟦",  color: "text-blue-600" },
+  googlemeet: { label: "Google Meet",     icon: "🟢",  color: "text-green-600" },
+  zoom:       { label: "Zoom",            icon: "🔵",  color: "text-blue-500" },
+  webex:      { label: "Webex",           icon: "🟩",  color: "text-emerald-600" },
+} as const;
+
+function VideoBridgeGroup({
+  control,
+  register,
+  watch,
+}: {
+  control: import("react-hook-form").Control<IntegrationsSettings>;
+  register: import("react-hook-form").UseFormRegister<IntegrationsSettings>;
+  watch: import("react-hook-form").UseFormWatch<IntegrationsSettings>;
+}) {
+  const [testing, setTesting]   = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string; joinUrl?: string } | null>(null);
+
+  const provider = watch("videoBridgeProvider");
+
+  async function handleTest() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await (await import("axios")).default.post<{ ok: boolean; error?: string; joinUrl?: string }>(
+        "/api/settings/integrations/test-video-bridge",
+      );
+      setTestResult(res.data);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? "Request failed";
+      setTestResult({ ok: false, error: msg });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <SettingsGroup
+      title="Video Bridge (Incident Bridge Calls)"
+      description="When configured, agents can create a one-click conference call directly from any incident page. Only one provider can be active at a time."
+    >
+      {/* Provider selector */}
+      <SettingsField
+        label="Active provider"
+        description="Select the video conferencing platform your team uses. Fill in the credentials below, then click Test Connection."
+      >
+        <Controller
+          name="videoBridgeProvider"
+          control={control}
+          render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger className="w-52">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.entries(PROVIDER_INFO) as [keyof typeof PROVIDER_INFO, (typeof PROVIDER_INFO)[keyof typeof PROVIDER_INFO]][]).map(
+                  ([key, meta]) => (
+                    <SelectItem key={key} value={key} className="text-sm">
+                      {meta.icon} {meta.label}
+                    </SelectItem>
+                  ),
+                )}
+              </SelectContent>
+            </Select>
+          )}
+        />
+      </SettingsField>
+
+      {/* ── Microsoft Teams ─────────────────────────────────────────────────── */}
+      {provider === "teams" && (
+        <>
+          <SettingsField
+            label="Azure Tenant ID"
+            description="Found in Azure Portal → Azure Active Directory → Overview → Tenant ID."
+            htmlFor="teamsTenantId"
+          >
+            <Input id="teamsTenantId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" {...register("teamsTenantId")} />
+          </SettingsField>
+          <SettingsField
+            label="Application (Client) ID"
+            description="Found in Azure Portal → App Registrations → your app → Application ID."
+            htmlFor="teamsClientId"
+          >
+            <Input id="teamsClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" {...register("teamsClientId")} />
+          </SettingsField>
+          <SettingsField
+            label="Client Secret"
+            description="Generate under Azure App → Certificates & secrets. Requires OnlineMeetings.ReadWrite.All app permission (admin consent)."
+          >
+            <Input type="password" autoComplete="off" {...register("teamsClientSecret")} />
+          </SettingsField>
+          <SettingsField
+            label="Organizer User ID"
+            description="UPN (email) or Object ID of the Azure AD user on whose behalf meetings are created (e.g. incidents@company.com)."
+            htmlFor="teamsOrganizerUserId"
+          >
+            <Input id="teamsOrganizerUserId" placeholder="incidents@company.com" {...register("teamsOrganizerUserId")} />
+          </SettingsField>
+        </>
+      )}
+
+      {/* ── Google Meet ─────────────────────────────────────────────────────── */}
+      {provider === "googlemeet" && (
+        <>
+          <SettingsField
+            label="OAuth Client ID"
+            description="From Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client IDs."
+            htmlFor="googleClientId"
+          >
+            <Input id="googleClientId" placeholder="xxxx.apps.googleusercontent.com" {...register("googleClientId")} />
+          </SettingsField>
+          <SettingsField
+            label="OAuth Client Secret"
+            description="From the same credential entry in Google Cloud Console."
+          >
+            <Input type="password" autoComplete="off" {...register("googleClientSecret")} />
+          </SettingsField>
+          <SettingsField
+            label="Refresh Token"
+            description={
+              <span>
+                Obtain via <strong>Google OAuth Playground</strong> (oauth2.googleapis.com/tokeninfo) using scope{" "}
+                <code className="text-[11px] bg-muted px-1 rounded">https://www.googleapis.com/auth/calendar.events</code>.
+                Paste the refresh token here — it does not expire unless revoked.
+              </span>
+            }
+          >
+            <Input type="password" autoComplete="off" placeholder="1/xxxx..." {...register("googleRefreshToken")} />
+          </SettingsField>
+        </>
+      )}
+
+      {/* ── Zoom ──────────────────────────────────────────────────────────────── */}
+      {provider === "zoom" && (
+        <>
+          <SettingsField
+            label="Account ID"
+            description="From Zoom Marketplace → your Server-to-Server OAuth app → App Credentials."
+            htmlFor="zoomAccountId"
+          >
+            <Input id="zoomAccountId" placeholder="xxxxxxxxxxxx" {...register("zoomAccountId")} />
+          </SettingsField>
+          <SettingsField
+            label="Client ID"
+            description="From the same App Credentials page in Zoom Marketplace."
+            htmlFor="zoomClientId"
+          >
+            <Input id="zoomClientId" placeholder="xxxxxxxxxxxx" {...register("zoomClientId")} />
+          </SettingsField>
+          <SettingsField
+            label="Client Secret"
+            description="Requires scopes: meeting:write:admin, meeting:read:admin. Activate the app and grant admin approval before testing."
+          >
+            <Input type="password" autoComplete="off" {...register("zoomClientSecret")} />
+          </SettingsField>
+        </>
+      )}
+
+      {/* ── Webex ─────────────────────────────────────────────────────────────── */}
+      {provider === "webex" && (
+        <>
+          <SettingsField
+            label="Bot Token (Personal Access Token)"
+            description="From developer.webex.com → My Webex Apps → your Bot → Access Token. Bot tokens never expire; Personal Access Tokens expire after 12 hours."
+          >
+            <Input type="password" autoComplete="off" placeholder="NWN0..." {...register("webexBotToken")} />
+          </SettingsField>
+          <SettingsField
+            label="Site URL"
+            description="Your Webex site domain, e.g. company.webex.com. Leave blank to use the token owner's default site."
+            htmlFor="webexSiteUrl"
+          >
+            <Input id="webexSiteUrl" placeholder="company.webex.com" {...register("webexSiteUrl")} />
+          </SettingsField>
+        </>
+      )}
+
+      {/* Test Connection button */}
+      {provider !== "none" && (
+        <SettingsField label="Connection test" description="Creates a real test meeting to verify credentials. Save settings before testing.">
+          <div className="space-y-2">
+            <Button type="button" variant="outline" size="sm" onClick={handleTest} disabled={testing} className="gap-2">
+              {testing && <span className="h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />}
+              {testing ? "Testing…" : "Test Connection"}
+            </Button>
+            {testResult && (
+              <div className={`text-[12px] rounded-md px-3 py-2 border ${
+                testResult.ok
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400"
+                  : "bg-destructive/10 border-destructive/20 text-destructive"
+              }`}>
+                {testResult.ok ? (
+                  <span>✓ Connected successfully. Test meeting created. <a href={testResult.joinUrl} target="_blank" rel="noopener noreferrer" className="underline">Open test link</a></span>
+                ) : (
+                  <span>✗ {testResult.error}</span>
+                )}
+              </div>
+            )}
+          </div>
+        </SettingsField>
+      )}
+    </SettingsGroup>
+  );
+}
+
 export function IntegrationsSection() {
   const { data, isLoading } = useSettings("integrations");
   const update = useUpdateSettings("integrations");
@@ -1300,6 +1672,8 @@ export function IntegrationsSection() {
           </SettingsField>
         )}
       </SettingsGroup>
+
+      <VideoBridgeGroup control={control} register={register} watch={watch} />
     </SettingsFormShell>
   );
 }
@@ -2374,6 +2748,49 @@ export function NotificationsSection() {
         </SettingsSwitchRow>
         <SettingsSwitchRow label="Approval decision" description="Notify requesters when their approval request is approved or rejected.">
           <Controller name="notifyOnApprovalDecision" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Following">
+        <SettingsSwitchRow
+          label="Followed ticket status changes"
+          description="Notify agents when a ticket they follow changes status."
+        >
+          <Controller name="notifyOnFollowedTicketStatusChanged" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow
+          label="Followed incident status changes"
+          description="Notify agents when an incident they follow changes status."
+        >
+          <Controller name="notifyOnFollowedIncidentStatusChanged" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow
+          label="Followed change status changes"
+          description="Notify agents when a change they follow transitions state."
+        >
+          <Controller name="notifyOnFollowedChangeStatusChanged" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow
+          label="Followed service request status changes"
+          description="Notify agents when a service request they follow changes status."
+        >
+          <Controller name="notifyOnFollowedRequestStatusChanged" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow
+          label="Followed problem status changes"
+          description="Notify agents when a problem they follow changes status."
+        >
+          <Controller name="notifyOnFollowedProblemStatusChanged" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>

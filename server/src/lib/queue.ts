@@ -5,6 +5,8 @@ import { registerAutoResolveWorker } from "./auto-resolve-ticket";
 import { registerSendEmailWorker } from "./send-email";
 import { registerSlaCheckerWorker } from "./check-sla";
 import { registerAutomationCheckerWorker } from "./check-automation";
+import { registerCheckReportSchedulesWorker } from "./check-report-schedules";
+import { registerRefreshMatViewsWorker } from "./refresh-materialized-views";
 
 const boss = new PgBoss({
   connectionString: process.env.DATABASE_URL!,
@@ -30,6 +32,8 @@ export async function startQueue(): Promise<void> {
     boss.createQueue("send-email",           { retryLimit: 3, retryDelay: 30, retryBackoff: true }),
     boss.createQueue("check-sla"),
     boss.createQueue("check-automation"),
+    boss.createQueue("check-report-schedules"),
+    boss.createQueue("refresh-materialized-views"),
   ]);
 
   await registerClassifyWorker(boss);
@@ -37,6 +41,8 @@ export async function startQueue(): Promise<void> {
   await registerSendEmailWorker(boss);
   await registerSlaCheckerWorker(boss);
   await registerAutomationCheckerWorker(boss);
+  await registerCheckReportSchedulesWorker(boss);
+  await registerRefreshMatViewsWorker(boss);
 
   console.log("Job queue started");
 }

@@ -3,6 +3,7 @@ import axios from "axios";
 
 interface PublicBranding {
   logoDataUrl: string;
+  faviconDataUrl: string;
   companyName: string;
   primaryColor: string;
 }

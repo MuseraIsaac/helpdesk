@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -31,14 +32,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -52,6 +45,8 @@ import {
   Plus,
   Pencil,
   Trash2,
+  Copy,
+  Check,
   FileText,
   Ticket,
   Inbox,
@@ -60,9 +55,13 @@ import {
   BookOpen,
   Mail,
   BookMarked,
+  Search,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+import { useSession } from "@/lib/auth-client";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Template {
   id: number;
@@ -77,55 +76,59 @@ interface Template {
   updatedAt: string;
 }
 
-// ─── Tab config ───────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const TAB_ICONS: Record<TemplateType, React.ReactNode> = {
-  ticket: <Ticket className="h-3.5 w-3.5" />,
-  request: <Inbox className="h-3.5 w-3.5" />,
-  change: <RefreshCw className="h-3.5 w-3.5" />,
-  problem: <Bug className="h-3.5 w-3.5" />,
+  ticket:  <Ticket   className="h-3.5 w-3.5" />,
+  request: <Inbox    className="h-3.5 w-3.5" />,
+  change:  <RefreshCw className="h-3.5 w-3.5" />,
+  problem: <Bug      className="h-3.5 w-3.5" />,
   article: <BookOpen className="h-3.5 w-3.5" />,
-  email: <Mail className="h-3.5 w-3.5" />,
-  macro: <BookMarked className="h-3.5 w-3.5" />,
+  email:   <Mail     className="h-3.5 w-3.5" />,
+  macro:   <BookMarked className="h-3.5 w-3.5" />,
 };
 
-// ─── VariablePicker ───────────────────────────────────────────────────────────
+const TYPE_COLORS: Record<TemplateType, string> = {
+  ticket:  "bg-blue-500/10 text-blue-700 border-blue-200",
+  request: "bg-purple-500/10 text-purple-700 border-purple-200",
+  change:  "bg-orange-500/10 text-orange-700 border-orange-200",
+  problem: "bg-red-500/10 text-red-700 border-red-200",
+  article: "bg-emerald-500/10 text-emerald-700 border-emerald-200",
+  email:   "bg-sky-500/10 text-sky-700 border-sky-200",
+  macro:   "bg-violet-500/10 text-violet-700 border-violet-200",
+};
 
-interface VariablePickerProps {
-  type: TemplateType;
-  onInsert: (key: string) => void;
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function VariablePicker({ type, onInsert }: VariablePickerProps) {
-  const variables = TEMPLATE_VARIABLES[type];
+// ── VariablePicker ────────────────────────────────────────────────────────────
 
+function VariablePicker({ type, onInsert }: { type: TemplateType; onInsert: (k: string) => void }) {
+  const variables = TEMPLATE_VARIABLES[type] ?? [];
   const groups = Array.from(new Set(variables.map((v) => v.group)));
-
+  if (!variables.length) return null;
   return (
-    <div className="rounded-md border bg-muted/40 p-3 space-y-3">
-      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-        Available variables — click to insert
+    <div className="rounded-lg border border-border/60 bg-muted/30 p-3 space-y-2.5">
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+        Variables — click to insert
       </p>
-      <div className="max-h-44 overflow-y-auto space-y-3 pr-1">
+      <div className="max-h-36 overflow-y-auto space-y-2 pr-1">
         {groups.map((group) => (
           <div key={group}>
-            <p className="text-[10px] font-medium text-muted-foreground mb-1.5 uppercase tracking-wider">
-              {group}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {variables
-                .filter((v) => v.group === group)
-                .map((v) => (
-                  <button
-                    key={v.key}
-                    type="button"
-                    title={v.description}
-                    onClick={() => onInsert(v.key)}
-                    className="inline-flex items-center text-[11px] font-mono bg-background border rounded px-1.5 py-0.5 hover:bg-accent hover:border-ring transition-colors cursor-pointer"
-                  >
-                    {v.key}
-                  </button>
-                ))}
+            <p className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider mb-1">{group}</p>
+            <div className="flex flex-wrap gap-1">
+              {variables.filter((v) => v.group === group).map((v) => (
+                <button
+                  key={v.key}
+                  type="button"
+                  title={v.description}
+                  onClick={() => onInsert(v.key)}
+                  className="font-mono text-[10px] bg-background border rounded px-1.5 py-0.5 hover:bg-accent hover:border-ring transition-colors"
+                >
+                  {v.key}
+                </button>
+              ))}
             </div>
           </div>
         ))}
@@ -134,15 +137,16 @@ function VariablePicker({ type, onInsert }: VariablePickerProps) {
   );
 }
 
-// ─── TemplateForm ─────────────────────────────────────────────────────────────
+// ── Template form (create / edit dialog) ──────────────────────────────────────
 
 interface TemplateFormProps {
   template?: Template;
   defaultType: TemplateType;
+  canManage: boolean;
   onSuccess: () => void;
 }
 
-function TemplateForm({ template, defaultType, onSuccess }: TemplateFormProps) {
+function TemplateForm({ template, defaultType, canManage, onSuccess }: TemplateFormProps) {
   const isEdit = !!template;
   const queryClient = useQueryClient();
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
@@ -178,208 +182,291 @@ function TemplateForm({ template, defaultType, onSuccess }: TemplateFormProps) {
 
   function insertVariable(key: string) {
     const el = bodyRef.current;
-    if (!el) {
-      form.setValue("body", (form.getValues("body") ?? "") + key);
-      return;
-    }
-    const start = el.selectionStart ?? el.value.length;
-    const end = el.selectionEnd ?? el.value.length;
-    const current = el.value;
-    const next = current.slice(0, start) + key + current.slice(end);
-    form.setValue("body", next, { shouldValidate: true });
-    requestAnimationFrame(() => {
-      el.focus();
-      const pos = start + key.length;
-      el.setSelectionRange(pos, pos);
-    });
+    const current = form.getValues("body") ?? "";
+    if (!el) { form.setValue("body", current + key); return; }
+    const start = el.selectionStart ?? current.length;
+    const end = el.selectionEnd ?? current.length;
+    form.setValue("body", current.slice(0, start) + key + current.slice(end), { shouldValidate: true });
+    requestAnimationFrame(() => { el.focus(); const pos = start + key.length; el.setSelectionRange(pos, pos); });
   }
 
   return (
-    <form
-      onSubmit={form.handleSubmit((d) => mutation.mutate(d))}
-      className="space-y-4"
-    >
-      <div className="space-y-2">
-        <Label htmlFor="title">Title</Label>
-        <Input
-          id="title"
-          placeholder="e.g. Acknowledge — Ticket received"
-          {...form.register("title")}
-        />
-        {form.formState.errors.title && (
-          <ErrorMessage message={form.formState.errors.title.message} />
-        )}
-      </div>
-
+    <form onSubmit={form.handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
       {!isEdit && (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           <Label>Template type</Label>
           <Select
             defaultValue={defaultType}
             onValueChange={(v) => form.setValue("type", v as TemplateType, { shouldValidate: true })}
           >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
+            <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               {templateTypes.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {templateTypeLabel[t]}
-                </SelectItem>
+                <SelectItem key={t} value={t}>{templateTypeLabel[t]}</SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
       )}
 
-      <div className="space-y-2">
-        <Label htmlFor="body">Body</Label>
+      <div className="space-y-1.5">
+        <Label htmlFor="tmpl-title">Title <span className="text-destructive">*</span></Label>
+        <Input id="tmpl-title" placeholder="e.g. Acknowledge — Ticket received" {...form.register("title")} />
+        {form.formState.errors.title && <ErrorMessage message={form.formState.errors.title.message} />}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="tmpl-body">Body <span className="text-destructive">*</span></Label>
         <Textarea
-          id="body"
-          placeholder={`Write your ${templateTypeLabel[selectedType].toLowerCase()} template here. Click variables below to insert placeholders.`}
-          rows={7}
+          id="tmpl-body"
+          rows={8}
+          placeholder="Template content… Use variables below as placeholders."
+          className="font-mono text-sm resize-y"
           {...form.register("body")}
-          ref={(el) => {
-            form.register("body").ref(el);
-            bodyRef.current = el;
-          }}
+          ref={(el) => { form.register("body").ref(el); bodyRef.current = el; }}
         />
-        {form.formState.errors.body && (
-          <ErrorMessage message={form.formState.errors.body.message} />
-        )}
+        {form.formState.errors.body && <ErrorMessage message={form.formState.errors.body.message} />}
         <VariablePicker type={selectedType} onInsert={insertVariable} />
       </div>
 
-      <div className="space-y-2">
-        <Label>Status</Label>
-        <Select
-          defaultValue={template?.isActive === false ? "inactive" : "active"}
-          onValueChange={(v) =>
-            form.setValue("isActive", v === "active", { shouldValidate: true })
-          }
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {mutation.error && (
-        <ErrorAlert
-          error={mutation.error}
-          fallback={`Failed to ${isEdit ? "update" : "create"} template`}
-        />
+      {canManage && (
+        <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
+          <Switch
+            id="tmpl-active"
+            checked={form.watch("isActive") ?? true}
+            onCheckedChange={(v) => form.setValue("isActive", v)}
+          />
+          <Label htmlFor="tmpl-active" className="cursor-pointer text-sm">Active — available for use</Label>
+        </div>
       )}
 
-      <div className="flex justify-end">
-        <Button type="submit" disabled={mutation.isPending}>
-          {isEdit
-            ? mutation.isPending ? "Saving..." : "Save Changes"
-            : mutation.isPending ? "Creating..." : "Create Template"}
+      {mutation.error && <ErrorAlert error={mutation.error} fallback={`Failed to ${isEdit ? "update" : "create"} template`} />}
+
+      <div className="flex justify-end gap-2">
+        <Button type="submit" disabled={mutation.isPending} className="gap-2">
+          {mutation.isPending ? (
+            <><span className="h-3.5 w-3.5 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground animate-spin" />{isEdit ? "Saving…" : "Creating…"}</>
+          ) : (
+            isEdit ? "Save Changes" : "Create Template"
+          )}
         </Button>
       </div>
     </form>
   );
 }
 
-// ─── TemplateTabContent ────────────────────────────────────────────────────────
+// ── Template card ─────────────────────────────────────────────────────────────
 
-interface TemplateTabContentProps {
-  type: TemplateType;
-  templates: Template[] | undefined;
-  isLoading: boolean;
-  onEdit: (t: Template) => void;
-  onDelete: (t: Template) => void;
+function TemplateCard({
+  template,
+  canManage,
+  onEdit,
+  onDuplicate,
+  onDelete,
+}: {
+  template: Template;
+  canManage: boolean;
+  onEdit: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  function copyBody() {
+    void navigator.clipboard.writeText(template.body).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  const preview = template.body.slice(0, 160);
+  const hasMore = template.body.length > 160;
+
+  return (
+    <div
+      className={`group rounded-xl border bg-card shadow-sm overflow-hidden transition-all duration-150 hover:shadow-md ${
+        !template.isActive ? "opacity-60" : ""
+      }`}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 px-4 pt-4 pb-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold shrink-0 ${TYPE_COLORS[template.type]}`}>
+            {TAB_ICONS[template.type]}
+            {templateTypeLabel[template.type]}
+          </div>
+          {!template.isActive && (
+            <span className="text-[10px] font-medium text-muted-foreground border rounded-full px-2 py-0.5">
+              Inactive
+            </span>
+          )}
+        </div>
+        {/* Action buttons — fade in on hover */}
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            title={copied ? "Copied!" : "Copy body to clipboard"}
+            onClick={copyBody}
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            title="Duplicate"
+            onClick={onDuplicate}
+          >
+            <FileText className="h-3.5 w-3.5" />
+          </Button>
+          {canManage && (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                title="Edit"
+                onClick={onEdit}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                title="Delete"
+                onClick={onDelete}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Title */}
+      <div className="px-4 pb-2">
+        <p className="font-semibold text-sm leading-snug">{template.title}</p>
+      </div>
+
+      {/* Body preview */}
+      <div className="px-4 pb-3">
+        <p className="text-sm text-muted-foreground font-mono leading-relaxed whitespace-pre-wrap break-words">
+          {expanded ? template.body : preview}
+          {!expanded && hasMore && "…"}
+        </p>
+        {hasMore && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {expanded ? "Collapse" : "Show more"}
+          </button>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-t border-border/50 bg-muted/20 text-[11px] text-muted-foreground">
+        <span>by {template.createdBy.name}</span>
+        <span>{formatDate(template.updatedAt)}</span>
+      </div>
+    </div>
+  );
 }
+
+// ── Tab content ───────────────────────────────────────────────────────────────
 
 function TemplateTabContent({
   type,
   templates,
   isLoading,
+  search,
+  canManage,
   onEdit,
+  onDuplicate,
   onDelete,
-}: TemplateTabContentProps) {
-  const filtered = (templates ?? []).filter((t) => t.type === type);
+  onNew,
+}: {
+  type: TemplateType;
+  templates: Template[] | undefined;
+  isLoading: boolean;
+  search: string;
+  canManage: boolean;
+  onEdit: (t: Template) => void;
+  onDuplicate: (t: Template) => void;
+  onDelete: (t: Template) => void;
+  onNew: () => void;
+}) {
+  const q = search.toLowerCase();
+  const filtered = (templates ?? [])
+    .filter((t) => t.type === type)
+    .filter((t) => !q || t.title.toLowerCase().includes(q) || t.body.toLowerCase().includes(q));
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="rounded-xl border bg-card p-4 space-y-3">
+            <Skeleton className="h-5 w-24 rounded-full" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (filtered.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="h-14 w-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
+          {TAB_ICONS[type]}
+        </div>
+        <p className="font-semibold text-foreground">
+          {search ? "No matching templates" : `No ${templateTypeLabel[type].toLowerCase()} templates yet`}
+        </p>
+        <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+          {search
+            ? "Try a different search term."
+            : `Create your first ${templateTypeLabel[type].toLowerCase()} template to reuse across your team.`}
+        </p>
+        {!search && (
+          <Button className="mt-4 gap-2" onClick={onNew}>
+            <Plus className="h-4 w-4" />
+            New Template
+          </Button>
+        )}
+      </div>
+    );
+  }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Title</TableHead>
-          <TableHead>Preview</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Created by</TableHead>
-          <TableHead />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {isLoading
-          ? Array.from({ length: 3 }).map((_, i) => (
-              <TableRow key={i}>
-                {Array.from({ length: 5 }).map((__, j) => (
-                  <TableCell key={j}>
-                    <Skeleton className="h-4 w-24" />
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))
-          : filtered.map((tmpl) => (
-              <TableRow key={tmpl.id} className={!tmpl.isActive ? "opacity-50" : ""}>
-                <TableCell className="font-medium">{tmpl.title}</TableCell>
-                <TableCell className="max-w-[300px]">
-                  <p className="text-sm text-muted-foreground truncate">{tmpl.body}</p>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={tmpl.isActive ? "default" : "outline"}>
-                    {tmpl.isActive ? "Active" : "Inactive"}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {tmpl.createdBy.name}
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-1 justify-end">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => onEdit(tmpl)}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => onDelete(tmpl)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-
-        {!isLoading && filtered.length === 0 && (
-          <TableRow>
-            <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
-              <FileText className="h-8 w-8 mx-auto mb-3 opacity-30" />
-              <p className="text-sm">
-                No {templateTypeLabel[type].toLowerCase()} templates yet. Create the first one.
-              </p>
-            </TableCell>
-          </TableRow>
-        )}
-      </TableBody>
-    </Table>
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      {filtered.map((t) => (
+        <TemplateCard
+          key={t.id}
+          template={t}
+          canManage={canManage}
+          onEdit={() => onEdit(t)}
+          onDuplicate={() => onDuplicate(t)}
+          onDelete={() => onDelete(t)}
+        />
+      ))}
+    </div>
   );
 }
 
-// ─── TemplatesPage ─────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 type DialogState =
   | { mode: "create"; type: TemplateType }
@@ -387,7 +474,11 @@ type DialogState =
   | null;
 
 export default function TemplatesPage() {
+  const { data: session } = useSession();
+  const canManage = session?.user?.role === "admin" || session?.user?.role === "supervisor";
+
   const [activeTab, setActiveTab] = useState<TemplateType>("ticket");
+  const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState<DialogState>(null);
   const [deleting, setDeleting] = useState<Template | null>(null);
   const queryClient = useQueryClient();
@@ -402,50 +493,78 @@ export default function TemplatesPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => axios.delete(`/api/templates/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["templates"] });
-      setDeleting(null);
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["templates"] }); setDeleting(null); },
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: async (t: Template) => {
+      const { data } = await axios.post("/api/templates", {
+        title: `Copy of ${t.title}`,
+        body: t.body,
+        bodyHtml: t.bodyHtml,
+        type: t.type,
+        isActive: t.isActive,
+      });
+      return data;
     },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["templates"] }),
   });
 
   const close = () => setDialog(null);
 
   const dialogType =
-    dialog?.mode === "create"
-      ? dialog.type
-      : dialog?.mode === "edit"
-      ? dialog.template.type
-      : activeTab;
+    dialog?.mode === "create" ? dialog.type :
+    dialog?.mode === "edit" ? dialog.template.type :
+    activeTab;
+
+  const totalByType = (type: TemplateType) =>
+    (data ?? []).filter((t) => t.type === type).length;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="space-y-6">
+      {/* ── Page header ── */}
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Templates</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Reusable content templates for tickets, requests, changes, problems, articles, emails, and macros.
+            Reusable content for tickets, requests, changes, problems, articles, emails, and macros.
+            Agents can save templates directly from any entity's detail page.
           </p>
         </div>
-        <Button onClick={() => setDialog({ mode: "create", type: activeTab })}>
-          <Plus className="mr-2 h-4 w-4" />
+        <Button onClick={() => setDialog({ mode: "create", type: activeTab })} className="gap-2 shrink-0">
+          <Plus className="h-4 w-4" />
           New Template
         </Button>
       </div>
 
       {error && <ErrorAlert message="Failed to load templates" />}
 
-      <Tabs
-        value={activeTab}
-        onValueChange={(v) => setActiveTab(v as TemplateType)}
-      >
-        <TabsList className="mb-4">
+      {/* ── Search ── */}
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        <Input
+          type="text"
+          placeholder="Search templates…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9"
+        />
+      </div>
+
+      {/* ── Tabs ── */}
+      <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v as TemplateType); setSearch(""); }}>
+        <TabsList className="mb-6 h-auto flex-wrap gap-1 bg-transparent p-0">
           {templateTypes.map((t) => (
-            <TabsTrigger key={t} value={t} className="flex items-center gap-1.5">
+            <TabsTrigger
+              key={t}
+              value={t}
+              className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-card shadow-sm data-[state=active]:border-primary/40 data-[state=active]:bg-primary/5 data-[state=active]:text-primary data-[state=active]:shadow-none px-3 py-1.5 text-sm"
+            >
               {TAB_ICONS[t]}
               {templateTypeLabel[t]}
               {!isLoading && data && (
-                <span className="ml-1 text-[10px] text-muted-foreground tabular-nums">
-                  ({(data ?? []).filter((tmpl) => tmpl.type === t).length})
+                <span className="ml-0.5 text-[10px] tabular-nums text-muted-foreground">
+                  ({totalByType(t)})
                 </span>
               )}
             </TabsTrigger>
@@ -453,25 +572,29 @@ export default function TemplatesPage() {
         </TabsList>
 
         {templateTypes.map((t) => (
-          <TabsContent key={t} value={t}>
+          <TabsContent key={t} value={t} className="mt-0">
             <TemplateTabContent
               type={t}
               templates={data}
               isLoading={isLoading}
+              search={search}
+              canManage={canManage}
               onEdit={(tmpl) => setDialog({ mode: "edit", template: tmpl })}
+              onDuplicate={(tmpl) => duplicateMutation.mutate(tmpl)}
               onDelete={(tmpl) => setDeleting(tmpl)}
+              onNew={() => setDialog({ mode: "create", type: t })}
             />
           </TabsContent>
         ))}
       </Tabs>
 
-      {/* Create / Edit dialog */}
+      {/* ── Create / Edit dialog ── */}
       <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open) close(); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {dialog?.mode === "edit"
-                ? `Edit ${templateTypeLabel[dialog.template.type]} Template`
+                ? `Edit — ${dialog.template.title}`
                 : `New ${templateTypeLabel[dialogType]} Template`}
             </DialogTitle>
           </DialogHeader>
@@ -479,23 +602,19 @@ export default function TemplatesPage() {
             key={dialog?.mode === "edit" ? dialog.template.id : `create-${activeTab}`}
             template={dialog?.mode === "edit" ? dialog.template : undefined}
             defaultType={dialogType}
+            canManage={canManage}
             onSuccess={close}
           />
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirm */}
-      <AlertDialog
-        open={deleting !== null}
-        onOpenChange={(open) => {
-          if (!open) { setDeleting(null); deleteMutation.reset(); }
-        }}
-      >
+      {/* ── Delete confirm ── */}
+      <AlertDialog open={deleting !== null} onOpenChange={(open) => { if (!open) { setDeleting(null); deleteMutation.reset(); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete template?</AlertDialogTitle>
             <AlertDialogDescription>
-              <strong>{deleting?.title}</strong> will be permanently deleted. This cannot be undone.
+              <strong>{deleting?.title}</strong> will be permanently deleted. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteMutation.isError && <ErrorAlert message="Failed to delete template" />}

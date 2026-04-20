@@ -95,6 +95,15 @@ export interface Ticket {
     createdAt: string;
     updatedAt: string;
   } | null;
+  /** Number of agents following this ticket — present in GET /api/tickets/:id responses */
+  followerCount?: number;
+  // Merge — set when this ticket has been merged into another
+  mergedIntoId?: number | null;
+  mergedAt?: string | null;
+  mergedInto?: { id: number; ticketNumber: string; subject: string } | null;
+  /** Child tickets that were merged into this one — present in GET /api/tickets/:id */
+  mergedTickets?: Array<{ id: number; ticketNumber: string; subject: string; mergedAt: string }>;
+
   /** Linked ServiceRequest — present only in GET /api/tickets/:id responses when ticketType is "service_request" */
   linkedServiceRequest?: {
     id: number;

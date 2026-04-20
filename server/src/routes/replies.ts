@@ -85,9 +85,19 @@ router.post("/", requireAuth, async (req, res) => {
     }
   }
 
+  const { cc, bcc, replyType = "reply_all", forwardTo, quotedBody, quotedHtml } = data;
+
+  if (replyType === "forward" && !forwardTo) {
+    res.status(400).json({ error: "forwardTo is required for forward replies" });
+    return;
+  }
+
   // If HTML body provided, derive plain-text for storage + email fallback
   const plainBody = data.bodyHtml ? htmlToText(data.bodyHtml) : data.body;
   const htmlBody = data.bodyHtml ?? null;
+
+  const ccStr  = cc?.join(", ")  || null;
+  const bccStr = bcc?.join(", ") || null;
 
   const reply = await prisma.reply.create({
     data: {
@@ -96,9 +106,14 @@ router.post("/", requireAuth, async (req, res) => {
       senderType: "agent",
       ticketId,
       userId: req.user.id,
-      // Agent replies go out via email (the platform's primary outbound channel)
       channel: "email",
-      channelMeta: { agentId: req.user.id, via: "agent_reply" },
+      channelMeta: { agentId: req.user.id, via: replyType === "forward" ? "agent_forward" : "agent_reply" },
+      replyType,
+      cc: ccStr,
+      bcc: bccStr,
+      forwardTo: replyType === "forward" ? forwardTo ?? null : null,
+      quotedBody: quotedBody ?? null,
+      quotedHtml: quotedHtml ?? null,
     },
     include: {
       user: { select: { id: true, name: true } },
@@ -157,13 +172,39 @@ router.post("/", requireAuth, async (req, res) => {
     ? allPriorIds.map((id) => `<${id}>`).join(" ")
     : undefined;
 
+  const emailTo = replyType === "forward" ? forwardTo! : ticket.senderEmail;
+  const emailSubject = replyType === "forward"
+    ? `Fwd: ${ticket.subject}`
+    : `Re: ${ticket.subject}`;
+  // Reply to sender only: strip CC; forward: include any cc the agent added
+  const emailCc = replyType === "reply_sender" ? undefined : (cc?.length ? cc : undefined);
+
+  // Append quoted content as an email-standard blockquote so recipients see the trail
+  let emailBodyHtml = htmlBody;
+  let emailBodyText = plainBody;
+  if (quotedHtml) {
+    const quoteHeader = replyType === "forward"
+      ? `<p style="color:#666;font-size:0.85em;margin:8px 0 4px">---------- Forwarded message ----------</p>`
+      : `<p style="color:#666;font-size:0.85em;margin:8px 0 4px">On ${new Date(reply.createdAt).toUTCString()}, ${ticket.senderName} wrote:</p>`;
+    emailBodyHtml = (htmlBody ?? `<p>${plainBody}</p>`) +
+      `<blockquote style="margin:0 0 0 .8ex;border-left:2px solid #ccc;padding-left:1ex;color:#555;">${quoteHeader}${quotedHtml}</blockquote>`;
+  }
+  if (quotedBody) {
+    const quoteHeader = replyType === "forward"
+      ? `\n\n---------- Forwarded message ----------\n`
+      : `\n\nOn ${new Date(reply.createdAt).toUTCString()}, ${ticket.senderName} wrote:\n`;
+    emailBodyText = plainBody + quoteHeader + quotedBody.split("\n").map(l => `> ${l}`).join("\n");
+  }
+
   await sendEmailJob({
-    to: ticket.senderEmail,
-    subject: `Re: ${ticket.subject}`,
-    body: plainBody,
-    ...(htmlBody && { bodyHtml: htmlBody }),
-    ...(inReplyTo && { inReplyTo }),
-    ...(references && { references }),
+    to: emailTo,
+    subject: emailSubject,
+    body: emailBodyText,
+    ...(emailCc && { cc: emailCc }),
+    ...(bcc?.length && { bcc }),
+    ...(emailBodyHtml && { bodyHtml: emailBodyHtml }),
+    ...(replyType !== "forward" && inReplyTo && { inReplyTo }),
+    ...(replyType !== "forward" && references && { references }),
     ...(data.attachmentIds?.length && { attachmentIds: data.attachmentIds }),
   });
 

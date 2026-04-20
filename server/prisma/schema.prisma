@@ -139,6 +139,7 @@ model User {
   incidentsAssigned     Incident[]          @relation("IncidentAssignee")
   incidentsCreated      Incident[]          @relation("IncidentCreatedBy")
   incidentUpdates       IncidentUpdate[]    @relation("IncidentUpdateAuthor")
+  incidentAttachments   IncidentAttachment[] @relation("IncidentAttachmentUploader")
   incidentEvents        IncidentEvent[]     @relation("IncidentEventActor")
   // Approval engine relations
   approvalRequestsMade  ApprovalRequest[]   @relation("ApprovalRequestedBy")
@@ -188,6 +189,13 @@ model User {
   ticketTypesCreated       TicketTypeConfig[]
   ticketStatusesCreated    TicketStatusConfig[]
   escalationRulesCreated   EscalationRule[]
+  ticketFollows            TicketFollower[]
+  entityFollows            EntityFollower[]
+  // Analytics relations
+  savedReports             SavedReport[]    @relation("SavedReportOwner")
+  reportSchedules          ReportSchedule[] @relation("ReportScheduleCreatedBy")
+  reportSharesGiven        ReportShare[]    @relation("ReportSharedBy")
+  reportSharesReceived     ReportShare[]    @relation("ReportSharedTo")
 
   @@map("user")
 }
@@ -409,6 +417,13 @@ model Ticket {
   linkedServiceRequest   ServiceRequest? @relation("TicketLinkedServiceRequest", fields: [linkedServiceRequestId], references: [id])
   scenarioExecutions     ScenarioExecution[]
   problemLinks           ProblemTicketLink[]
+  followers              TicketFollower[]
+  // Merge — when a ticket is merged into another, mergedIntoId is set and the
+  // ticket is closed. The parent sees its child tickets via mergedTickets.
+  mergedIntoId           Int?                @map("merged_into_id")
+  mergedInto             Ticket?             @relation("MergedTickets", fields: [mergedIntoId], references: [id])
+  mergedTickets          Ticket[]            @relation("MergedTickets")
+  mergedAt               DateTime?           @map("merged_at")
   customFields           Json                @default("{}")
   customStatusId         Int?
   customStatus           TicketStatusConfig? @relation(fields: [customStatusId], references: [id], onDelete: SetNull)
@@ -422,6 +437,30 @@ model Ticket {
   @@map("ticket")
 }
 
+// ── ITSM module following ─────────────────────────────────────────────────────
+
+enum EntityFollowerType {
+  incident
+  change
+  service_request
+  problem
+}
+
+/// Polymorphic follower record — one row per (entityType, entityId, userId).
+/// Agents who follow an ITSM record receive in-app notifications on status changes.
+model EntityFollower {
+  entityType  EntityFollowerType @map("entity_type")
+  entityId    Int                @map("entity_id")
+  userId      String             @map("user_id")
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime           @default(now())
+
+  @@id([entityType, entityId, userId])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@map("entity_follower")
+}
+
 model EscalationEvent {
   id        Int              @id @default(autoincrement())
   ticketId  Int
@@ -430,6 +469,20 @@ model EscalationEvent {
   createdAt DateTime         @default(now())
 
   @@map("escalation_event")
+}
+
+/// Agent subscription to a ticket — followed agents receive in-app notifications
+/// whenever the ticket status changes.
+model TicketFollower {
+  ticketId  Int      @map("ticket_id")
+  userId    String   @map("user_id")
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([ticketId, userId])
+  @@index([userId])
+  @@map("ticket_follower")
 }
 
 model Reply {
@@ -451,6 +504,13 @@ model Reply {
   // channelMeta: channel-specific structured data (e.g. WhatsApp waId, email Message-ID chain).
   // Kept as untyped JSON so channel adapters can store what they need without migrations.
   channelMeta    Json?        @map("channel_meta")
+  // ── Reply addressing ─────────────────────────────────────────────────────
+  replyType      String?      // "reply_all" | "reply_sender" | "forward"
+  cc             String?      // comma-separated CC addresses
+  bcc            String?      // comma-separated BCC addresses
+  forwardTo      String?      // recipient address for forwarded messages
+  quotedBody     String?      // plain-text snapshot of the message being replied to / forwarded
+  quotedHtml     String?      // HTML snapshot of the message being replied to / forwarded
   // ────────────────────────────────────────────────────────────────────────
   createdAt      DateTime     @default(now())
   attachments    Attachment[]
@@ -894,6 +954,23 @@ model KbArticleFeedback {
   @@map("kb_article_feedback")
 }
 
+/**
+ * KbSearchLog — records every KB search query with result count.
+ * Used to identify popular searches, zero-result queries, and content gaps.
+ */
+model KbSearchLog {
+  id           Int      @id @default(autoincrement())
+  query        String
+  resultCount  Int      @default(0)
+  sessionId    String?  @map("session_id")
+  userId       String?  @map("user_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([query])
+  @@index([createdAt])
+  @@map("kb_search_log")
+}
+
 model Verification {
   id         String    @id
   identifier String
@@ -931,6 +1008,7 @@ model Team {
   changesCoordinated Change[]        @relation("ChangeCoordinatorGroup")
   teamDashboards     DashboardConfig[]    @relation("DashboardVisibilityTeam")
   scenarioVisibility ScenarioDefinition[] @relation("ScenarioVisibilityTeam")
+  savedReports       SavedReport[]        @relation("SavedReportTeam")
 
   @@map("queue")
 }
@@ -1132,7 +1210,16 @@ model Incident {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  // ── Video bridge call ─────────────────────────────────────────────────────
+  /// Join URL for the active bridge call (e.g. Zoom join_url, Teams joinWebUrl).
+  bridgeCallUrl       String?   @map("bridge_call_url")
+  /// Which provider created the bridge (teams | googlemeet | zoom | webex).
+  bridgeCallProvider  String?   @map("bridge_call_provider")
+  /// When the bridge was created — shown in the UI for context.
+  bridgeCallCreatedAt DateTime? @map("bridge_call_created_at")
+
   updates          IncidentUpdate[]
+  attachments      IncidentAttachment[]
   events           IncidentEvent[]
   problemLinks     ProblemIncidentLink[]
   ciLinks          IncidentCiLink[]
@@ -1163,10 +1250,42 @@ model IncidentUpdate {
   bodyHtml   String?            @map("body_html")
   authorId   String?            @map("author_id")
   author     User?              @relation("IncidentUpdateAuthor", fields: [authorId], references: [id])
+  attachments IncidentAttachment[]
   createdAt  DateTime           @default(now())
 
   @@index([incidentId, createdAt])
   @@map("incident_update")
+}
+
+/**
+ * IncidentAttachment — file attached to an incident update (progress photo,
+ * screenshot, runbook, etc.). Staged on upload then linked to the update.
+ */
+model IncidentAttachment {
+  id              Int             @id @default(autoincrement())
+  filename        String
+  mimeType        String          @map("mime_type")
+  size            Int
+  storageKey      String          @unique @map("storage_key")
+  storageProvider String          @default("local") @map("storage_provider")
+  checksum        String?
+  virusScanStatus VirusScanStatus @default(skipped) @map("virus_scan_status")
+
+  incidentId      Int             @map("incident_id")
+  incident        Incident        @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  // Null while staged (not yet submitted); set when the update is created.
+  updateId        Int?            @map("update_id")
+  update          IncidentUpdate? @relation(fields: [updateId], references: [id], onDelete: SetNull)
+
+  uploadedById    String?         @map("uploaded_by_id")
+  uploadedBy      User?           @relation("IncidentAttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime        @default(now())
+
+  @@index([incidentId])
+  @@index([updateId])
+  @@map("incident_attachment")
 }
 
 /**
@@ -2746,4 +2865,91 @@ model NotificationRule {
 
   @@index([event, isActive])
   @@map("notification_rule")
+}
+
+// ── Analytics — Saved Reports, Schedules, Shares ──────────────────────────────
+
+/**
+ * SavedReport — a named analytics report configuration.
+ *
+ * visibility:
+ *   private — only the owner can see it
+ *   team    — all members of visibilityTeam can see it
+ *   org     — all authenticated agents can see it
+ *
+ * isCurated — system-created template reports; only admins can delete these.
+ * config    — JSON blob matching SavedReportConfig in core/schemas/analytics.ts
+ */
+model SavedReport {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  ownerId     String   @map("owner_id")
+  owner       User     @relation("SavedReportOwner", fields: [ownerId], references: [id])
+  config      Json
+  visibility  String   @default("private") @map("visibility")
+  teamId      Int?     @map("team_id")
+  team        Team?    @relation("SavedReportTeam", fields: [teamId], references: [id], onDelete: SetNull)
+  isCurated   Boolean  @default(false) @map("is_curated")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  schedules   ReportSchedule[]
+  shares      ReportShare[]
+
+  @@index([ownerId])
+  @@index([visibility])
+  @@map("saved_report")
+}
+
+/**
+ * ReportSchedule — periodic delivery of a saved report via email.
+ *
+ * cronExpr: standard 5-field cron expression (UTC unless timezone set).
+ * format:   "csv" | "xlsx"
+ * recipients: list of email addresses to deliver to.
+ */
+model ReportSchedule {
+  id           Int         @id @default(autoincrement())
+  reportId     Int         @map("report_id")
+  report       SavedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  name         String?
+  cronExpr     String      @map("cron_expr")
+  timezone     String      @default("UTC")
+  format       String      @default("csv")
+  recipients   String[]
+  isActive     Boolean     @default(true) @map("is_active")
+  lastRunAt    DateTime?   @map("last_run_at")
+  nextRunAt    DateTime?   @map("next_run_at")
+  createdById  String      @map("created_by_id")
+  createdBy    User        @relation("ReportScheduleCreatedBy", fields: [createdById], references: [id])
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  @@index([reportId])
+  @@index([isActive, nextRunAt])
+  @@map("report_schedule")
+}
+
+/**
+ * ReportShare — grants a specific user or team access to a report.
+ *
+ * sharedToId and teamId are mutually exclusive; exactly one should be set.
+ * canEdit allows the recipient to modify the report config.
+ */
+model ReportShare {
+  id          Int         @id @default(autoincrement())
+  reportId    Int         @map("report_id")
+  report      SavedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  sharedById  String      @map("shared_by_id")
+  sharedBy    User        @relation("ReportSharedBy", fields: [sharedById], references: [id])
+  sharedToId  String?     @map("shared_to_id")
+  sharedTo    User?       @relation("ReportSharedTo", fields: [sharedToId], references: [id])
+  teamId      Int?        @map("team_id")
+  canEdit     Boolean     @default(false) @map("can_edit")
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  @@index([reportId])
+  @@index([sharedToId])
+  @@map("report_share")
 }

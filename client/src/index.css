@@ -76,14 +76,15 @@
   --chart-3: oklch(0.696 0.17 162.48);
   --chart-4: oklch(0.78 0.17 75);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.985 0.003 270);
-  --sidebar-foreground: oklch(0.13 0.012 270);
+  --sidebar: oklch(0.972 0.007 287);
+  --sidebar-foreground: oklch(0.24 0.022 270);
   --sidebar-primary: oklch(0.527 0.280 287);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.965 0.006 270);
+  --sidebar-accent: oklch(0.935 0.015 287);
   --sidebar-accent-foreground: oklch(0.18 0.012 270);
-  --sidebar-border: oklch(0.92 0.003 270);
+  --sidebar-border: oklch(0.898 0.010 287);
   --sidebar-ring: oklch(0.527 0.280 287);
+  --sidebar-glow: transparent;
   --success: oklch(0.55 0.18 145);
   --success-foreground: oklch(1 0 0);
   --warning: oklch(0.78 0.17 75);
@@ -114,14 +115,15 @@
   --chart-3: oklch(0.696 0.17 162.48);
   --chart-4: oklch(0.78 0.17 75);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.15 0.01 270);
-  --sidebar-foreground: oklch(0.93 0.003 270);
-  --sidebar-primary: oklch(0.60 0.27 287);
-  --sidebar-primary-foreground: oklch(0.93 0.003 270);
-  --sidebar-accent: oklch(0.21 0.01 270);
-  --sidebar-accent-foreground: oklch(0.93 0.003 270);
-  --sidebar-border: oklch(0.25 0.01 270);
-  --sidebar-ring: oklch(0.60 0.27 287);
+  --sidebar: oklch(0.093 0.022 277);
+  --sidebar-foreground: oklch(0.86 0.007 268);
+  --sidebar-primary: oklch(0.655 0.265 287);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.158 0.025 278);
+  --sidebar-accent-foreground: oklch(0.94 0.004 268);
+  --sidebar-border: oklch(0.198 0.022 277);
+  --sidebar-ring: oklch(0.655 0.265 287);
+  --sidebar-glow: oklch(0.655 0.265 287 / 0.32);
   --success: oklch(0.65 0.18 145);
   --success-foreground: oklch(1 0 0);
   --warning: oklch(0.82 0.17 75);
@@ -130,6 +132,37 @@
 
 @utility link {
   @apply text-foreground hover:underline;
+}
+
+/* Sidebar themed background */
+@utility sidebar-surface {
+  background-color: var(--sidebar);
+}
+
+.dark .sidebar-surface {
+  /* Layered radial + linear: violet top glow over deep navy base */
+  background:
+    radial-gradient(ellipse 180% 30% at 50% -2%, oklch(0.22 0.065 283) 0%, transparent 70%),
+    radial-gradient(ellipse 80% 25% at 0% 100%, oklch(0.16 0.04 270) 0%, transparent 60%),
+    linear-gradient(180deg, oklch(0.092 0.023 277) 0%, oklch(0.100 0.020 275) 100%);
+}
+
+@utility sidebar-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sidebar-border) transparent;
+}
+
+/* Active nav item: glowing left bar in dark mode */
+@utility sidebar-active-bar {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  border-radius: 0 9999px 9999px 0;
+  background-color: var(--sidebar-primary);
+  box-shadow: 0 0 10px var(--sidebar-glow);
 }
 
 @layer base {
@@ -163,4 +196,93 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ── react-grid-layout overrides ─────────────────────────────────────────── */
+
+/* Drag placeholder */
+.react-grid-placeholder {
+  background: hsl(var(--primary) / 0.08) !important;
+  border: 1.5px dashed hsl(var(--primary) / 0.4) !important;
+  border-radius: 0.5rem !important;
+  opacity: 1 !important;
+}
+
+/* Resize handle — bottom-right corner triangle */
+.react-resizable-handle {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.react-resizable-handle::after {
+  border-color: hsl(var(--muted-foreground) / 0.5) !important;
+  width: 8px !important;
+  height: 8px !important;
+  right: 4px !important;
+  bottom: 4px !important;
+}
+
+/* Show handle on widget hover */
+.react-grid-item:hover .react-resizable-handle {
+  opacity: 1;
+}
+
+/* Smooth transitions when not dragging */
+.react-grid-item {
+  transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+}
+.react-grid-item.react-grid-placeholder {
+  transition: none !important;
+}
+
+/* Dragging state — lift widget */
+.react-grid-item.react-draggable-dragging {
+  z-index: 40 !important;
+  box-shadow: 0 20px 40px -8px hsl(var(--foreground) / 0.12) !important;
+  transition: none !important;
+}
+
+/* Remove default border on RGL item */
+.react-grid-item > .react-resizable-handle {
+  z-index: 5;
+}
+
+/* ── Reports section ─────────────────────────────────────────────────────── */
+
+/* Hide scrollbar on report nav tabs while still scrollable */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Recharts grid lines use the shadcn border token */
+.recharts-cartesian-grid line {
+  stroke: hsl(var(--border));
+  stroke-opacity: 0.5;
+}
+
+/* Recharts tooltip panel */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  border-radius: 8px !important;
+  border: 1px solid hsl(var(--border)) !important;
+  background: hsl(var(--popover)) !important;
+  color: hsl(var(--popover-foreground)) !important;
+  font-size: 12px !important;
+  box-shadow: 0 4px 16px -4px rgb(0 0 0 / 0.15) !important;
+}
+.recharts-default-tooltip .recharts-tooltip-label {
+  color: hsl(var(--muted-foreground)) !important;
+  font-weight: 500 !important;
+  margin-bottom: 4px !important;
+}
+.recharts-default-tooltip .recharts-tooltip-item {
+  color: hsl(var(--foreground)) !important;
+}
+
+/* Smooth KPI card entrance */
+@keyframes kpi-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }

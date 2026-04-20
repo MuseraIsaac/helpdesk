@@ -61,12 +61,34 @@ import CustomersPage from "./pages/CustomersPage";
 import CustomerDetailPage from "./pages/CustomerDetailPage";
 import OrganizationsPage from "./pages/OrganizationsPage";
 import OrganizationDetailPage from "./pages/OrganizationDetailPage";
+import PermissionRoute from "./components/PermissionRoute";
+import ReportsLayout from "./pages/reports/ReportsLayout";
+import OverviewReport from "./pages/reports/OverviewReport";
+import TicketsReport from "./pages/reports/TicketsReport";
+import SlaReport from "./pages/reports/SlaReport";
+import IncidentsReport from "./pages/reports/IncidentsReport";
+import CsatReport from "./pages/reports/CsatReport";
+import AgentReport from "./pages/reports/AgentReport";
+import TeamReport from "./pages/reports/TeamReport";
+import KbReport from "./pages/reports/KbReport";
+import RealtimeReport from "./pages/reports/RealtimeReport";
+import CustomReportPage from "./pages/reports/CustomReportPage";
+import ReportLibraryPage from "./pages/reports/ReportLibraryPage";
+import RequestsReport    from "./pages/reports/RequestsReport";
+import ProblemsReport    from "./pages/reports/ProblemsReport";
+import ApprovalsReport   from "./pages/reports/ApprovalsReport";
+import ChangesReport     from "./pages/reports/ChangesReport";
 
-/** Applies the uploaded logo as the browser favicon whenever branding changes. */
+/**
+ * Injects the browser favicon from branding settings.
+ * Prefers the dedicated faviconDataUrl; falls back to logoDataUrl when no
+ * separate favicon has been uploaded.
+ */
 function FaviconEffect() {
   const { data: branding } = useBranding();
   useEffect(() => {
-    const dataUrl = branding?.logoDataUrl;
+    // Prefer dedicated favicon; fall back to logo
+    const dataUrl = branding?.faviconDataUrl || branding?.logoDataUrl;
     if (!dataUrl) return;
     let link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
     if (!link) {
@@ -76,7 +98,7 @@ function FaviconEffect() {
     }
     link.type = dataUrl.startsWith("data:image/svg") ? "image/svg+xml" : "image/png";
     link.href = dataUrl;
-  }, [branding?.logoDataUrl]);
+  }, [branding?.faviconDataUrl, branding?.logoDataUrl]);
   return null;
 }
 
@@ -132,13 +154,38 @@ function App() {
             <Route path="/admin/ticket-types" element={<TicketTypesPage />} />
             <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
             <Route path="/automations" element={<ScenariosPage />} />
-            <Route path="/reports" element={<PlaceholderPage title="Reports" description="Advanced reporting and analytics is coming soon." />} />
             <Route path="/catalog/admin" element={<CatalogAdminPage />} />
           </Route>
           <Route element={<SupervisorRoute />}>
             <Route path="/kb" element={<KbPage />} />
             <Route path="/kb/articles/new" element={<KbArticleFormPage />} />
             <Route path="/kb/articles/:id/edit" element={<KbArticleFormPage />} />
+          </Route>
+
+          {/* ── Standard reports with shared layout ───────────────────── */}
+          <Route element={<PermissionRoute permission="reports.view" />}>
+            <Route path="/reports" element={<ReportsLayout />}>
+              <Route index element={<Navigate to="overview" replace />} />
+              <Route path="overview"  element={<OverviewReport />} />
+              <Route path="tickets"   element={<TicketsReport />} />
+              <Route path="sla"       element={<SlaReport />} />
+              <Route path="agents"    element={<AgentReport />} />
+              <Route path="teams"     element={<TeamReport />} />
+              <Route path="incidents" element={<IncidentsReport />} />
+              <Route path="csat"      element={<CsatReport />} />
+              <Route path="kb"        element={<KbReport />} />
+              <Route path="realtime"   element={<RealtimeReport />} />
+              <Route path="requests"  element={<RequestsReport />} />
+              <Route path="problems"  element={<ProblemsReport />} />
+              <Route path="approvals" element={<ApprovalsReport />} />
+              <Route path="changes"   element={<ChangesReport />} />
+              <Route path="library"   element={<ReportLibraryPage />} />
+            </Route>
+          </Route>
+          {/* ── Custom report builder (no shared layout, own permission guard) */}
+          <Route element={<PermissionRoute permission="reports.view" />}>
+            <Route path="/reports/custom"     element={<CustomReportPage />} />
+            <Route path="/reports/custom/:id" element={<CustomReportPage />} />
           </Route>
         </Route>
       </Route>

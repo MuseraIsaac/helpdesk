@@ -431,6 +431,13 @@ router.get("/:id", requireAuth, async (req, res) => {
           updatedAt: true,
         },
       },
+      mergedInto: {
+        select: { id: true, ticketNumber: true, subject: true },
+      },
+      mergedTickets: {
+        select: { id: true, ticketNumber: true, subject: true, mergedAt: true },
+        orderBy: { mergedAt: "asc" as const },
+      },
     },
   });
 
@@ -477,6 +484,7 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
     where: { id },
     select: {
       id: true,
+      ticketNumber: true,
       subject: true,
       body: true,
       status: true,
@@ -637,6 +645,31 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
         to: data.status,
       })
     );
+
+    // Notify followers of the status change (fire-and-forget)
+    void (async () => {
+      const settings = await getSection("notifications");
+      if (settings?.notifyOnFollowedTicketStatusChanged === false) return;
+
+      const followers = await prisma.ticketFollower.findMany({
+        where: { ticketId: id },
+        select: { userId: true },
+      });
+      const recipientIds = followers.map((f) => f.userId).filter((uid) => uid !== req.user.id);
+      if (recipientIds.length === 0) return;
+
+      const fromLabel = ticket.status.replace(/_/g, " ");
+      const toLabel = (data.status as string).replace(/_/g, " ");
+      await notify({
+        event: "ticket.followed_status_changed",
+        recipientIds,
+        title: `${ticket.ticketNumber} status changed`,
+        body: `${fromLabel} → ${toLabel}: ${ticket.subject}`,
+        entityType: "ticket",
+        entityId: String(id),
+        entityUrl: `/tickets/${id}`,
+      });
+    })();
   }
   if ("priority" in data && data.priority !== ticket.priority) {
     auditLogs.push(
@@ -774,6 +807,77 @@ import { z } from "zod/v4";
 import type { WorkflowAction, TicketWorkflowSnapshot } from "../lib/workflow/types";
 import { executeWorkflowActions } from "../lib/workflow/actions";
 
+// ─── Merge ─────────────────────────────────────────────────────────────────
+
+router.post("/:id/merge", requireAuth, requirePermission("tickets.update"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid ticket ID" }); return; }
+
+  const targetId = typeof req.body.targetId === "number" ? req.body.targetId : parseId(String(req.body.targetId ?? ""));
+  if (!targetId) { res.status(400).json({ error: "targetId is required" }); return; }
+  if (id === targetId) { res.status(422).json({ error: "A ticket cannot be merged into itself" }); return; }
+
+  const settings = await getSection("tickets");
+  if (settings?.mergeTicketsEnabled === false) {
+    res.status(403).json({ error: "Ticket merging is disabled" }); return;
+  }
+
+  const [source, target] = await Promise.all([
+    prisma.ticket.findUnique({ where: { id },       select: { id: true, status: true, mergedIntoId: true, subject: true, ticketNumber: true } }),
+    prisma.ticket.findUnique({ where: { id: targetId }, select: { id: true, status: true, mergedIntoId: true, ticketNumber: true } }),
+  ]);
+
+  if (!source) { res.status(404).json({ error: "Ticket not found" }); return; }
+  if (!target) { res.status(404).json({ error: "Target ticket not found" }); return; }
+  if (source.mergedIntoId) { res.status(422).json({ error: "This ticket has already been merged" }); return; }
+  if (target.mergedIntoId) { res.status(422).json({ error: "Cannot merge into a ticket that has itself been merged" }); return; }
+
+  const now = new Date();
+  await prisma.ticket.update({
+    where: { id },
+    data: { mergedIntoId: targetId, mergedAt: now, status: "closed" },
+  });
+
+  await Promise.all([
+    logAudit(id,       req.user.id, "ticket.merged",          { mergedIntoId: targetId, targetNumber: target.ticketNumber }),
+    logAudit(targetId, req.user.id, "ticket.received_merge",  { fromId: id, fromNumber: source.ticketNumber }),
+  ]);
+
+  res.json({ ok: true, mergedAt: now });
+});
+
+// ─── Search (for merge picker) ─────────────────────────────────────────────
+
+router.get("/search", requireAuth, async (req, res) => {
+  const q = String(req.query.q ?? "").trim();
+  const excludeId = parseId(String(req.query.exclude ?? "")) ?? undefined;
+  if (!q) { res.json({ tickets: [] }); return; }
+
+  const tickets = await prisma.ticket.findMany({
+    where: {
+      AND: [
+        { status: { notIn: ["new", "processing"] } },
+        { mergedIntoId: null },
+        ...(excludeId ? [{ id: { not: excludeId } }] : []),
+        {
+          OR: [
+            { ticketNumber: { contains: q, mode: "insensitive" as const } },
+            { subject:      { contains: q, mode: "insensitive" as const } },
+            { senderEmail:  { contains: q, mode: "insensitive" as const } },
+          ],
+        },
+      ],
+    },
+    select: { id: true, ticketNumber: true, subject: true, status: true, senderName: true },
+    take: 10,
+    orderBy: { updatedAt: "desc" },
+  });
+
+  res.json({ tickets });
+});
+
+// ─── Bulk ──────────────────────────────────────────────────────────────────
+
 const bulkActionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("delete"),
@@ -795,6 +899,11 @@ const bulkActionSchema = z.discriminatedUnion("action", [
     action:     z.literal("scenario"),
     ids:        z.array(z.number().int().positive()).min(1).max(100),
     scenarioId: z.number().int().positive(),
+  }),
+  z.object({
+    action:   z.literal("merge"),
+    ids:      z.array(z.number().int().positive()).min(1).max(100),
+    targetId: z.number().int().positive(),
   }),
 ]);
 
@@ -903,6 +1012,33 @@ router.post("/bulk", requireAuth, requirePermission("tickets.update"), async (re
       }
 
       res.json({ affected });
+      return;
+    }
+
+    case "merge": {
+      const settings = await getSection("tickets");
+      if (settings?.mergeTicketsEnabled === false) {
+        res.status(403).json({ error: "Ticket merging is disabled" }); return;
+      }
+
+      const idsToMerge = data.ids.filter((i) => i !== data.targetId);
+      if (idsToMerge.length === 0) { res.json({ affected: 0 }); return; }
+
+      const now = new Date();
+      const { count } = await prisma.ticket.updateMany({
+        where: { id: { in: idsToMerge }, mergedIntoId: null },
+        data: { mergedIntoId: data.targetId, mergedAt: now, status: "closed" },
+      });
+
+      // Audit all merged tickets (fire-and-forget)
+      void Promise.all(
+        idsToMerge.map((tid) =>
+          logAudit(tid, req.user.id, "ticket.merged", { mergedIntoId: data.targetId })
+        )
+      );
+      void logAudit(data.targetId, req.user.id, "ticket.received_merge", { count });
+
+      res.json({ affected: count });
       return;
     }
   }

@@ -22,6 +22,7 @@ import { notify } from "../lib/notify";
 import { syncIncidentToTicket } from "../lib/ticket-sync";
 import { applyEscalationRules, sendEscalationNotifications } from "../lib/apply-escalation-rules";
 import { notifyMentions } from "../lib/mentions";
+import { notifyEntityFollowers } from "../lib/notify-entity-followers";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -54,6 +55,9 @@ const LIST_SELECT = {
   createdBy: { select: { id: true, name: true } },
   createdAt: true,
   updatedAt: true,
+  bridgeCallUrl: true,
+  bridgeCallProvider: true,
+  bridgeCallCreatedAt: true,
 } as const;
 
 const CI_SUMMARY_SELECT = {
@@ -70,7 +74,11 @@ const DETAIL_SELECT = {
       id: true,
       updateType: true,
       body: true,
+      bodyHtml: true,
       author: { select: { id: true, name: true } },
+      attachments: {
+        select: { id: true, filename: true, mimeType: true, size: true, virusScanStatus: true },
+      },
       createdAt: true,
     },
   },
@@ -481,6 +489,21 @@ router.patch(
 
     await Promise.all(auditTasks);
 
+    // Notify followers on status change (fire-and-forget)
+    if (data.status && data.status !== current.status) {
+      void notifyEntityFollowers({
+        entityType:   "incident",
+        entityId:     id,
+        actorUserId:  req.user.id,
+        event:        "incident.followed_status_changed",
+        entityNumber: updated.incidentNumber,
+        entityTitle:  updated.title,
+        fromStatus:   current.status,
+        toStatus:     data.status,
+        entityUrl:    `/incidents/${id}`,
+      });
+    }
+
     // Back-sync relevant changes to the linked source ticket (fire-and-forget)
     const backSyncChanges: { status?: string; assignedToId?: string | null; teamId?: number | null } = {};
     if (data.status && data.status !== current.status) backSyncChanges.status = data.status;
@@ -537,9 +560,20 @@ router.post(
         body: true,
         bodyHtml: true,
         author: { select: { id: true, name: true } },
+        attachments: {
+          select: { id: true, filename: true, mimeType: true, size: true, virusScanStatus: true },
+        },
         createdAt: true,
       },
     });
+
+    // Link staged attachments to this update
+    if (data.attachmentIds && data.attachmentIds.length > 0) {
+      await prisma.incidentAttachment.updateMany({
+        where: { id: { in: data.attachmentIds }, incidentId: id, updateId: null },
+        data: { updateId: update.id },
+      });
+    }
 
     // Notify @mentioned users (fire-and-forget)
     void notifyMentions(data.bodyHtml, {

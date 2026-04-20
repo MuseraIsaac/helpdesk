@@ -245,6 +245,17 @@ router.get("/public/suggest", async (req, res) => {
     }));
 
   res.json({ articles: scored });
+
+  // Fire-and-forget: log the search for analytics (never blocks response)
+  prisma.kbSearchLog.create({
+    data: {
+      query:       q.slice(0, 500),
+      resultCount: scored.length,
+      sessionId:   typeof req.headers["x-session-id"] === "string"
+        ? req.headers["x-session-id"].slice(0, 128)
+        : null,
+    },
+  }).catch(() => {/* ignore logging errors */});
 });
 
 // ── Authenticated routes (agents + admins) ────────────────────────────────────

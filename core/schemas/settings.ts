@@ -172,6 +172,12 @@ export const generalSettingsSchema = z.object({
 export const brandingSettingsSchema = z.object({
   companyName:        z.string().max(100).default(""),
   logoDataUrl:        z.string().default(""),
+  /**
+   * Dedicated browser favicon. Separate from the app logo so the two can differ.
+   * Ideal: 32×32 px PNG or 16×16 px ICO. SVG is supported in modern browsers.
+   * If not set, the app falls back to logoDataUrl for the tab icon.
+   */
+  faviconDataUrl:     z.string().default(""),
   primaryColor:       z.string().default("#6366f1"),
   helpCenterTitle:    z.string().max(100).default("Help Center"),
   helpCenterTagline:  z.string().max(200).default(""),
@@ -191,6 +197,15 @@ export const ticketsSettingsSchema = z.object({
    * Individual agents can be granted a global override via globalTicketView on the User record.
    */
   teamScopedVisibility:         z.boolean().default(false),
+  // Reply composer defaults
+  replyDraftEnabled:            z.boolean().default(true),
+  replyGreeting:                z.string().max(500).default("Hi {senderName},"),
+  replyFooter:                  z.string().max(500).default("Your Ticket number is {ticketNumber}."),
+  replyDefaultMode:             z.enum(["reply_all", "reply_sender"]).default("reply_all"),
+  // Presence / live collaboration indicators
+  presenceEnabled:              z.boolean().default(true),
+  // Merge tickets
+  mergeTicketsEnabled:          z.boolean().default(true),
 });
 
 // Per-series configuration for one numbering series (incident, SR, etc.)
@@ -277,22 +292,46 @@ export const appearanceSettingsSchema = z.object({
   customSidebarDarkColor:  z.string().default(""),
 });
 
+export const VIDEO_BRIDGE_PROVIDERS = ["none", "teams", "googlemeet", "zoom", "webex"] as const;
+export type VideoBridgeProvider = (typeof VIDEO_BRIDGE_PROVIDERS)[number];
+
 export const integrationsSettingsSchema = z.object({
+  // ── Email ──────────────────────────────────────────────────────────────────
   emailEnabled:       z.boolean().default(false),
   emailProvider:      z.enum(["sendgrid", "smtp", "ses"]).default("sendgrid"),
-  fromEmail:          z.string().default(""),   // From address for all outbound emails
-  sendgridApiKey:     z.string().default(""),   // stored server-side; never exposed to client
+  fromEmail:          z.string().default(""),
+  sendgridApiKey:     z.string().default(""),   // server-only; never echoed to client
   smtpHost:           z.string().default(""),
   smtpPort:           z.number().int().default(587),
   smtpUser:           z.string().default(""),
-  smtpPassword:       z.string().default(""),   // stored server-side; never exposed to client
+  smtpPassword:       z.string().default(""),   // server-only
+  // ── Slack ──────────────────────────────────────────────────────────────────
   slackEnabled:       z.boolean().default(false),
-  slackWebhookUrl:    z.string().default(""),
-  // Inbound email webhook
-  webhookSecret:      z.string().default(""),   // stored server-side; never exposed to client
-  // AI / OpenAI
-  openaiApiKey:       z.string().default(""),   // stored server-side; never exposed to client
+  slackWebhookUrl:    z.string().default(""),   // server-only
+  // ── Inbound email webhook ──────────────────────────────────────────────────
+  webhookSecret:      z.string().default(""),   // server-only
+  // ── AI / OpenAI ────────────────────────────────────────────────────────────
+  openaiApiKey:       z.string().default(""),   // server-only
   openaiModel:        z.string().default("gpt-4o-mini"),
+  // ── Video Bridge (Incident Bridge Calls) ───────────────────────────────────
+  // The active provider. Only one can be active at a time.
+  videoBridgeProvider: z.enum(VIDEO_BRIDGE_PROVIDERS).default("none"),
+  // Microsoft Teams (Azure AD App — requires OnlineMeetings.ReadWrite.All app permission)
+  teamsClientId:          z.string().default(""),
+  teamsTenantId:          z.string().default(""),
+  teamsClientSecret:      z.string().default(""),   // server-only
+  teamsOrganizerUserId:   z.string().default(""),   // UPN or Object ID of the organizer
+  // Google Meet (OAuth 2.0 — requires Calendar API + conferenceData scope)
+  googleClientId:         z.string().default(""),
+  googleClientSecret:     z.string().default(""),   // server-only
+  googleRefreshToken:     z.string().default(""),   // server-only; obtained via OAuth consent
+  // Zoom (Server-to-Server OAuth app)
+  zoomAccountId:          z.string().default(""),
+  zoomClientId:           z.string().default(""),
+  zoomClientSecret:       z.string().default(""),   // server-only
+  // Webex (Personal Access Token or Bot Token)
+  webexBotToken:          z.string().default(""),   // server-only
+  webexSiteUrl:           z.string().default(""),   // e.g. company.webex.com
 });
 
 export const advancedSettingsSchema = z.object({
@@ -450,7 +489,12 @@ export const notificationsSettingsSchema = z.object({
   notifyOnTicketEscalated:     z.boolean().default(true),
   notifyOnMentioned:           z.boolean().default(true),
   notifyOnApprovalRequired:    z.boolean().default(true),
-  notifyOnApprovalDecision:    z.boolean().default(true),
+  notifyOnApprovalDecision:             z.boolean().default(true),
+  notifyOnFollowedTicketStatusChanged:    z.boolean().default(true),
+  notifyOnFollowedIncidentStatusChanged:  z.boolean().default(true),
+  notifyOnFollowedChangeStatusChanged:    z.boolean().default(true),
+  notifyOnFollowedRequestStatusChanged:   z.boolean().default(true),
+  notifyOnFollowedProblemStatusChanged:   z.boolean().default(true),
   // Agent-facing notification sound
   notificationSoundEnabled:    z.boolean().default(false),
 });

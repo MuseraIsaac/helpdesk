@@ -18,6 +18,7 @@ import {
 import { logProblemEvent } from "../lib/problem-events";
 import { logIncidentEvent } from "../lib/incident-events";
 import { notifyMentions } from "../lib/mentions";
+import { notifyEntityFollowers } from "../lib/notify-entity-followers";
 import { generateTicketNumber } from "../lib/ticket-number";
 import prisma from "../db";
 import type { Prisma, TicketPriority, ProblemStatus } from "../generated/prisma/client";
@@ -519,6 +520,21 @@ router.patch(
     }
 
     await Promise.all(auditTasks);
+
+    // Notify followers on status change (fire-and-forget)
+    if (data.status && data.status !== current.status) {
+      void notifyEntityFollowers({
+        entityType:   "problem",
+        entityId:     id,
+        actorUserId:  req.user.id,
+        event:        "problem.followed_status_changed",
+        entityNumber: updated.problemNumber,
+        entityTitle:  updated.title,
+        fromStatus:   current.status,
+        toStatus:     data.status,
+        entityUrl:    `/problems/${id}`,
+      });
+    }
 
     // Return with cluster hint
     const linkedIncidents = updated.linkedIncidents.map((link) => ({

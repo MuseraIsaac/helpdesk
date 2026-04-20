@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import RichTextEditor from "@/components/RichTextEditor";
 import RichTextRenderer from "@/components/RichTextRenderer";
+import SearchableSelect from "@/components/SearchableSelect";
 import {
   Select,
   SelectContent,
@@ -29,7 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import SearchableSelect from "@/components/SearchableSelect";
 import {
   Dialog,
   DialogContent,
@@ -42,6 +42,8 @@ import BackLink from "@/components/BackLink";
 import ErrorAlert from "@/components/ErrorAlert";
 import { ProblemStatusBadge, ProblemPriorityBadge } from "./ProblemsPage";
 import CiLinksPanel from "@/components/CiLinksPanel";
+import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
+import FollowButton from "@/components/FollowButton";
 import {
   BookMarked,
   Plus,
@@ -57,7 +59,46 @@ import {
   AlertTriangle,
   Database,
   Ticket,
+  BookmarkPlus,
+  ArrowRight,
+  Bug,
+  Clock,
+  User,
+  Users,
+  Server,
 } from "lucide-react";
+
+// ── Palette helpers ───────────────────────────────────────────────────────────
+
+const STATUS_COLORS: Record<string, string> = {
+  new:                    "bg-slate-100   text-slate-700  border-slate-200",
+  under_investigation:    "bg-blue-50     text-blue-700   border-blue-200",
+  root_cause_identified:  "bg-purple-50   text-purple-700 border-purple-200",
+  known_error:            "bg-amber-50    text-amber-700  border-amber-200",
+  resolved:               "bg-emerald-50  text-emerald-700 border-emerald-200",
+  closed:                 "bg-muted       text-muted-foreground border-muted-foreground/20",
+};
+
+const NOTE_TYPE_LABEL: Record<string, string> = {
+  investigation: "Investigation",
+  rca:           "Root Cause Analysis",
+  workaround:    "Workaround",
+  general:       "Note",
+};
+
+const NOTE_TYPE_STYLES: Record<string, string> = {
+  investigation: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  rca:           "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  workaround:    "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  general:       "bg-muted text-muted-foreground",
+};
+
+const NOTE_TYPE_DOT: Record<string, string> = {
+  investigation: "bg-blue-500",
+  rca:           "bg-amber-500",
+  workaround:    "bg-emerald-500",
+  general:       "bg-border",
+};
 
 // ── Event label map ───────────────────────────────────────────────────────────
 
@@ -78,20 +119,6 @@ const EVENT_LABELS: Record<string, (meta: Record<string, unknown>) => string> = 
   "problem.note_added":         (m) => `Note added (${m.noteType})`,
 };
 
-const NOTE_TYPE_LABEL: Record<string, string> = {
-  investigation: "Investigation",
-  rca:           "Root Cause Analysis",
-  workaround:    "Workaround",
-  general:       "Note",
-};
-
-const NOTE_TYPE_STYLES: Record<string, string> = {
-  investigation: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  rca:           "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  workaround:    "bg-green-500/15 text-green-700 dark:text-green-400",
-  general:       "bg-muted text-muted-foreground",
-};
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatRelative(iso: string) {
@@ -105,29 +132,38 @@ function formatRelative(iso: string) {
 }
 
 function formatDatetime(iso: string | null) {
-  if (!iso) return null;
-  return new Date(iso).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+// ── Shared card shell ─────────────────────────────────────────────────────────
+
+function SectionCard({
+  icon: Icon, title, action, children,
+}: {
+  icon?: React.ElementType; title: string; action?: React.ReactNode; children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-border/50 bg-muted/20">
+        <div className="flex items-center gap-2">
+          {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">{title}</span>
+        </div>
+        {action}
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  );
 }
 
 // ── Inline editable text area ─────────────────────────────────────────────────
 
 function InlineTextArea({
-  label,
-  placeholder,
-  value,
-  onSave,
-  disabled,
+  label, placeholder, value, onSave, disabled,
 }: {
-  label: string;
-  placeholder: string;
-  value: string | null | undefined;
-  onSave: (val: string | null) => void;
-  disabled?: boolean;
+  label: string; placeholder: string; value: string | null | undefined;
+  onSave: (val: string | null) => void; disabled?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -143,53 +179,41 @@ function InlineTextArea({
     if (editing) ref.current?.focus();
   }, [editing]);
 
-  function save() {
-    onSave(draft.trim() || null);
-    setEditing(false);
-  }
+  function save() { onSave(draft.trim() || null); setEditing(false); }
 
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">{label}</span>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">{label}</span>
         {!disabled && !editing && (
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={startEdit}>
-            <Pencil className="h-3 w-3 mr-1" />
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground" onClick={startEdit}>
+            <Pencil className="h-3 w-3" />
             {value ? "Edit" : "Add"}
           </Button>
         )}
       </div>
       {editing ? (
-        <div className="space-y-1">
+        <div className="space-y-2">
           <textarea
             ref={ref}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={placeholder}
-            className="w-full min-h-[100px] text-sm rounded-md border border-input bg-background px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full min-h-[120px] text-sm rounded-lg border border-input bg-background px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring"
           />
-          <div className="flex gap-1.5">
-            <Button size="sm" className="h-7 text-xs" onClick={save}>
-              <Check className="h-3 w-3 mr-1" />
-              Save
+          <div className="flex gap-2">
+            <Button size="sm" className="h-7 text-xs gap-1" onClick={save}>
+              <Check className="h-3 w-3" />Save
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-              onClick={() => setEditing(false)}
-            >
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEditing(false)}>
               Cancel
             </Button>
           </div>
         </div>
       ) : (
         <div
-          className={`rounded-md ${
-            value
-              ? "text-sm whitespace-pre-wrap text-foreground"
-              : "italic text-muted-foreground text-sm"
-          } ${!disabled ? "cursor-pointer hover:bg-muted/50 p-2 -mx-2 rounded-md transition-colors" : ""}`}
+          className={`rounded-lg text-sm ${value ? "whitespace-pre-wrap text-foreground" : "italic text-muted-foreground/60"}
+            ${!disabled ? "cursor-pointer hover:bg-muted/50 px-3 py-2 -mx-3 transition-colors rounded-lg" : ""}`}
           onClick={startEdit}
         >
           {value ?? placeholder}
@@ -201,16 +225,8 @@ function InlineTextArea({
 
 // ── Linked incidents panel ────────────────────────────────────────────────────
 
-function LinkedIncidentsPanel({
-  incidents,
-  problemId,
-  isTerminal,
-  refetch,
-}: {
-  incidents: LinkedIncident[];
-  problemId: number;
-  isTerminal: boolean;
-  refetch: () => void;
+function LinkedIncidentsPanel({ incidents, problemId, isTerminal, refetch }: {
+  incidents: LinkedIncident[]; problemId: number; isTerminal: boolean; refetch: () => void;
 }) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [incidentInput, setIncidentInput] = useState("");
@@ -220,90 +236,39 @@ function LinkedIncidentsPanel({
     mutationFn: async (incidentNumber: string) => {
       await axios.post(`/api/problems/${problemId}/incidents`, { incidentNumber });
     },
-    onSuccess: () => {
-      setLinkOpen(false);
-      setIncidentInput("");
-      setLinkError("");
-      refetch();
-    },
-    onError: (err: any) => {
-      setLinkError(
-        err?.response?.data?.error ?? "Failed to link incident"
-      );
-    },
+    onSuccess: () => { setLinkOpen(false); setIncidentInput(""); setLinkError(""); refetch(); },
+    onError: (err: any) => { setLinkError(err?.response?.data?.error ?? "Failed to link incident"); },
   });
 
   const unlinkMutation = useMutation({
-    mutationFn: async (incidentId: number) => {
-      await axios.delete(`/api/problems/${problemId}/incidents/${incidentId}`);
-    },
+    mutationFn: async (incidentId: number) => { await axios.delete(`/api/problems/${problemId}/incidents/${incidentId}`); },
     onSuccess: () => refetch(),
   });
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="font-medium text-sm flex items-center gap-2">
-          <Link2 className="h-4 w-4" />
-          Linked Incidents
-          {incidents.length > 0 && (
-            <span className="text-xs text-muted-foreground font-normal">
-              ({incidents.length})
-            </span>
-          )}
-        </h3>
-        {!isTerminal && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => setLinkOpen(true)}
-          >
-            <Plus className="h-3 w-3 mr-1" />
-            Link incident
-          </Button>
-        )}
-      </div>
-
       {incidents.length === 0 ? (
-        <p className="text-sm text-muted-foreground italic">
-          No incidents linked yet. Link related incidents to build the recurrence picture.
-        </p>
+        <div className="flex flex-col items-center py-8 gap-2 text-center">
+          <Link2 className="h-8 w-8 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">No incidents linked yet.</p>
+          <p className="text-xs text-muted-foreground/60">Link related incidents to build the recurrence picture.</p>
+        </div>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           {incidents.map((inc) => (
-            <div
-              key={inc.id}
-              className="flex items-center justify-between rounded-md border px-3 py-2 group"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <span className="font-mono text-xs text-muted-foreground shrink-0">
-                  {inc.incidentNumber}
-                </span>
-                <Link
-                  to={`/incidents/${inc.id}`}
-                  className="text-sm font-medium truncate hover:underline"
-                >
+            <div key={inc.id} className="group flex items-center justify-between rounded-lg border border-border/60 bg-card px-3 py-2.5 hover:border-border transition-colors">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="font-mono text-[11px] text-muted-foreground shrink-0">{inc.incidentNumber}</span>
+                <Link to={`/incidents/${inc.id}`} className="text-sm font-medium truncate hover:text-primary transition-colors">
                   {inc.title}
                 </Link>
-                <Badge
-                  variant="outline"
-                  className="text-[11px] shrink-0 capitalize"
-                >
-                  {inc.status.replace("_", " ")}
-                </Badge>
+                <Badge variant="outline" className="text-[10px] shrink-0 capitalize">{inc.status.replace("_", " ")}</Badge>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs text-muted-foreground hidden group-hover:block">
-                  linked {formatRelative(inc.linkedAt)}
-                </span>
+                <span className="text-[11px] text-muted-foreground hidden group-hover:block">linked {formatRelative(inc.linkedAt)}</span>
                 {!isTerminal && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => unlinkMutation.mutate(inc.id)}
-                  >
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
+                    onClick={() => unlinkMutation.mutate(inc.id)}>
                     <Unlink className="h-3 w-3" />
                   </Button>
                 )}
@@ -313,44 +278,28 @@ function LinkedIncidentsPanel({
         </div>
       )}
 
-      {/* Link dialog */}
+      {!isTerminal && (
+        <Button variant="outline" size="sm" className="gap-1.5 h-8 w-full" onClick={() => setLinkOpen(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          Link incident
+        </Button>
+      )}
+
       <Dialog open={linkOpen} onOpenChange={(v) => { setLinkOpen(v); if (!v) { setIncidentInput(""); setLinkError(""); } }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Link Incident</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Link Incident</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Enter an incident number (e.g. INC0004) or the ticket number it was raised from (e.g. TKT0001).
-            </p>
+            <p className="text-sm text-muted-foreground">Enter an incident number (e.g. INC0004) or ticket number (e.g. TKT0001).</p>
             <div className="space-y-1.5">
               <Label>Incident or Ticket Number</Label>
-              <Input
-                type="text"
-                placeholder="e.g. INC0004 or TKT0001"
-                value={incidentInput}
-                onChange={(e) => { setIncidentInput(e.target.value); setLinkError(""); }}
-                autoFocus
-              />
-              {linkError && (
-                <p className="text-xs text-destructive">{linkError}</p>
-              )}
+              <Input type="text" placeholder="e.g. INC0004" value={incidentInput}
+                onChange={(e) => { setIncidentInput(e.target.value); setLinkError(""); }} autoFocus />
+              {linkError && <p className="text-xs text-destructive">{linkError}</p>}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setLinkOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                const val = incidentInput.trim();
-                if (!val) { setLinkError("Enter a valid incident number"); return; }
-                linkMutation.mutate(val);
-              }}
-              disabled={!incidentInput.trim() || linkMutation.isPending}
-            >
-              Link
-            </Button>
+            <Button variant="outline" onClick={() => setLinkOpen(false)}>Cancel</Button>
+            <Button onClick={() => { const v = incidentInput.trim(); if (!v) { setLinkError("Enter a valid number"); return; } linkMutation.mutate(v); }} disabled={!incidentInput.trim() || linkMutation.isPending}>Link</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -360,31 +309,16 @@ function LinkedIncidentsPanel({
 
 // ── Linked tickets panel ──────────────────────────────────────────────────────
 
-function LinkedTicketsPanel({
-  tickets,
-  problemId,
-  isTerminal,
-  refetch,
-}: {
-  tickets: LinkedTicket[];
-  problemId: number;
-  isTerminal: boolean;
-  refetch: () => void;
+function LinkedTicketsPanel({ tickets, problemId, isTerminal, refetch }: {
+  tickets: LinkedTicket[]; problemId: number; isTerminal: boolean; refetch: () => void;
 }) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [ticketInput, setTicketInput] = useState("");
   const [linkError, setLinkError] = useState("");
 
   const linkMutation = useMutation({
-    mutationFn: async (ticketNumber: string) => {
-      await axios.post(`/api/problems/${problemId}/tickets`, { ticketNumber });
-    },
-    onSuccess: () => {
-      setLinkOpen(false);
-      setTicketInput("");
-      setLinkError("");
-      refetch();
-    },
+    mutationFn: async (ticketNumber: string) => { await axios.post(`/api/problems/${problemId}/tickets`, { ticketNumber }); },
+    onSuccess: () => { setLinkOpen(false); setTicketInput(""); setLinkError(""); refetch(); },
     onError: (err: unknown) => {
       const e = err as { response?: { data?: { error?: string } } };
       setLinkError(e?.response?.data?.error ?? "Failed to link ticket");
@@ -392,68 +326,31 @@ function LinkedTicketsPanel({
   });
 
   const unlinkMutation = useMutation({
-    mutationFn: async (ticketId: number) => {
-      await axios.delete(`/api/problems/${problemId}/tickets/${ticketId}`);
-    },
+    mutationFn: async (ticketId: number) => { await axios.delete(`/api/problems/${problemId}/tickets/${ticketId}`); },
     onSuccess: () => refetch(),
   });
 
-  function timeAgo(dateStr: string) {
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    return `${days}d ago`;
-  }
-
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">
-          Linked Tickets
-          {tickets.length > 0 && (
-            <span className="ml-1.5 text-xs text-muted-foreground">({tickets.length})</span>
-          )}
-        </p>
-        {!isTerminal && (
-          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setLinkOpen(true)}>
-            <Plus className="h-3 w-3" />
-            Link ticket
-          </Button>
-        )}
-      </div>
-
       {tickets.length === 0 ? (
-        <p className="text-sm text-muted-foreground italic">
-          No tickets linked yet. Link related tickets to track symptoms of this problem.
-        </p>
+        <div className="flex flex-col items-center py-8 gap-2 text-center">
+          <Ticket className="h-8 w-8 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">No tickets linked yet.</p>
+        </div>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           {tickets.map((t) => (
-            <div key={t.id} className="group flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="font-mono text-xs text-muted-foreground shrink-0">{t.ticketNumber}</span>
-                <Link to={`/tickets/${t.id}`} className="truncate hover:underline text-primary">
-                  {t.subject}
-                </Link>
-                <span className="text-xs capitalize text-muted-foreground shrink-0">
-                  {t.status.replace(/_/g, " ")}
-                </span>
+            <div key={t.id} className="group flex items-center justify-between rounded-lg border border-border/60 bg-card px-3 py-2.5 hover:border-border transition-colors">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="font-mono text-[11px] text-muted-foreground shrink-0">{t.ticketNumber}</span>
+                <Link to={`/tickets/${t.id}`} className="truncate hover:text-primary transition-colors text-sm">{t.subject}</Link>
+                <span className="text-[10px] capitalize text-muted-foreground shrink-0">{t.status.replace(/_/g, " ")}</span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-                  linked {timeAgo(t.linkedAt)}
-                </span>
+                <span className="text-[11px] text-muted-foreground hidden group-hover:block">linked {formatRelative(t.linkedAt)}</span>
                 {!isTerminal && (
-                  <button
-                    onClick={() => unlinkMutation.mutate(t.id)}
-                    disabled={unlinkMutation.isPending}
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted-foreground hover:text-destructive transition-opacity"
-                    title="Unlink ticket"
-                  >
+                  <button onClick={() => unlinkMutation.mutate(t.id)} disabled={unlinkMutation.isPending}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted-foreground hover:text-destructive transition-opacity">
                     <Unlink className="h-3.5 w-3.5" />
                   </button>
                 )}
@@ -463,39 +360,28 @@ function LinkedTicketsPanel({
         </div>
       )}
 
+      {!isTerminal && (
+        <Button size="sm" variant="outline" className="gap-1.5 h-8 w-full" onClick={() => setLinkOpen(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          Link ticket
+        </Button>
+      )}
+
       <Dialog open={linkOpen} onOpenChange={(v) => { setLinkOpen(v); if (!v) { setTicketInput(""); setLinkError(""); } }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Link Ticket</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Link Ticket</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Enter the ticket number to link to this problem (e.g. TKT0042).
-            </p>
+            <p className="text-sm text-muted-foreground">Enter the ticket number to link (e.g. TKT0042).</p>
             <div className="space-y-1.5">
               <Label>Ticket Number</Label>
-              <Input
-                type="text"
-                placeholder="e.g. TKT0042"
-                value={ticketInput}
-                onChange={(e) => { setTicketInput(e.target.value); setLinkError(""); }}
-                autoFocus
-              />
+              <Input type="text" placeholder="e.g. TKT0042" value={ticketInput}
+                onChange={(e) => { setTicketInput(e.target.value); setLinkError(""); }} autoFocus />
               {linkError && <p className="text-xs text-destructive">{linkError}</p>}
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setLinkOpen(false)}>Cancel</Button>
-            <Button
-              onClick={() => {
-                const val = ticketInput.trim();
-                if (!val) { setLinkError("Enter a valid ticket number"); return; }
-                linkMutation.mutate(val);
-              }}
-              disabled={!ticketInput.trim() || linkMutation.isPending}
-            >
-              Link
-            </Button>
+            <Button onClick={() => { const v = ticketInput.trim(); if (!v) { setLinkError("Enter a valid ticket number"); return; } linkMutation.mutate(v); }} disabled={!ticketInput.trim() || linkMutation.isPending}>Link</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -505,16 +391,15 @@ function LinkedTicketsPanel({
 
 // ── Notes panel ───────────────────────────────────────────────────────────────
 
-function NotesPanel({
-  notes,
-  problemId,
-  isTerminal,
-  refetch,
-}: {
-  notes: ProblemNote[];
-  problemId: number;
-  isTerminal: boolean;
-  refetch: () => void;
+const NOTE_TYPE_OPTIONS = [
+  { value: "investigation", label: "Investigation" },
+  { value: "rca",           label: "Root Cause Analysis" },
+  { value: "workaround",    label: "Workaround" },
+  { value: "general",       label: "General Note" },
+];
+
+function NotesPanel({ notes, problemId, isTerminal, refetch }: {
+  notes: ProblemNote[]; problemId: number; isTerminal: boolean; refetch: () => void;
 }) {
   const { control, handleSubmit, reset } = useForm<CreateProblemNoteInput>({
     resolver: zodResolver(createProblemNoteSchema),
@@ -525,65 +410,51 @@ function NotesPanel({
   const [bodyText, setBodyText] = useState("");
 
   const handleEditorChange = useCallback((html: string, text: string) => {
-    setBodyHtml(html);
-    setBodyText(text);
+    setBodyHtml(html); setBodyText(text);
   }, []);
 
   const addNote = useMutation({
     mutationFn: async (data: CreateProblemNoteInput) => {
-      await axios.post(`/api/problems/${problemId}/notes`, {
-        ...data,
-        body: bodyText,
-        bodyHtml,
-      });
+      await axios.post(`/api/problems/${problemId}/notes`, { ...data, body: bodyText, bodyHtml });
     },
-    onSuccess: () => {
-      reset({ noteType: "investigation", body: " " });
-      setBodyHtml("");
-      setBodyText("");
-      refetch();
-    },
+    onSuccess: () => { reset({ noteType: "investigation", body: " " }); setBodyHtml(""); setBodyText(""); refetch(); },
   });
 
   const deleteNote = useMutation({
-    mutationFn: async (noteId: number) => {
-      await axios.delete(`/api/problems/${problemId}/notes/${noteId}`);
-    },
+    mutationFn: async (noteId: number) => { await axios.delete(`/api/problems/${problemId}/notes/${noteId}`); },
     onSuccess: () => refetch(),
   });
 
   return (
     <div className="space-y-4">
-      {/* Existing notes */}
       {notes.length === 0 ? (
-        <p className="text-sm text-muted-foreground italic">
-          No investigation notes yet.
-        </p>
+        <div className="flex flex-col items-center py-10 gap-2 text-center">
+          <FileText className="h-8 w-8 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">No investigation notes yet.</p>
+        </div>
       ) : (
-        <ol className="space-y-3">
+        <ol className="space-y-0">
           {notes.map((note) => {
+            const dot = NOTE_TYPE_DOT[note.noteType] ?? "bg-border";
             const cls = NOTE_TYPE_STYLES[note.noteType] ?? NOTE_TYPE_STYLES.general;
             return (
               <li key={note.id} className="flex gap-3 group">
-                <div className="flex flex-col items-center pt-1">
-                  <span className={`h-2 w-2 rounded-full ${cls.includes("bg-") ? cls.split(" ")[0] : "bg-border"}`} />
-                  <div className="w-px flex-1 bg-border mt-1" />
+                <div className="flex flex-col items-center pt-2">
+                  <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${dot}`} />
+                  <div className="w-px flex-1 bg-border/60 mt-1 mb-1" />
                 </div>
-                <div className="flex-1 pb-3 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Badge variant="outline" className={`text-[11px] px-1.5 py-0 ${cls}`}>
+                <div className="flex-1 pb-4 min-w-0">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`}>
                       {NOTE_TYPE_LABEL[note.noteType] ?? note.noteType}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
                       {note.author?.name ?? "System"} · {formatRelative(note.createdAt)}
                     </span>
                     {!isTerminal && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
+                      <Button variant="ghost" size="sm"
                         className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive ml-auto opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={() => deleteNote.mutate(note.id)}
-                      >
+                        onClick={() => deleteNote.mutate(note.id)}>
                         <Trash2 className="h-3 w-3" />
                       </Button>
                     )}
@@ -596,32 +467,22 @@ function NotesPanel({
         </ol>
       )}
 
-      {/* Add note form */}
       {!isTerminal && (
-        <form
-          onSubmit={handleSubmit((d) => addNote.mutate(d))}
-          className="rounded-md border p-3 space-y-2"
-        >
-          <div className="flex items-center gap-2">
-            <Controller
-              name="noteType"
-              control={control}
+        <form onSubmit={handleSubmit((d) => addNote.mutate(d))}
+          className="rounded-xl border border-border/60 bg-card p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <Controller name="noteType" control={control}
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger className="h-7 w-40 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="investigation">Investigation</SelectItem>
-                    <SelectItem value="rca">Root Cause Analysis</SelectItem>
-                    <SelectItem value="workaround">Workaround</SelectItem>
-                    <SelectItem value="general">General Note</SelectItem>
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={field.value}
+                  onChange={field.onChange}
+                  options={NOTE_TYPE_OPTIONS}
+                  className="h-8 text-xs w-44"
+                />
               )}
             />
-            <span className="text-xs text-muted-foreground">
-              Adding an RCA note will auto-advance status to "Root Cause Identified"
+            <span className="text-[11px] text-muted-foreground">
+              RCA note auto-advances status to "Root Cause Identified"
             </span>
           </div>
           <RichTextEditor
@@ -632,17 +493,12 @@ function NotesPanel({
             disabled={addNote.isPending}
             enableMentions
           />
-          {addNote.error && (
-            <ErrorAlert error={addNote.error} fallback="Failed to add note" />
-          )}
-          <Button
-            type="submit"
-            size="sm"
-            className="h-7 text-xs"
-            disabled={!bodyText.trim() || addNote.isPending}
-          >
-            {addNote.isPending ? "Adding…" : "Add Note"}
-          </Button>
+          {addNote.error && <ErrorAlert error={addNote.error} fallback="Failed to add note" />}
+          <div className="flex justify-end">
+            <Button type="submit" size="sm" className="gap-1.5" disabled={!bodyText.trim() || addNote.isPending}>
+              {addNote.isPending ? "Adding…" : <><Plus className="h-3.5 w-3.5" />Add Note</>}
+            </Button>
+          </div>
         </form>
       )}
     </div>
@@ -654,20 +510,24 @@ function NotesPanel({
 function EventTrail({ events }: { events: ProblemEvent[] }) {
   if (events.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground italic">No audit events yet.</p>
+      <div className="flex flex-col items-center py-10 gap-2 text-center">
+        <Activity className="h-8 w-8 text-muted-foreground/30" />
+        <p className="text-sm text-muted-foreground">No audit events yet.</p>
+      </div>
     );
   }
-
   return (
-    <ol className="relative border-l border-border ml-2 space-y-3">
+    <ol className="space-y-3">
       {[...events].reverse().map((ev) => {
         const label = EVENT_LABELS[ev.action]?.(ev.meta) ?? ev.action;
         return (
-          <li key={ev.id} className="ml-4">
-            <div className="absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full border border-background bg-border" />
-            <div className="text-sm">{label}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              {ev.actor?.name ?? "System"} · {formatRelative(ev.createdAt)}
+          <li key={ev.id} className="flex items-start gap-3">
+            <div className="mt-1.5 h-2 w-2 rounded-full bg-border shrink-0" />
+            <div>
+              <p className="text-sm">{label}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {ev.actor?.name ?? "System"} · {formatRelative(ev.createdAt)}
+              </p>
             </div>
           </li>
         );
@@ -678,30 +538,22 @@ function EventTrail({ events }: { events: ProblemEvent[] }) {
 
 // ── Cluster hint banner ───────────────────────────────────────────────────────
 
-function ClusterHintBanner({
-  hint,
-}: {
-  hint: Problem["clusterHint"];
-}) {
+function ClusterHintBanner({ hint }: { hint: Problem["clusterHint"] }) {
   if (!hint || hint.recurrenceCount < 2) return null;
-
   return (
-    <div className="rounded-md border border-amber-200 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
-      <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+    <div className="rounded-xl border border-amber-200 bg-amber-500/[0.04] px-4 py-3.5 flex items-start gap-3">
+      <div className="h-7 w-7 rounded-lg bg-amber-500/15 flex items-center justify-center shrink-0 mt-0.5">
+        <AlertTriangle className="h-4 w-4 text-amber-600" />
+      </div>
       <div>
-        <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+        <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
           Recurring incident cluster detected
         </p>
-        <p className="text-xs text-amber-600 dark:text-amber-500 mt-0.5">
+        <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
           {hint.recurrenceCount} incidents linked
-          {hint.commonAffectedSystem
-            ? ` · most affecting "${hint.commonAffectedSystem}"`
-            : ""}
-          {hint.earliestIncidentAt
-            ? ` · earliest ${formatRelative(hint.earliestIncidentAt)}`
-            : ""}
-          . A pattern-based clustering engine will provide deeper analysis in a
-          future release.
+          {hint.commonAffectedSystem ? ` · most affecting "${hint.commonAffectedSystem}"` : ""}
+          {hint.earliestIncidentAt ? ` · earliest ${formatRelative(hint.earliestIncidentAt)}` : ""}.
+          A pattern-based clustering engine will provide deeper analysis in a future release.
         </p>
       </div>
     </div>
@@ -709,6 +561,13 @@ function ClusterHintBanner({
 }
 
 // ── ProblemDetailPage ─────────────────────────────────────────────────────────
+
+const PRIORITY_OPTIONS = [
+  { value: "low",    label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high",   label: "High" },
+  { value: "urgent", label: "Urgent" },
+];
 
 export default function ProblemDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -738,6 +597,8 @@ export default function ProblemDetailPage() {
     },
   });
 
+  const [templateDialog, setTemplateDialog] = useState(false);
+
   const patchMutation = useMutation({
     mutationFn: async (patch: Record<string, unknown>) => {
       const { data } = await axios.patch(`/api/problems/${id}`, patch);
@@ -748,348 +609,314 @@ export default function ProblemDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-4 w-96" />
+      <div className="space-y-4 p-2">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-8 w-80" />
+        <Skeleton className="h-4 w-48" />
+        <Skeleton className="h-64 w-full rounded-xl" />
       </div>
     );
   }
 
-  if (error || !problem) {
-    return <ErrorAlert error={error} fallback="Problem not found" />;
-  }
+  if (error || !problem) return <ErrorAlert error={error} fallback="Problem not found" />;
 
   const isTerminal = terminalProblemStatuses.includes(problem.status);
-  const availableTransitions =
-    problemStatusTransitions[problem.status as ProblemStatus] ?? [];
+  const availableTransitions = problemStatusTransitions[problem.status as ProblemStatus] ?? [];
+  const statusPalette = STATUS_COLORS[problem.status] ?? STATUS_COLORS.new;
+
+  const agentOptions = [
+    { value: "none", label: "Unassigned" },
+    ...(agentsData?.agents ?? []).map((a) => ({ value: a.id, label: a.name })),
+  ];
+
+  const teamOptions = [
+    { value: "none", label: "No team" },
+    ...(teamsData?.teams ?? []).map((t) => ({ value: String(t.id), label: t.name })),
+  ];
 
   return (
-    <div className="space-y-6">
-      {/* Back + Header */}
-      <div>
-        <BackLink to="/problems">Back to Problems</BackLink>
-        <div className="flex items-start justify-between gap-4 mt-3">
-          <div className="flex-1 min-w-0">
+    <div className="flex flex-col min-h-full bg-muted/20">
+
+      {/* ── Header ── */}
+      <div className="border-b bg-background shadow-sm">
+        <div className="px-6 pt-3 pb-0">
+          <BackLink to="/problems">Back to Problems</BackLink>
+        </div>
+
+        <div className="px-6 py-4">
+          {/* Number + badges row */}
+          <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-mono text-sm text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted px-2 py-0.5 font-mono text-xs font-semibold text-muted-foreground">
+                <Bug className="h-3 w-3" />
                 {problem.problemNumber}
               </span>
-              <ProblemStatusBadge status={problem.status} />
-              <ProblemPriorityBadge priority={problem.priority} />
               {problem.isKnownError && (
-                <span className="inline-flex items-center gap-1 rounded border border-orange-200 bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-700 dark:text-orange-400">
+                <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-orange-700">
                   <BookMarked className="h-3 w-3" />
                   Known Error · KEDB
                 </span>
               )}
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight mt-1">{problem.title}</h1>
-            {problem.affectedService && (
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Affected service: {problem.affectedService}
-              </p>
-            )}
-          </div>
 
-          {/* Status transitions */}
-          {!isTerminal && availableTransitions.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              {availableTransitions.map((nextStatus) => (
-                <Button
-                  key={nextStatus}
-                  size="sm"
-                  variant={
-                    nextStatus === "closed"
-                      ? "default"
-                      : nextStatus === "resolved"
-                      ? "default"
-                      : "outline"
-                  }
+            {/* Action buttons */}
+            <div className="flex items-center gap-2 flex-wrap justify-end shrink-0">
+              <FollowButton entityPath="problems" entityId={problem.id} />
+              <Button type="button" variant="outline" size="sm" className="gap-1.5 h-8"
+                onClick={() => setTemplateDialog(true)}>
+                <BookmarkPlus className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Save as Template</span>
+              </Button>
+              {!isTerminal && availableTransitions.map((nextStatus) => (
+                <Button key={nextStatus} size="sm"
+                  variant={nextStatus === "closed" || nextStatus === "resolved" ? "default" : "outline"}
+                  className="h-8 gap-1.5"
                   disabled={patchMutation.isPending}
-                  onClick={() => patchMutation.mutate({ status: nextStatus })}
-                >
+                  onClick={() => patchMutation.mutate({ status: nextStatus })}>
+                  <ArrowRight className="h-3.5 w-3.5" />
                   {problemStatusLabel[nextStatus]}
                 </Button>
               ))}
             </div>
-          )}
+          </div>
+
+          {/* Title */}
+          <h1 className="mt-2 text-xl font-semibold leading-snug">{problem.title}</h1>
+
+          {/* Status chips */}
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold ${statusPalette}`}>
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+              {problemStatusLabel[problem.status] ?? problem.status}
+            </span>
+            <ProblemPriorityBadge priority={problem.priority} />
+            {problem.affectedService && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-[11px] text-muted-foreground bg-muted/30">
+                <Server className="h-3 w-3" />
+                {problem.affectedService}
+              </span>
+            )}
+            {problem.owner && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-[11px] text-muted-foreground bg-muted/30">
+                <User className="h-3 w-3" />
+                {problem.owner.name}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
       {patchMutation.error && (
-        <ErrorAlert error={patchMutation.error} fallback="Failed to update problem" />
+        <div className="px-6 pt-3">
+          <ErrorAlert error={patchMutation.error} fallback="Failed to update problem" />
+        </div>
       )}
 
-      {/* Cluster hint */}
-      <ClusterHintBanner hint={problem.clusterHint} />
+      {/* ── Body ── */}
+      <div className="flex-1 px-6 py-5">
+        <ClusterHintBanner hint={problem.clusterHint} />
 
-      {/* Two-column layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ── Main content ─────────────────────────────────── */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Description */}
-          {problem.description && (
-            <div className="rounded-md border p-4">
-              <h3 className="font-medium text-sm mb-2">Description</h3>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                {problem.description}
-              </p>
+        <div className="mt-5 grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5">
+
+          {/* ── Main content ── */}
+          <div className="space-y-4 min-w-0">
+
+            {/* Description */}
+            {problem.description && (
+              <SectionCard icon={FileText} title="Description">
+                <p className="text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">
+                  {problem.description}
+                </p>
+              </SectionCard>
+            )}
+
+            {/* Tabbed investigation area */}
+            <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
+              <Tabs defaultValue="notes">
+                <div className="border-b px-4 bg-muted/20">
+                  <TabsList className="h-auto bg-transparent p-0 gap-0 rounded-none">
+                    {[
+                      { value: "notes",    icon: FileText,    label: "Investigation Notes" },
+                      { value: "rca",      icon: Lightbulb,   label: "RCA & Workaround" },
+                      { value: "incidents",icon: Link2,       label: "Incidents",   badge: problem.linkedIncidents?.length ?? 0 },
+                      { value: "tickets",  icon: Ticket,      label: "Tickets",     badge: problem.linkedTickets?.length ?? 0 },
+                      { value: "history",  icon: Activity,    label: "Audit Trail" },
+                    ].map(({ value, icon: Icon, label, badge }) => (
+                      <TabsTrigger key={value} value={value}
+                        className="flex items-center gap-1.5 px-3 py-3 text-[12px] font-medium rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary data-[state=active]:bg-transparent data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:text-foreground transition-colors">
+                        <Icon className="h-3 w-3" />
+                        {label}
+                        {badge !== undefined && badge > 0 && (
+                          <span className="ml-0.5 rounded-full bg-primary/10 text-primary px-1.5 text-[10px] font-semibold">{badge}</span>
+                        )}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </div>
+
+                <TabsContent value="notes" className="p-4 mt-0">
+                  <NotesPanel notes={problem.notes ?? []} problemId={Number(id)} isTerminal={isTerminal} refetch={refetch} />
+                </TabsContent>
+
+                <TabsContent value="rca" className="p-4 mt-0 space-y-5">
+                  <InlineTextArea
+                    label="Root Cause Analysis"
+                    placeholder="Describe the root cause in detail. Include contributing factors, timeline, and evidence."
+                    value={problem.rootCause}
+                    disabled={isTerminal}
+                    onSave={(v) => patchMutation.mutate({ rootCause: v })}
+                  />
+                  <div className="border-t border-border/50 pt-5">
+                    <InlineTextArea
+                      label="Workaround"
+                      placeholder="Document the workaround. Include step-by-step instructions for affected users."
+                      value={problem.workaround}
+                      disabled={isTerminal}
+                      onSave={(v) => patchMutation.mutate({ workaround: v })}
+                    />
+                  </div>
+                  {problem.linkedChangeRef && (
+                    <div className="border-t border-border/50 pt-5">
+                      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Linked Change</p>
+                      <p className="text-sm font-mono text-muted-foreground">{problem.linkedChangeRef}</p>
+                    </div>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="incidents" className="p-4 mt-0">
+                  <LinkedIncidentsPanel incidents={problem.linkedIncidents ?? []} problemId={Number(id)} isTerminal={isTerminal} refetch={refetch} />
+                </TabsContent>
+
+                <TabsContent value="tickets" className="p-4 mt-0">
+                  <LinkedTicketsPanel tickets={problem.linkedTickets ?? []} problemId={Number(id)} isTerminal={isTerminal} refetch={refetch} />
+                </TabsContent>
+
+                <TabsContent value="history" className="p-4 mt-0">
+                  <EventTrail events={problem.events ?? []} />
+                </TabsContent>
+              </Tabs>
             </div>
-          )}
+          </div>
 
-          {/* Tabbed investigation area */}
-          <Tabs defaultValue="notes">
-            <TabsList className="h-8">
-              <TabsTrigger value="notes" className="text-xs">
-                <FileText className="h-3.5 w-3.5 mr-1.5" />
-                Investigation Notes
-              </TabsTrigger>
-              <TabsTrigger value="rca" className="text-xs">
-                <Lightbulb className="h-3.5 w-3.5 mr-1.5" />
-                RCA &amp; Workaround
-              </TabsTrigger>
-              <TabsTrigger value="incidents" className="text-xs">
-                <Link2 className="h-3.5 w-3.5 mr-1.5" />
-                Incidents
-                {(problem.linkedIncidents?.length ?? 0) > 0 && (
-                  <span className="ml-1 text-[11px] bg-muted rounded-full px-1">
-                    {problem.linkedIncidents?.length}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="tickets" className="text-xs">
-                <Ticket className="h-3.5 w-3.5 mr-1.5" />
-                Tickets
-                {(problem.linkedTickets?.length ?? 0) > 0 && (
-                  <span className="ml-1 text-[11px] bg-muted rounded-full px-1">
-                    {problem.linkedTickets?.length}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="history" className="text-xs">
-                <Activity className="h-3.5 w-3.5 mr-1.5" />
-                Audit Trail
-              </TabsTrigger>
-            </TabsList>
+          {/* ── Sidebar ── */}
+          <div className="space-y-4">
 
-            <TabsContent value="notes" className="mt-4 rounded-md border p-4">
-              <NotesPanel
-                notes={problem.notes ?? []}
-                problemId={Number(id)}
-                isTerminal={isTerminal}
-                refetch={refetch}
-              />
-            </TabsContent>
-
-            <TabsContent value="rca" className="mt-4 rounded-md border p-4 space-y-6">
-              <InlineTextArea
-                label="Root Cause Analysis"
-                placeholder="Describe the root cause of this problem in detail. Include contributing factors, timeline, and evidence."
-                value={problem.rootCause}
-                disabled={isTerminal}
-                onSave={(v) => patchMutation.mutate({ rootCause: v })}
-              />
-              <div className="border-t pt-4">
-                <InlineTextArea
-                  label="Workaround"
-                  placeholder="Document the workaround for affected users and teams. Include step-by-step instructions."
-                  value={problem.workaround}
-                  disabled={isTerminal}
-                  onSave={(v) => patchMutation.mutate({ workaround: v })}
-                />
+            {/* Ownership */}
+            <SectionCard icon={Users} title="Ownership">
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Problem Manager</span>
+                  <SearchableSelect
+                    value={problem.owner?.id ?? "none"}
+                    onChange={(v) => patchMutation.mutate({ ownerId: v === "none" ? null : v })}
+                    disabled={isTerminal}
+                    placeholder="Unowned"
+                    options={agentOptions}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Analyst</span>
+                  <SearchableSelect
+                    value={problem.assignedTo?.id ?? "none"}
+                    onChange={(v) => patchMutation.mutate({ assignedToId: v === "none" ? null : v })}
+                    disabled={isTerminal}
+                    placeholder="Unassigned"
+                    options={agentOptions}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Team</span>
+                  <SearchableSelect
+                    value={problem.team?.id != null ? String(problem.team.id) : "none"}
+                    onChange={(v) => patchMutation.mutate({ teamId: v === "none" ? null : Number(v) })}
+                    disabled={isTerminal}
+                    placeholder="No team"
+                    options={teamOptions}
+                  />
+                </div>
               </div>
-              {problem.linkedChangeRef && (
-                <div className="border-t pt-4">
-                  <p className="text-sm font-medium mb-1">Linked Change</p>
-                  <p className="text-sm font-mono text-muted-foreground">
-                    {problem.linkedChangeRef}
-                  </p>
-                </div>
-              )}
-            </TabsContent>
+            </SectionCard>
 
-            <TabsContent value="incidents" className="mt-4 rounded-md border p-4">
-              <LinkedIncidentsPanel
-                incidents={problem.linkedIncidents ?? []}
-                problemId={Number(id)}
-                isTerminal={isTerminal}
-                refetch={refetch}
-              />
-            </TabsContent>
-
-            <TabsContent value="tickets" className="mt-4 rounded-md border p-4">
-              <LinkedTicketsPanel
-                tickets={problem.linkedTickets ?? []}
-                problemId={Number(id)}
-                isTerminal={isTerminal}
-                refetch={refetch}
-              />
-            </TabsContent>
-
-            <TabsContent value="history" className="mt-4 rounded-md border p-4">
-              <EventTrail events={problem.events ?? []} />
-            </TabsContent>
-          </Tabs>
-        </div>
-
-        {/* ── Sidebar ──────────────────────────────────────── */}
-        <div className="space-y-4">
-          {/* Ownership */}
-          <div className="rounded-md border p-4 space-y-4">
-            <h3 className="font-medium text-sm">Ownership</h3>
-
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Problem Manager
-              </span>
+            {/* Priority */}
+            <SectionCard icon={AlertTriangle} title="Priority">
               <SearchableSelect
-                value={problem.owner?.id ?? "none"}
-                onChange={(v) => patchMutation.mutate({ ownerId: v === "none" ? null : v })}
+                value={problem.priority}
+                onChange={(v) => patchMutation.mutate({ priority: v })}
                 disabled={isTerminal}
-                placeholder="Unowned"
-                options={[
-                  { value: "none", label: "Unowned" },
-                  ...(agentsData?.agents ?? []).map((a) => ({ value: a.id, label: a.name })),
-                ]}
+                placeholder="Select priority…"
+                options={PRIORITY_OPTIONS}
               />
-            </div>
+            </SectionCard>
 
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Analyst
-              </span>
-              <SearchableSelect
-                value={problem.assignedTo?.id ?? "none"}
-                onChange={(v) => patchMutation.mutate({ assignedToId: v === "none" ? null : v })}
-                disabled={isTerminal}
-                placeholder="Unassigned"
-                options={[
-                  { value: "none", label: "Unassigned" },
-                  ...(agentsData?.agents ?? []).map((a) => ({ value: a.id, label: a.name })),
-                ]}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Team
-              </span>
-              <SearchableSelect
-                value={problem.team?.id != null ? String(problem.team.id) : "none"}
-                onChange={(v) => patchMutation.mutate({ teamId: v === "none" ? null : Number(v) })}
-                disabled={isTerminal}
-                placeholder="No team"
-                options={[
-                  { value: "none", label: "No team" },
-                  ...(teamsData?.teams ?? []).map((t) => ({ value: String(t.id), label: t.name })),
-                ]}
-              />
-            </div>
-          </div>
-
-          {/* Priority */}
-          <div className="rounded-md border p-4 space-y-2">
-            <h3 className="font-medium text-sm">Priority</h3>
-            <Select
-              value={problem.priority}
-              onValueChange={(v) => patchMutation.mutate({ priority: v })}
-              disabled={isTerminal}
-            >
-              <SelectTrigger className="h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {["low", "medium", "high", "urgent"].map((p) => (
-                  <SelectItem key={p} value={p} className="capitalize">
-                    {p.charAt(0).toUpperCase() + p.slice(1)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Affected service + change ref */}
-          <div className="rounded-md border p-4 space-y-3">
-            <h3 className="font-medium text-sm">Details</h3>
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Affected Service / CI
-              </span>
-              <Input
-                defaultValue={problem.affectedService ?? ""}
-                placeholder="e.g. Payment API"
-                className="h-8 text-sm"
-                disabled={isTerminal}
-                onBlur={(e) =>
-                  patchMutation.mutate({
-                    affectedService: e.target.value.trim() || null,
-                  })
-                }
-              />
-            </div>
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Linked Change Ref.
-              </span>
-              <Input
-                defaultValue={problem.linkedChangeRef ?? ""}
-                placeholder="e.g. CHG-0042"
-                className="h-8 text-sm font-mono"
-                disabled={isTerminal}
-                onBlur={(e) =>
-                  patchMutation.mutate({
-                    linkedChangeRef: e.target.value.trim() || null,
-                  })
-                }
-              />
-            </div>
-          </div>
-
-          {/* Affected CIs */}
-          <div className="rounded-md border p-4 space-y-3">
-            <h3 className="font-medium text-sm flex items-center gap-1.5">
-              <Database className="h-3.5 w-3.5" />
-              Affected CIs
-            </h3>
-            <CiLinksPanel
-              entityType="problems"
-              entityId={Number(id)}
-              linkedCis={problem.ciLinks ?? []}
-              readonly={isTerminal}
-              onChanged={() => refetch()}
-            />
-          </div>
-
-          {/* Dates */}
-          <div className="rounded-md border p-4 space-y-2">
-            <h3 className="font-medium text-sm">Timeline</h3>
-            <div className="space-y-2 text-sm">
-              {problem.resolvedAt && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground text-xs uppercase tracking-wide font-medium">
-                    Resolved
-                  </span>
-                  <span>{formatDatetime(problem.resolvedAt)}</span>
+            {/* Details */}
+            <SectionCard icon={Server} title="Details">
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Affected Service / CI</span>
+                  <Input
+                    defaultValue={problem.affectedService ?? ""}
+                    placeholder="e.g. Payment API"
+                    className="h-9 text-sm"
+                    disabled={isTerminal}
+                    onBlur={(e) => patchMutation.mutate({ affectedService: e.target.value.trim() || null })}
+                  />
                 </div>
-              )}
-              {problem.closedAt && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground text-xs uppercase tracking-wide font-medium">
-                    Closed
-                  </span>
-                  <span>{formatDatetime(problem.closedAt)}</span>
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Linked Change Ref.</span>
+                  <Input
+                    defaultValue={problem.linkedChangeRef ?? ""}
+                    placeholder="e.g. CRQ0042"
+                    className="h-9 text-sm font-mono"
+                    disabled={isTerminal}
+                    onBlur={(e) => patchMutation.mutate({ linkedChangeRef: e.target.value.trim() || null })}
+                  />
                 </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-muted-foreground text-xs uppercase tracking-wide font-medium">
-                  Opened
-                </span>
-                <span>{formatDatetime(problem.createdAt)}</span>
               </div>
-            </div>
+            </SectionCard>
+
+            {/* Affected CIs */}
+            <SectionCard icon={Database} title="Affected CIs">
+              <CiLinksPanel
+                entityType="problems"
+                entityId={Number(id)}
+                linkedCis={problem.ciLinks ?? []}
+                readonly={isTerminal}
+                onChanged={() => refetch()}
+              />
+            </SectionCard>
+
+            {/* Timeline */}
+            <SectionCard icon={Clock} title="Timeline">
+              <div className="space-y-2 text-sm">
+                {problem.resolvedAt && (
+                  <div className="flex justify-between">
+                    <span className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium">Resolved</span>
+                    <span className="text-xs font-medium">{formatDatetime(problem.resolvedAt)}</span>
+                  </div>
+                )}
+                {problem.closedAt && (
+                  <div className="flex justify-between">
+                    <span className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium">Closed</span>
+                    <span className="text-xs font-medium">{formatDatetime(problem.closedAt)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium">Opened</span>
+                  <span className="text-xs font-medium">{formatDatetime(problem.createdAt)}</span>
+                </div>
+              </div>
+            </SectionCard>
           </div>
         </div>
       </div>
+
+      <SaveAsTemplateDialog
+        open={templateDialog}
+        onOpenChange={setTemplateDialog}
+        type="problem"
+        defaultTitle={problem.title}
+        defaultBody={problem.description ?? ""}
+      />
     </div>
   );
 }

@@ -2,13 +2,20 @@ import { z } from "zod/v4";
 
 export const createReplySchema = z.object({
   body: z.string().trim().min(1, "Reply body is required"),
-  /** HTML version of the body — produced by the rich text editor. Stored alongside plain text. */
   bodyHtml: z.string().optional(),
-  /**
-   * IDs of attachments previously uploaded via POST /api/tickets/:id/attachments/upload.
-   * The server links these to the created reply and includes them in the outbound email.
-   */
   attachmentIds: z.array(z.number().int().positive()).max(5).optional(),
+  /** CC recipients (array of email strings). */
+  cc: z.array(z.email()).max(10).optional(),
+  /** BCC recipients (array of email strings). */
+  bcc: z.array(z.email()).max(10).optional(),
+  /** Determines who receives the email and how it is labelled. */
+  replyType: z.enum(["reply_all", "reply_sender", "forward"]).default("reply_all"),
+  /** Required when replyType is "forward" — the address to forward to. */
+  forwardTo: z.email().optional(),
+  /** Plain-text snapshot of the message being replied to or forwarded. */
+  quotedBody: z.string().optional(),
+  /** HTML snapshot of the message being replied to or forwarded. */
+  quotedHtml: z.string().optional(),
 });
 
 export type CreateReplyInput = z.infer<typeof createReplySchema>;

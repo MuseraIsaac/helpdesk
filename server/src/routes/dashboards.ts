@@ -14,6 +14,80 @@ import prisma from "../db";
 const router = Router();
 router.use(requireAuth);
 
+// ── Dashboard templates ───────────────────────────────────────────────────────
+
+const DASHBOARD_TEMPLATES = [
+  {
+    id: "service_desk",
+    name: "Service Desk Overview",
+    description: "Key ticket KPIs, volume trends, SLA status, and top open tickets — the day-to-day command center.",
+    widgets: [
+      { id: "volume",           visible: true, order: 0, x: 0,  y: 0,  w: 12, h: 2 },
+      { id: "performance",      visible: true, order: 1, x: 0,  y: 2,  w: 6,  h: 3 },
+      { id: "sla_by_dimension", visible: true, order: 2, x: 6,  y: 2,  w: 6,  h: 3 },
+      { id: "tickets_per_day",  visible: true, order: 3, x: 0,  y: 5,  w: 8,  h: 3 },
+      { id: "backlog_trend",    visible: true, order: 4, x: 8,  y: 5,  w: 4,  h: 3 },
+      { id: "breakdowns",       visible: true, order: 5, x: 0,  y: 8,  w: 6,  h: 3 },
+      { id: "channel_breakdown",visible: true, order: 6, x: 6,  y: 8,  w: 3,  h: 3 },
+      { id: "csat",             visible: true, order: 7, x: 9,  y: 8,  w: 3,  h: 3 },
+      { id: "top_open_tickets", visible: true, order: 8, x: 0,  y: 11, w: 12, h: 4 },
+    ],
+    config: { period: 30, density: "comfortable" },
+  },
+  {
+    id: "itsm_operations",
+    name: "ITSM Operations",
+    description: "Incidents, problems, changes, and service requests — for IT operations managers.",
+    widgets: [
+      { id: "incident_analytics",    visible: true, order: 0, x: 0,  y: 0,  w: 6,  h: 3 },
+      { id: "request_fulfillment",   visible: true, order: 1, x: 6,  y: 0,  w: 6,  h: 3 },
+      { id: "problem_recurrence",    visible: true, order: 2, x: 0,  y: 3,  w: 6,  h: 3 },
+      { id: "approval_turnaround",   visible: true, order: 3, x: 6,  y: 3,  w: 6,  h: 3 },
+      { id: "volume",                visible: true, order: 4, x: 0,  y: 6,  w: 12, h: 2 },
+      { id: "sla_by_dimension",      visible: true, order: 5, x: 0,  y: 8,  w: 12, h: 3 },
+    ],
+    config: { period: 30, density: "comfortable" },
+  },
+  {
+    id: "manager_view",
+    name: "Manager View",
+    description: "SLA compliance, CSAT trends, agent leaderboard, and team performance at a glance.",
+    widgets: [
+      { id: "performance",      visible: true, order: 0, x: 0,  y: 0,  w: 12, h: 2 },
+      { id: "csat_trend",       visible: true, order: 1, x: 0,  y: 2,  w: 6,  h: 3 },
+      { id: "fcr_rate",         visible: true, order: 2, x: 6,  y: 2,  w: 3,  h: 3 },
+      { id: "csat",             visible: true, order: 3, x: 9,  y: 2,  w: 3,  h: 3 },
+      { id: "sla_by_dimension", visible: true, order: 4, x: 0,  y: 5,  w: 8,  h: 3 },
+      { id: "resolution_dist",  visible: true, order: 5, x: 8,  y: 5,  w: 4,  h: 3 },
+      { id: "agent_leaderboard",visible: true, order: 6, x: 0,  y: 8,  w: 6,  h: 4 },
+      { id: "by_assignee",      visible: true, order: 7, x: 6,  y: 8,  w: 6,  h: 4 },
+    ],
+    config: { period: 30, density: "comfortable" },
+  },
+  {
+    id: "agent_performance",
+    name: "Agent Performance",
+    description: "Per-agent resolution speed, SLA compliance, CSAT scores, and current workload.",
+    widgets: [
+      { id: "agent_leaderboard",visible: true, order: 0, x: 0,  y: 0,  w: 6,  h: 5 },
+      { id: "by_assignee",      visible: true, order: 1, x: 6,  y: 0,  w: 6,  h: 5 },
+      { id: "resolution_dist",  visible: true, order: 2, x: 0,  y: 5,  w: 6,  h: 3 },
+      { id: "csat_trend",       visible: true, order: 3, x: 6,  y: 5,  w: 6,  h: 3 },
+      { id: "backlog_trend",    visible: true, order: 4, x: 0,  y: 8,  w: 8,  h: 3 },
+      { id: "fcr_rate",         visible: true, order: 5, x: 8,  y: 8,  w: 4,  h: 3 },
+    ],
+    config: { period: 30, density: "comfortable" },
+  },
+];
+
+/**
+ * GET /api/dashboards/templates
+ * Returns predefined dashboard template configs.
+ */
+router.get("/templates", (req, res) => {
+  res.json({ templates: DASHBOARD_TEMPLATES });
+});
+
 // ── Shared select projection ───────────────────────────────────────────────────
 
 const DASHBOARD_SELECT = {

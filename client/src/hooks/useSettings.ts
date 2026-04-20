@@ -18,6 +18,12 @@ export function useSettings<S extends SettingsSection>(section: S) {
       );
       return data.data;
     },
+    // Settings change infrequently. Disable all background refetches that
+    // would trigger reset() while the user is editing, silently clearing
+    // isDirty and disabling the Save button.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }
 
@@ -46,8 +52,13 @@ export function useUpdateSettings<S extends SettingsSection>(section: S) {
       return data.data;
     },
     onSuccess: (saved) => {
+      // Update the section cache directly — no need to refetch.
       queryClient.setQueryData(["settings", section], saved);
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      // Invalidate ONLY the aggregated all-settings query (used by the search
+      // index). Avoid partial-key invalidation, which would also mark the
+      // current section as stale, trigger a background refetch, call reset(),
+      // and silently flip isDirty back to false while the user is still editing.
+      queryClient.invalidateQueries({ queryKey: ["settings"], exact: true });
     },
   });
 }
