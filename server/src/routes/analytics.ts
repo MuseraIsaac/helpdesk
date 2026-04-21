@@ -31,6 +31,11 @@ import { runQuery, runBatch }   from "../lib/analytics/engine";
 import { listMetrics, toMetricMeta } from "../lib/analytics/registry";
 import { AnalyticsError }    from "../lib/analytics/types";
 import type { QueryResult }  from "../lib/analytics/types";
+import { buildStyledWorkbook } from "../lib/excel-export";
+import {
+  buildCsv, buildFilename, isoDate, isoTs,
+  type Sheet, type CellValue, type ColType, type ExportMeta,
+} from "../lib/export-metadata";
 import {
   analyticsQuerySchema,
   batchQuerySchema,
@@ -568,6 +573,300 @@ function resultToWorkbook(result: QueryResult, sheetName: string): XLSX.WorkBook
   XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
   return wb;
 }
+
+// ── Saved-report export ───────────────────────────────────────────────────────
+//
+// POST /api/analytics/reports/:id/export
+//
+// Loads a saved report's widget config, executes every widget query via the
+// analytics engine, converts each QueryResult into a typed Sheet, then builds
+// a styled Excel workbook (ExcelJS) or a structured CSV.
+//
+// This is the correct export path for the Report Library and CustomReportPage.
+// It replaces the old broken behaviour of always exporting "section=overview".
+
+// ── QueryResult → Sheet converter ────────────────────────────────────────────
+// isoDate() imported from export-metadata — do not redefine here.
+
+/** Heuristic: detect numeric columns from their key name or unit string. */
+function guessColType(key: string, unit?: string): ColType {
+  if (unit?.includes("%") || key.endsWith("_pct") || key.endsWith("_rate"))   return "percent";
+  if (unit === "s"        || key.endsWith("_s")  || key.includes("_seconds")) return "seconds";
+  if (key.includes("count") || key.includes("total") || key === "rank")        return "integer";
+  return "decimal_2";
+}
+
+function queryResultToSheet(result: QueryResult, widgetTitle: string): Sheet {
+  const name = widgetTitle.slice(0, 31) || "Widget";
+
+  switch (result.type) {
+
+    case "stat":
+      return {
+        name,
+        headers: ["Metric", "Value", ...(result.unit ? ["Unit"] : [])],
+        keys:    ["metric", "value", ...(result.unit ? ["unit"] : [])],
+        types:   ["string", "decimal_2", ...(result.unit ? ["string"] as ColType[] : [])],
+        rows:    [[result.label, result.value ?? null, ...(result.unit ? [result.unit] : [])]],
+      };
+
+    case "stat_change":
+      return {
+        name,
+        headers: ["Metric", "Current Value", "Previous Value", "Change (%)", ...(result.unit ? ["Unit"] : [])],
+        keys:    ["metric", "current_value", "previous_value", "change_pct", ...(result.unit ? ["unit"] : [])],
+        types:   ["string", "decimal_2", "decimal_2", "decimal_1", ...(result.unit ? ["string"] as ColType[] : [])],
+        rows:    [[
+          result.label,
+          result.value        ?? null,
+          result.previousValue ?? null,
+          result.changePercent ?? null,
+          ...(result.unit ? [result.unit] : []),
+        ]],
+      };
+
+    case "time_series": {
+      const seriesKeys  = result.series.map(s => s.key);
+      const seriesLabels = result.series.map(s => s.label);
+      return {
+        name,
+        headers: ["Date", ...seriesLabels],
+        keys:    ["date", ...seriesKeys],
+        types:   ["date_iso", ...seriesKeys.map(() => "decimal_2" as ColType)],
+        rows: result.points.map(p => [
+          p["date"] as string,
+          ...seriesKeys.map(k => (p[k] ?? null) as CellValue),
+        ]),
+      };
+    }
+
+    case "grouped_count": {
+      const total = result.total;
+      // Extra columns beyond key/label/value (e.g., secondary breakdowns)
+      const extraKeys = Object.keys(result.items[0] ?? {}).filter(
+        k => !["key", "label", "value"].includes(k),
+      );
+      return {
+        name,
+        headers: ["Rank", "Key", "Label", "Count", "Share (%)", ...extraKeys.map(k => k.replace(/_/g, " "))],
+        keys:    ["rank", "key", "label", "count", "share_pct", ...extraKeys],
+        types:   ["integer", "string", "string", "integer", "percent", ...extraKeys.map(() => "decimal_2" as ColType)],
+        rows: result.items.map((item, i) => [
+          i + 1,
+          item.key,
+          item.label,
+          item.value,
+          total > 0 ? Math.round((item.value / total) * 100) : null,
+          ...extraKeys.map(k => (item[k] ?? null) as CellValue),
+        ]),
+      };
+    }
+
+    case "distribution":
+      return {
+        name,
+        headers: ["Bucket", "Label", "Count"],
+        keys:    ["bucket", "label", "count"],
+        types:   ["string", "string", "integer"],
+        rows: result.buckets.map(b => [b.bucket, b.label, b.count]),
+      };
+
+    case "leaderboard":
+      return {
+        name,
+        headers: ["Rank", "Name", ...result.columnDefs.map(c => c.label)],
+        keys:    ["rank", "name", ...result.columnDefs.map(c => c.key)],
+        types:   ["integer", "string", ...result.columnDefs.map(c => guessColType(c.key, c.unit))],
+        rows: result.entries.map(e => [
+          e.rank,
+          e.label,
+          ...result.columnDefs.map(c => (e.columns[c.key] ?? null) as CellValue),
+        ]),
+      };
+
+    case "table":
+      return {
+        name,
+        headers: result.columnDefs.map(c => c.label),
+        keys:    result.columnDefs.map(c => c.key),
+        types:   result.columnDefs.map(c => guessColType(c.key, c.unit)),
+        rows: result.rows.map(r => result.columnDefs.map(c => (r[c.key] ?? null) as CellValue)),
+      };
+
+    default:
+      return {
+        name,
+        headers: ["Note"],
+        keys:    ["note"],
+        types:   ["string"],
+        rows:    [["No tabular representation available for this widget type."]],
+      };
+  }
+}
+
+/** Ensure no two sheets share the same name (Excel rejects duplicates). */
+function deduplicateSheetNames(sheets: Sheet[]): Sheet[] {
+  const seen = new Map<string, number>();
+  return sheets.map(s => {
+    const base  = s.name.slice(0, 28);
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    return count === 0 ? { ...s, name: base } : { ...s, name: `${base} (${count})` };
+  });
+}
+
+router.post(
+  "/reports/:id/export",
+  requirePermission("reports.view"),
+  async (req, res) => {
+    const reportId = parseId(req.params.id);
+    if (reportId === null) { res.status(400).json({ error: "Invalid report ID" }); return; }
+
+    const format: "csv" | "xlsx" = req.body.format === "csv" ? "csv" : "xlsx";
+
+    // ── Optional date-range override from the request ────────────────────
+    // Sent by ReportLibraryPage when the user has a specific date range
+    // selected.  Takes precedence over the report's saved dateRange.
+    const bodyFrom:   string | undefined = typeof req.body.from   === "string" ? req.body.from   : undefined;
+    const bodyTo:     string | undefined = typeof req.body.to     === "string" ? req.body.to     : undefined;
+    const bodyPeriod: string | undefined = typeof req.body.period === "string" ? req.body.period : undefined;
+
+    const dateOverride: { preset?: string; from?: string; to?: string } | null =
+      bodyFrom && bodyTo
+        ? { preset: "custom", from: bodyFrom, to: bodyTo }
+        : bodyPeriod
+          ? { preset: bodyPeriod }
+          : null;
+
+    // ── Load the saved report ────────────────────────────────────────────
+    const report = await prisma.savedReport.findUnique({
+      where:  { id: reportId },
+      select: {
+        id: true, name: true, isCurated: true, ownerId: true,
+        config: true, owner: { select: { name: true } },
+      },
+    });
+
+    if (!report) { res.status(404).json({ error: "Report not found" }); return; }
+
+    // Access check: owner, admin, or shared visibility already handled by
+    // requirePermission; additionally guard curated reports (public, no check needed).
+    const userId  = req.user!.id;
+    const isAdmin = req.user!.role === "admin";
+    if (!report.isCurated && report.ownerId !== userId && !isAdmin) {
+      res.status(403).json({ error: "Not authorised to export this report" });
+      return;
+    }
+
+    // ── Parse widget config ──────────────────────────────────────────────
+    const config = report.config as {
+      dateRange?: { preset?: string; from?: string; to?: string };
+      widgets?:   {
+        id: string; metricId: string; title?: string;
+        dateRange?: { preset?: string };
+        filters?: unknown; groupBy?: string;
+        sort?: { field: string; direction: string };
+        limit?: number;
+        x?: number; y?: number;
+      }[];
+    };
+
+    const widgets  = config.widgets ?? [];
+    // dateOverride (from request body) wins over the report's saved dateRange
+    const sharedDR = dateOverride ?? config.dateRange ?? { preset: "last_30_days" as const };
+
+    if (widgets.length === 0) {
+      res.status(422).json({ error: "This report has no widgets configured yet." });
+      return;
+    }
+
+    // ── Run each widget query ────────────────────────────────────────────
+    const sheets: Sheet[] = [];
+
+    // Determine a safe preset string that matches the analytics engine's accepted values
+    const KNOWN_PRESETS = new Set([
+      "last_30_days","today","yesterday","last_7_days","last_90_days",
+      "this_week","last_week","this_month","last_month",
+      "this_quarter","last_quarter","this_year","last_year",
+    ]);
+
+    function safeDateRange(raw?: { preset?: string; from?: string; to?: string }) {
+      if (!raw) return { preset: "last_30_days" as const };
+      if (raw.from && raw.to) return { preset: "custom" as const, from: raw.from, to: raw.to };
+      const p = raw.preset ?? "last_30_days";
+      return { preset: (KNOWN_PRESETS.has(p) ? p : "last_30_days") as "last_30_days" };
+    }
+
+    await Promise.all(
+      widgets.map(async (w) => {
+        // When the caller provides a date override, apply it to every widget
+        // so the entire export covers the same time window.
+        const dateRange = safeDateRange(dateOverride ?? w.dateRange ?? sharedDR);
+        try {
+          const queryResult = await runQuery(prisma, {
+            metricId:            w.metricId,
+            dateRange,
+            groupBy:             w.groupBy,
+            sort:                w.sort as { field: string; direction: "asc" | "desc" } | undefined,
+            limit:               w.limit ?? 50,
+            compareWithPrevious: false,
+          });
+          const widgetLabel = w.title?.trim() || queryResult.label;
+          sheets.push(queryResultToSheet(queryResult.result, widgetLabel));
+        } catch {
+          // Widget query failed — add an error placeholder sheet
+          sheets.push({
+            name:    (w.title || w.metricId).slice(0, 28),
+            headers: ["Note"],
+            keys:    ["note"],
+            types:   ["string"],
+            rows:    [[`Query failed for metric: ${w.metricId}`]],
+          });
+        }
+      }),
+    );
+
+    // Sort sheets to match the visual widget order (y then x)
+    const sortedWidgets = [...widgets].sort((a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0));
+    const orderedSheets = sortedWidgets
+      .map(w => {
+        const widgetLabel = w.title?.trim() || w.metricId;
+        return sheets.find(s => s.name.startsWith(widgetLabel.slice(0, 20)));
+      })
+      .filter((s): s is Sheet => s !== undefined);
+
+    const finalSheets = deduplicateSheetNames(orderedSheets.length > 0 ? orderedSheets : sheets);
+
+    // ── Build export metadata ────────────────────────────────────────────
+    const dr       = sharedDR as { preset?: string; from?: string; to?: string };
+    const dateLabel = dr.from && dr.to
+      ? `${isoDate(dr.from)} to ${isoDate(dr.to)}`
+      : `preset: ${dr.preset ?? "last_30_days"}`;
+    const exportedAt = isoTs();
+    const filename   = buildFilename(report.name, exportedAt, format);
+
+    const meta: ExportMeta = {
+      title:      report.name,
+      section:    "custom",
+      dateLabel,
+      filterDesc: "None",
+      exportedBy: req.user!.name,
+      exportedAt,
+    };
+
+    if (format === "xlsx") {
+      const buffer = await buildStyledWorkbook({ ...meta, sheets: finalSheets });
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.send(buffer);
+    } else {
+      const csv = buildCsv(meta, finalSheets);
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.send(csv);
+    }
+  },
+);
 
 export default router;
 

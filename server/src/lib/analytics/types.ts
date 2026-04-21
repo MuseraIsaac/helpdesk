@@ -199,7 +199,7 @@ export interface MetricDefinition {
   label: string;
   description: string;
   /** Domain this metric belongs to. */
-  domain: "tickets" | "incidents" | "requests" | "problems" | "changes" | "approvals" | "csat" | "agents" | "teams" | "kb" | "realtime";
+  domain: "tickets" | "incidents" | "requests" | "problems" | "changes" | "approvals" | "csat" | "agents" | "teams" | "kb" | "realtime" | "assets";
   unit?:  "count" | "percent" | "seconds" | "days" | "score" | "hours";
 
   /** Visualisations this metric can produce. */

@@ -210,3 +210,23 @@ export const APPROVAL_FIELD_MAP: FieldMap = {
   status:      "status",
   subjectType: `"subject_type"`,
 };
+
+export const ASSET_FIELD_MAP: FieldMap = {
+  type:            "type",
+  status:          "status",
+  condition:       "condition",
+  teamId:          `"team_id"`,
+  ownerId:         `"owner_id"`,
+  assignedToId:    `"assigned_to_id"`,
+  discoverySource: `"discovery_source"`,
+  location:        "location",
+  site:            "site",
+  manufacturer:    "manufacturer",
+  vendor:          "vendor",
+  warrantyExpiry:  `"warranty_expiry"`,
+  endOfLifeAt:     `"end_of_life_at"`,
+  retiredAt:       `"retired_at"`,
+  lastDiscoveredAt: `"last_discovered_at"`,
+  staleDetectedAt: `"stale_detected_at"`,
+  createdAt:       `"created_at"`,
+};

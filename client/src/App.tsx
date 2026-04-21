@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Toaster } from "sonner";
 import { Navigate, Route, Routes } from "react-router";
 import { useBranding } from "@/lib/useBranding";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -50,6 +51,16 @@ import PortalNewRequestPage from "./pages/portal/PortalNewRequestPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import CmdbPage from "./pages/CmdbPage";
 import CmdbDetailPage from "./pages/CmdbDetailPage";
+import AssetsPage from "./pages/AssetsPage";
+import AssetDetailPage from "./pages/AssetDetailPage";
+import InventoryLocationsPage from "./pages/InventoryLocationsPage";
+import ContractsPage from "./pages/ContractsPage";
+import SoftwareLicensesPage from "./pages/SoftwareLicensesPage";
+import SoftwareLicenseDetailPage from "./pages/SoftwareLicenseDetailPage";
+import SaaSSubscriptionsPage from "./pages/SaaSSubscriptionsPage";
+import SaaSSubscriptionDetailPage from "./pages/SaaSSubscriptionDetailPage";
+import DiscoveryPage from "./pages/DiscoveryPage";
+import DiscoverySyncRunPage from "./pages/DiscoverySyncRunPage";
 import CatalogPage from "./pages/CatalogPage";
 import CatalogItemPage from "./pages/CatalogItemPage";
 import CatalogAdminPage from "./pages/CatalogAdminPage";
@@ -78,6 +89,7 @@ import RequestsReport    from "./pages/reports/RequestsReport";
 import ProblemsReport    from "./pages/reports/ProblemsReport";
 import ApprovalsReport   from "./pages/reports/ApprovalsReport";
 import ChangesReport     from "./pages/reports/ChangesReport";
+import AssetsReport      from "./pages/reports/AssetsReport";
 
 /**
  * Injects the browser favicon from branding settings.
@@ -133,7 +145,17 @@ function App() {
           <Route path="/cmdb/:id" element={<CmdbDetailPage />} />
           <Route path="/catalog" element={<CatalogPage />} />
           <Route path="/catalog/:id" element={<CatalogItemPage />} />
-          <Route path="/assets" element={<PlaceholderPage title="Assets" description="IT asset management and CMDB integration is coming soon." />} />
+          <Route path="/assets" element={<AssetsPage />} />
+          <Route path="/assets/:id" element={<AssetDetailPage />} />
+          <Route path="/inventory-locations" element={<InventoryLocationsPage />} />
+          <Route path="/contracts" element={<ContractsPage />} />
+          <Route path="/discovery" element={<DiscoveryPage />} />
+          <Route path="/discovery/:id" element={<DiscoveryPage />} />
+          <Route path="/discovery/runs/:id" element={<DiscoverySyncRunPage />} />
+          <Route path="/software/licenses" element={<SoftwareLicensesPage />} />
+          <Route path="/software/licenses/:id" element={<SoftwareLicenseDetailPage />} />
+          <Route path="/software/saas" element={<SaaSSubscriptionsPage />} />
+          <Route path="/software/saas/:id" element={<SaaSSubscriptionDetailPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
           {/* Contacts */}
           <Route path="/customers" element={<CustomersPage />} />
@@ -179,6 +201,7 @@ function App() {
               <Route path="problems"  element={<ProblemsReport />} />
               <Route path="approvals" element={<ApprovalsReport />} />
               <Route path="changes"   element={<ChangesReport />} />
+              <Route path="assets"    element={<AssetsReport />} />
               <Route path="library"   element={<ReportLibraryPage />} />
             </Route>
           </Route>
@@ -214,6 +237,7 @@ function App() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    <Toaster richColors closeButton position="top-right" />
     </>
   );
 }

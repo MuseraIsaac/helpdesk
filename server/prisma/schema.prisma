@@ -134,6 +134,9 @@ model User {
   preference          UserPreference?
   dashboards          DashboardConfig[]
   savedTicketViews    SavedTicketView[]
+  savedAssetViews     SavedAssetView[]
+  assetMovements      AssetMovement[] @relation("AssetMovementPerformedBy")
+  createdContracts    Contract[]      @relation("ContractCreatedBy")
   // Incident management relations
   incidentsCommanded    Incident[]          @relation("IncidentCommander")
   incidentsAssigned     Incident[]          @relation("IncidentAssignee")
@@ -196,6 +199,26 @@ model User {
   reportSchedules          ReportSchedule[] @relation("ReportScheduleCreatedBy")
   reportSharesGiven        ReportShare[]    @relation("ReportSharedBy")
   reportSharesReceived     ReportShare[]    @relation("ReportSharedTo")
+  // Asset management relations
+  assetsOwned              Asset[]          @relation("AssetOwner")
+  assetsAssigned           Asset[]          @relation("AssetAssignee")
+  assetsCreated            Asset[]          @relation("AssetCreatedBy")
+  assetAssignments         AssetAssignment[]    @relation("AssetAssignmentUser")
+  assetAssignedBy          AssetAssignment[]    @relation("AssetAssignedBy")
+  assetEvents              AssetEvent[]         @relation("AssetEventActor")
+  assetRelationshipsCreated AssetRelationship[] @relation("AssetRelCreatedBy")
+  // Discovery & sync relations
+  discoveryConnectorsCreated DiscoveryConnector[] @relation("DiscoveryConnectorCreatedBy")
+  discoverySyncRunsTriggered DiscoverySyncRun[]   @relation("DiscoverySyncRunTriggeredBy")
+  // Software & SaaS governance relations
+  softwareLicensesOwned    SoftwareLicense[]    @relation("SoftwareLicenseOwner")
+  softwareLicensesCreated  SoftwareLicense[]    @relation("SoftwareLicenseCreatedBy")
+  licenseAssignments       LicenseAssignment[]  @relation("LicenseAssignmentUser")
+  licenseAssignmentsGiven  LicenseAssignment[]  @relation("LicenseAssignmentBy")
+  saasSubscriptionsOwned   SaaSSubscription[]   @relation("SaaSSubscriptionOwner")
+  saasSubscriptionsCreated SaaSSubscription[]   @relation("SaaSSubscriptionCreatedBy")
+  saasUserAssignments      SaaSUserAssignment[] @relation("SaaSUserAssignmentUser")
+  saasUserAssignmentsGiven SaaSUserAssignment[] @relation("SaaSUserAssignmentBy")
 
   @@map("user")
 }
@@ -1009,6 +1032,7 @@ model Team {
   teamDashboards     DashboardConfig[]    @relation("DashboardVisibilityTeam")
   scenarioVisibility ScenarioDefinition[] @relation("ScenarioVisibilityTeam")
   savedReports       SavedReport[]        @relation("SavedReportTeam")
+  assets             Asset[]
 
   @@map("queue")
 }
@@ -1114,6 +1138,24 @@ model SavedTicketView {
   @@index([userId], map: "saved_ticket_view_user_id_idx")
   @@index([isShared], map: "saved_ticket_view_is_shared_idx")
   @@map("saved_ticket_view")
+}
+
+model SavedAssetView {
+  id        Int      @id @default(autoincrement())
+  userId    String   @map("user_id")
+  name      String
+  emoji     String?
+  isDefault Boolean  @default(false) @map("is_default")
+  isShared  Boolean  @default(false) @map("is_shared")
+  config    Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "saved_asset_view_user_id_idx")
+  @@index([isShared], map: "saved_asset_view_is_shared_idx")
+  @@map("saved_asset_view")
 }
 
 // ── Incident Management ───────────────────────────────────────────────────────
@@ -1223,6 +1265,7 @@ model Incident {
   events           IncidentEvent[]
   problemLinks     ProblemIncidentLink[]
   ciLinks          IncidentCiLink[]
+  assetLinks       AssetIncidentLink[]
   // Back-relation: the source ticket that generated this incident (if any)
   sourceTicket     Ticket?              @relation("TicketLinkedIncident")
 
@@ -1728,6 +1771,7 @@ model ServiceRequest {
   items  RequestItem[]
   tasks  FulfillmentTask[]
   events RequestEvent[]
+  assetLinks AssetRequestLink[]
   // Back-relation: the source ticket that generated this service request (if any)
   sourceTicket Ticket? @relation("TicketLinkedServiceRequest")
 
@@ -1922,6 +1966,7 @@ model Problem {
   notes           ProblemNote[]
   events          ProblemEvent[]
   ciLinks         ProblemCiLink[]
+  assetLinks      AssetProblemLink[]
   /// Change requests that were raised to resolve this problem
   linkedChanges   Change[]             @relation("ChangeProblem")
 
@@ -2347,6 +2392,7 @@ model Change {
   tasks       ChangeTask[]
   events      ChangeEvent[]
   ciLinks     ChangeCiLink[]
+  assetLinks  AssetChangeLink[]
   attachments ChangeAttachment[]
 
   @@index([state])
@@ -2564,9 +2610,10 @@ model CatalogItem {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  requests ServiceRequest[]
+  requests   ServiceRequest[]
+  assetLinks AssetServiceLink[]
   /// Change requests that list this catalog item as the primary affected service
-  changes  Change[]         @relation("ChangeService")
+  changes    Change[]         @relation("ChangeService")
 
   @@index([categoryId])
   @@index([isActive])
@@ -2697,6 +2744,7 @@ model ConfigItem {
   primaryChanges Change[]        @relation("ChangePrimaryCI")
 
   events CiEvent[]
+  assets Asset[]
 
   @@index([type])
   @@index([status])
@@ -2952,4 +3000,901 @@ model ReportShare {
   @@index([reportId])
   @@index([sharedToId])
   @@map("report_share")
+}
+
+// ── IT Asset Management ────────────────────────────────────────────────────────
+
+enum AssetType {
+  hardware
+  end_user_device
+  software_license
+  network_equipment
+  peripheral
+  mobile_device
+  cloud_resource
+  iot_device
+  audio_visual
+  vehicle
+  furniture
+  consumable
+  other
+}
+
+enum AssetStatus {
+  ordered
+  in_stock
+  deployed
+  in_use
+  under_maintenance
+  in_repair       // legacy alias — prefer under_maintenance for new records
+  retired
+  disposed
+  lost_stolen
+}
+
+enum AssetRelationshipType {
+  is_component_of   // fromAsset is a physical component of toAsset (RAM → laptop)
+  contains          // inverse of is_component_of
+  is_installed_on   // software/license installed on a hardware asset
+  has_installed     // inverse of is_installed_on
+  is_connected_to   // network or physical connection
+  backs_up          // fromAsset backs up toAsset
+  is_spare_for      // fromAsset is a hot-spare/replacement for toAsset
+  is_upgrade_of     // fromAsset replaces/upgrades toAsset
+  is_hosted_on      // VM / container hosted on physical host
+  hosts             // inverse of is_hosted_on
+  depends_on        // soft dependency — asset relies on toAsset being available
+  is_managed_by     // fromAsset is managed by a tool/appliance toAsset
+}
+
+enum AssetCondition {
+  new_item
+  good
+  fair
+  poor
+}
+
+enum DepreciationMethod {
+  straight_line
+  declining_balance
+  none
+}
+
+enum ContractType {
+  support
+  maintenance
+  warranty
+  lease
+  license
+  insurance
+  service_level_agreement
+  vendor_agreement
+  other
+}
+
+enum ContractStatus {
+  draft
+  active
+  expired
+  terminated
+  pending_renewal
+}
+
+enum InventoryLocationType {
+  stockroom
+  repair_facility
+  transit
+  deployed_site
+}
+
+enum AssetMovementType {
+  received
+  transferred
+  issued
+  returned
+  sent_to_repair
+  repaired
+  retired
+  disposed
+}
+
+/**
+ * Asset — a physical or licensed item owned by the organisation.
+ *
+ * Distinct from ConfigItem (CMDB):
+ *  - ConfigItem models operational configuration and service topology.
+ *  - Asset models procurement, ownership, financial lifecycle, and physical location.
+ *
+ * An Asset may optionally link to a ConfigItem when the item is also
+ * tracked in the CMDB (e.g. a server is both an asset and a CI).
+ */
+model Asset {
+  id          Int            @id @default(autoincrement())
+  assetNumber String         @unique @map("asset_number")
+  name        String         @db.VarChar(200)
+  type        AssetType
+  status      AssetStatus    @default(in_stock)
+  condition   AssetCondition @default(new_item)
+
+  // ── Identification ──────────────────────────────────────────────────────────
+  manufacturer String? @db.VarChar(100)
+  model        String? @db.VarChar(100)
+  serialNumber String? @db.VarChar(200) @map("serial_number")
+  assetTag     String? @unique @db.VarChar(100) @map("asset_tag")
+
+  // ── Procurement ─────────────────────────────────────────────────────────────
+  purchaseDate  DateTime? @map("purchase_date") @db.Date
+  purchasePrice Decimal?  @map("purchase_price") @db.Decimal(12, 2)
+  currency      String    @default("USD") @db.VarChar(3)
+  poNumber      String?   @db.VarChar(100) @map("po_number")
+  vendor        String?   @db.VarChar(200)
+  invoiceNumber String?   @db.VarChar(100) @map("invoice_number")
+
+  // ── Warranty ────────────────────────────────────────────────────────────────
+  warrantyExpiry DateTime? @map("warranty_expiry") @db.Date
+  warrantyType   String?   @db.VarChar(100) @map("warranty_type")
+
+  // ── Lifecycle dates ─────────────────────────────────────────────────────────
+  receivedAt  DateTime? @map("received_at") @db.Date
+  deployedAt  DateTime? @map("deployed_at") @db.Date
+  endOfLifeAt DateTime? @map("end_of_life_at") @db.Date
+  retiredAt   DateTime? @map("retired_at") @db.Date
+
+  // ── Physical location ───────────────────────────────────────────────────────
+  location String? @db.VarChar(200)
+  site     String? @db.VarChar(100)
+  building String? @db.VarChar(100)
+  room     String? @db.VarChar(100)
+
+  // ── Managed inventory location ───────────────────────────────────────────────
+  inventoryLocationId Int?               @map("inventory_location_id")
+  inventoryLocation   InventoryLocation? @relation("AssetCurrentLocation", fields: [inventoryLocationId], references: [id], onDelete: SetNull)
+
+  // ── Financials ──────────────────────────────────────────────────────────────
+  depreciationMethod DepreciationMethod @default(none) @map("depreciation_method")
+  usefulLifeYears    Int?               @map("useful_life_years")
+  salvageValue       Decimal?           @map("salvage_value") @db.Decimal(12, 2)
+
+  // ── Governance / compliance ─────────────────────────────────────────────────
+  /// Contract number or reference linking this asset to a support/maintenance contract.
+  /// Serves as a placeholder until a full Contract model is implemented.
+  contractReference  String? @db.VarChar(200) @map("contract_reference")
+  /// Free-text compliance and regulatory notes (e.g. "SOX-relevant", "GDPR device").
+  complianceNotes    String? @db.Text          @map("compliance_notes")
+  /// How the asset was disposed of (e.g. "Recycled", "Sold", "Data-wiped and donated").
+  disposalMethod     String? @db.VarChar(100)  @map("disposal_method")
+  /// Disposal certificate or destruction reference number, required for regulated assets.
+  disposalCertificate String? @db.VarChar(200) @map("disposal_certificate")
+
+  // ── Notes ───────────────────────────────────────────────────────────────────
+  notes String? @db.Text
+
+  // ── Current assignment ───────────────────────────────────────────────────────
+  assignedToId String?   @map("assigned_to_id")
+  assignedTo   User?     @relation("AssetAssignee", fields: [assignedToId], references: [id])
+  assignedAt   DateTime? @map("assigned_at")
+
+  // ── Responsibility ───────────────────────────────────────────────────────────
+  ownerId String? @map("owner_id")
+  owner   User?   @relation("AssetOwner", fields: [ownerId], references: [id])
+  teamId  Int?    @map("team_id")
+  team    Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  // ── CMDB link ───────────────────────────────────────────────────────────────
+  ciId Int?        @map("ci_id")
+  ci   ConfigItem? @relation(fields: [ciId], references: [id], onDelete: SetNull)
+
+  // ── Discovery / integration ─────────────────────────────────────────────────
+  /// Identifier used by the discovery source (e.g. Jamf serial, Intune device ID)
+  externalId       String?   @db.VarChar(200) @map("external_id")
+  /// Source that last created/updated this record (e.g. "jamf", "intune", "manual")
+  discoverySource  String?   @db.VarChar(50) @map("discovery_source")
+  /// When the discovery source last saw this device
+  lastDiscoveredAt DateTime? @map("last_discovered_at")
+  /// Human-readable source name (e.g. "Microsoft Intune MDM", "Jamf Pro")
+  managedBy        String?   @db.VarChar(100) @map("managed_by")
+  /// Stamped when a sync run did not return this asset — flags possible decommission
+  staleDetectedAt  DateTime? @map("stale_detected_at")
+
+  // ── Audit ────────────────────────────────────────────────────────────────────
+  createdById String?  @map("created_by_id")
+  createdBy   User?    @relation("AssetCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  assignments       AssetAssignment[]
+  movements         AssetMovement[]
+  events            AssetEvent[]
+  assetContracts    AssetContractLink[]
+  licenseAssignments LicenseAssignment[]
+  // Asset-to-asset relationships
+  relationshipsFrom AssetRelationship[] @relation("AssetRelFrom")
+  relationshipsTo   AssetRelationship[] @relation("AssetRelTo")
+  // Cross-module impact links
+  incidentLinks  AssetIncidentLink[]
+  requestLinks   AssetRequestLink[]
+  problemLinks   AssetProblemLink[]
+  changeLinks    AssetChangeLink[]
+  serviceLinks   AssetServiceLink[]
+
+  @@index([type])
+  @@index([status])
+  @@index([assignedToId])
+  @@index([ownerId])
+  @@index([ciId])
+  @@index([externalId])
+  @@index([discoverySource])
+  @@index([inventoryLocationId])
+  @@map("asset")
+}
+
+/**
+ * AssetAssignment — full history of who held each asset and when.
+ * Closed assignments have unassignedAt set; the open (current) assignment has null.
+ */
+model AssetAssignment {
+  id           Int       @id @default(autoincrement())
+  assetId      Int       @map("asset_id")
+  asset        Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  userId       String    @map("user_id")
+  user         User      @relation("AssetAssignmentUser", fields: [userId], references: [id])
+  assignedAt   DateTime  @default(now()) @map("assigned_at")
+  unassignedAt DateTime? @map("unassigned_at")
+  note         String?   @db.VarChar(500)
+  assignedById String?   @map("assigned_by_id")
+  assignedBy   User?     @relation("AssetAssignedBy", fields: [assignedById], references: [id])
+
+  @@index([assetId])
+  @@index([userId])
+  @@map("asset_assignment")
+}
+
+/**
+ * AssetEvent — append-only audit trail for every state change on an Asset.
+ * action naming: "asset.<verb>" — e.g. "asset.created", "asset.assigned".
+ */
+model AssetEvent {
+  id        Int      @id @default(autoincrement())
+  assetId   Int      @map("asset_id")
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  actorId   String?  @map("actor_id")
+  actor     User?    @relation("AssetEventActor", fields: [actorId], references: [id])
+  action    String
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([assetId, createdAt])
+  @@map("asset_event")
+}
+
+/**
+ * Contract — a vendor agreement, support/maintenance/warranty contract, or license.
+ * Assets link to contracts via AssetContractLink (M-to-M).
+ */
+model Contract {
+  id             Int            @id @default(autoincrement())
+  contractNumber String         @unique @map("contract_number")
+  title          String         @db.VarChar(200)
+  type           ContractType
+  status         ContractStatus @default(active)
+
+  // ── Vendor ───────────────────────────────────────────────────────────────────
+  vendor        String?  @db.VarChar(200)
+  vendorContact String?  @db.VarChar(200) @map("vendor_contact")
+  vendorEmail   String?  @db.VarChar(200) @map("vendor_email")
+  vendorPhone   String?  @db.VarChar(50)  @map("vendor_phone")
+
+  // ── Key dates ────────────────────────────────────────────────────────────────
+  startDate   DateTime? @db.Date @map("start_date")
+  endDate     DateTime? @db.Date @map("end_date")
+  renewalDate DateTime? @db.Date @map("renewal_date")
+  autoRenews  Boolean   @default(false) @map("auto_renews")
+
+  // ── Value ────────────────────────────────────────────────────────────────────
+  value    Decimal? @db.Decimal(12, 2)
+  currency String   @default("USD") @db.VarChar(3)
+
+  // ── SLA / support ────────────────────────────────────────────────────────────
+  supportLevel      String? @db.VarChar(100) @map("support_level")
+  slaResponseHours  Int?    @map("sla_response_hours")
+
+  description String?  @db.Text
+  notes       String?  @db.Text
+
+  isActive    Boolean  @default(true) @map("is_active")
+
+  createdById String?  @map("created_by_id")
+  createdBy   User?    @relation("ContractCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  assetLinks  AssetContractLink[]
+
+  @@index([status])
+  @@index([endDate])
+  @@index([renewalDate])
+  @@map("contract")
+}
+
+/** AssetContractLink — links an asset to one or more contracts. */
+model AssetContractLink {
+  assetId    Int      @map("asset_id")
+  asset      Asset    @relation(fields: [assetId],    references: [id], onDelete: Cascade)
+  contractId Int      @map("contract_id")
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  linkedAt   DateTime @default(now()) @map("linked_at")
+
+  @@id([assetId, contractId])
+  @@map("asset_contract_link")
+}
+
+/**
+ * InventoryLocation — a named physical location where assets are stored or held.
+ * Stockrooms, repair benches, transit bays, and deployed sites are all modelled here.
+ * Assets carry an optional FK to their current managed location.
+ */
+model InventoryLocation {
+  id           Int                  @id @default(autoincrement())
+  name         String               @db.VarChar(100)
+  code         String?              @unique @db.VarChar(50)
+  locationType InventoryLocationType @default(stockroom) @map("location_type")
+  description  String?              @db.Text
+  site         String?              @db.VarChar(100)
+  building     String?              @db.VarChar(100)
+  room         String?              @db.VarChar(100)
+  isActive     Boolean              @default(true) @map("is_active")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+
+  assets        Asset[]         @relation("AssetCurrentLocation")
+  movementsFrom AssetMovement[] @relation("MovementFromLocation")
+  movementsTo   AssetMovement[] @relation("MovementToLocation")
+
+  @@map("inventory_location")
+}
+
+/**
+ * AssetMovement — one record per physical movement of an asset.
+ * Captures who moved it, from/to location, workflow type, and any lifecycle change.
+ */
+model AssetMovement {
+  id           Int               @id @default(autoincrement())
+  assetId      Int               @map("asset_id")
+  asset        Asset             @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  movementType AssetMovementType @map("movement_type")
+
+  fromLocationId Int?               @map("from_location_id")
+  fromLocation   InventoryLocation? @relation("MovementFromLocation", fields: [fromLocationId], references: [id])
+  toLocationId   Int?               @map("to_location_id")
+  toLocation     InventoryLocation? @relation("MovementToLocation",   fields: [toLocationId],   references: [id])
+
+  /// Free-text description for external origin/destination (e.g. "Vendor DHL", "John Smith's desk")
+  fromLabel String? @db.VarChar(200) @map("from_label")
+  toLabel   String? @db.VarChar(200) @map("to_label")
+
+  statusBefore String? @db.VarChar(50) @map("status_before")
+  statusAfter  String? @db.VarChar(50) @map("status_after")
+
+  performedById String @map("performed_by_id")
+  performedBy   User   @relation("AssetMovementPerformedBy", fields: [performedById], references: [id])
+
+  reference String? @db.VarChar(200)
+  notes     String? @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([assetId, createdAt])
+  @@map("asset_movement")
+}
+
+/**
+ * AssetRelationship — directed typed edge between two Assets.
+ *
+ * Mirrors CiRelationship for CMDB parity. Direction is always fromAsset → toAsset.
+ * Unique on (fromAssetId, toAssetId, type) so the same relationship type cannot
+ * be duplicated between a pair.
+ */
+model AssetRelationship {
+  id          Int                  @id @default(autoincrement())
+  fromAssetId Int                  @map("from_asset_id")
+  fromAsset   Asset                @relation("AssetRelFrom", fields: [fromAssetId], references: [id], onDelete: Cascade)
+  toAssetId   Int                  @map("to_asset_id")
+  toAsset     Asset                @relation("AssetRelTo",   fields: [toAssetId],   references: [id], onDelete: Cascade)
+  type        AssetRelationshipType
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  createdById String?  @map("created_by_id")
+  createdBy   User?    @relation("AssetRelCreatedBy", fields: [createdById], references: [id])
+
+  @@unique([fromAssetId, toAssetId, type])
+  @@index([fromAssetId])
+  @@index([toAssetId])
+  @@map("asset_relationship")
+}
+
+/** AssetIncidentLink — records which assets are affected by an incident. */
+model AssetIncidentLink {
+  assetId    Int      @map("asset_id")
+  asset      Asset    @relation(fields: [assetId],    references: [id], onDelete: Cascade)
+  incidentId Int      @map("incident_id")
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  linkedAt   DateTime @default(now()) @map("linked_at")
+
+  @@id([assetId, incidentId])
+  @@index([incidentId])
+  @@map("asset_incident_link")
+}
+
+/** AssetRequestLink — records which assets are involved in a service request. */
+model AssetRequestLink {
+  assetId   Int            @map("asset_id")
+  asset     Asset          @relation(fields: [assetId],   references: [id], onDelete: Cascade)
+  requestId Int            @map("request_id")
+  request   ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  linkedAt  DateTime       @default(now()) @map("linked_at")
+
+  @@id([assetId, requestId])
+  @@index([requestId])
+  @@map("asset_request_link")
+}
+
+/** AssetProblemLink — records which assets are the root cause of a problem. */
+model AssetProblemLink {
+  assetId   Int     @map("asset_id")
+  asset     Asset   @relation(fields: [assetId],   references: [id], onDelete: Cascade)
+  problemId Int     @map("problem_id")
+  problem   Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  linkedAt  DateTime @default(now()) @map("linked_at")
+
+  @@id([assetId, problemId])
+  @@index([problemId])
+  @@map("asset_problem_link")
+}
+
+/** AssetChangeLink — records which assets are in scope for a change request. */
+model AssetChangeLink {
+  assetId  Int     @map("asset_id")
+  asset    Asset   @relation(fields: [assetId],  references: [id], onDelete: Cascade)
+  changeId Int     @map("change_id")
+  change   Change  @relation(fields: [changeId], references: [id], onDelete: Cascade)
+  linkedAt DateTime @default(now()) @map("linked_at")
+
+  @@id([assetId, changeId])
+  @@index([changeId])
+  @@map("asset_change_link")
+}
+
+/** AssetServiceLink — records which assets deliver or support a catalog service. */
+model AssetServiceLink {
+  assetId       Int         @map("asset_id")
+  asset         Asset       @relation(fields: [assetId],       references: [id], onDelete: Cascade)
+  catalogItemId Int         @map("catalog_item_id")
+  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  linkedAt      DateTime    @default(now()) @map("linked_at")
+
+  @@id([assetId, catalogItemId])
+  @@index([catalogItemId])
+  @@map("asset_service_link")
+}
+
+// ── Software License Management ───────────────────────────────────────────────
+
+enum SoftwareLicenseType {
+  perpetual
+  subscription
+  oem
+  academic
+  trial
+  open_source
+  volume
+  site_license
+  concurrent
+  other
+}
+
+enum SoftwareLicenseStatus {
+  active
+  expired
+  pending
+  suspended
+  revoked
+  trial
+}
+
+enum SoftwarePlatform {
+  windows
+  mac
+  linux
+  cross_platform
+  web
+  mobile
+  other
+}
+
+/**
+ * SoftwareLicense — a procured software entitlement with seat-level allocation.
+ *
+ * Design principles:
+ *  - totalSeats null = unlimited / site license.
+ *  - consumedSeats is derived at query time from active LicenseAssignments.
+ *  - licenseKey is stored as-is; mask it in the UI for non-admin roles.
+ *  - externalId + discoverySource enable MDM sync (Jamf, Intune, etc.).
+ *  - licenseNumber: auto-generated SWL-NNNNN.
+ */
+model SoftwareLicense {
+  id             Int                   @id @default(autoincrement())
+  licenseNumber  String                @unique @map("license_number")
+  productName    String                @db.VarChar(200) @map("product_name")
+  vendor         String?               @db.VarChar(200)
+  edition        String?               @db.VarChar(100)
+  version        String?               @db.VarChar(50)
+  platform       SoftwarePlatform      @default(cross_platform)
+  licenseType    SoftwareLicenseType   @default(perpetual) @map("license_type")
+  status         SoftwareLicenseStatus @default(active)
+
+  // ── License key / reference ──────────────────────────────────────────────────
+  /// Full license key — masked in UI for non-admin roles.
+  licenseKey       String? @db.VarChar(500) @map("license_key")
+  /// Non-secret reference (order number, agreement ID, activation code prefix).
+  licenseReference String? @db.VarChar(200) @map("license_reference")
+
+  // ── Seat tracking ────────────────────────────────────────────────────────────
+  /// null = unlimited (site license, enterprise agreement, etc.)
+  totalSeats Int? @map("total_seats")
+
+  // ── Procurement / financial ──────────────────────────────────────────────────
+  purchaseDate  DateTime? @db.Date @map("purchase_date")
+  purchasePrice Decimal?  @db.Decimal(12, 2) @map("purchase_price")
+  annualCost    Decimal?  @db.Decimal(12, 2) @map("annual_cost")
+  currency      String    @default("USD") @db.VarChar(3)
+  poNumber      String?   @db.VarChar(100) @map("po_number")
+  invoiceNumber String?   @db.VarChar(100) @map("invoice_number")
+
+  // ── Dates ────────────────────────────────────────────────────────────────────
+  startDate    DateTime? @db.Date @map("start_date")
+  expiryDate   DateTime? @db.Date @map("expiry_date")
+  renewalDate  DateTime? @db.Date @map("renewal_date")
+  autoRenews   Boolean   @default(false) @map("auto_renews")
+
+  // ── Vendor contact ───────────────────────────────────────────────────────────
+  vendorContact String? @db.VarChar(200) @map("vendor_contact")
+  vendorEmail   String? @db.VarChar(200) @map("vendor_email")
+
+  // ── Governance ───────────────────────────────────────────────────────────────
+  complianceNotes String? @db.Text @map("compliance_notes")
+  notes           String? @db.Text
+
+  // ── Discovery / MDM integration ──────────────────────────────────────────────
+  /// Identifier used by the discovery source (e.g. Jamf software ID, Intune app ID)
+  externalId      String?   @db.VarChar(200) @map("external_id")
+  /// Source system that manages this license (e.g. "jamf", "intune", "manual", "saas_tool")
+  discoverySource String?   @db.VarChar(50)  @map("discovery_source")
+  lastSyncAt      DateTime? @map("last_sync_at")
+
+  // ── Ownership ────────────────────────────────────────────────────────────────
+  ownerId     String? @map("owner_id")
+  owner       User?   @relation("SoftwareLicenseOwner",     fields: [ownerId],     references: [id])
+  teamId      Int?    @map("team_id")
+  createdById String? @map("created_by_id")
+  createdBy   User?   @relation("SoftwareLicenseCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  assignments LicenseAssignment[]
+
+  @@index([licenseType])
+  @@index([status])
+  @@index([ownerId])
+  @@index([expiryDate])
+  @@index([renewalDate])
+  @@index([externalId])
+  @@index([discoverySource])
+  @@map("software_license")
+}
+
+/**
+ * LicenseAssignment — allocates one seat of a SoftwareLicense to a user or device.
+ *
+ * Either assignedToUserId or assignedToAssetId must be set (or both when a
+ * named-user license is tied to a specific machine).
+ * Active assignments have unassignedAt = null.
+ */
+model LicenseAssignment {
+  id          Int              @id @default(autoincrement())
+  licenseId   Int              @map("license_id")
+  license     SoftwareLicense  @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  /// User holding this seat (person-based licensing)
+  assignedToUserId  String? @map("assigned_to_user_id")
+  assignedToUser    User?   @relation("LicenseAssignmentUser",  fields: [assignedToUserId],  references: [id])
+
+  /// Device holding this seat (device-based / OEM licensing)
+  assignedToAssetId Int?   @map("assigned_to_asset_id")
+  assignedToAsset   Asset? @relation(fields: [assignedToAssetId], references: [id])
+
+  assignedAt   DateTime  @default(now()) @map("assigned_at")
+  unassignedAt DateTime? @map("unassigned_at")
+  note         String?   @db.VarChar(500)
+
+  assignedById String? @map("assigned_by_id")
+  assignedBy   User?   @relation("LicenseAssignmentBy", fields: [assignedById], references: [id])
+
+  @@index([licenseId])
+  @@index([assignedToUserId])
+  @@index([assignedToAssetId])
+  @@index([licenseId, unassignedAt])
+  @@map("license_assignment")
+}
+
+// ── SaaS Subscription Management ─────────────────────────────────────────────
+
+enum SaaSCategory {
+  identity
+  collaboration
+  project_management
+  crm
+  devtools
+  security
+  hr
+  finance
+  communication
+  productivity
+  analytics
+  design
+  marketing
+  storage
+  monitoring
+  other
+}
+
+enum SaaSBillingCycle {
+  monthly
+  annual
+  multi_year
+  one_time
+  usage_based
+}
+
+enum SaaSSubscriptionStatus {
+  active
+  trial
+  pending
+  suspended
+  cancelled
+  expired
+}
+
+/**
+ * SaaSSubscription — a cloud/web application subscription with user provisioning.
+ *
+ * Design principles:
+ *  - totalSeats null = unlimited (enterprise agreements, usage-based plans).
+ *  - Consumed seats is derived at query time from active SaaSUserAssignments.
+ *  - externalId + discoverySource support Okta SSO, expense data, or SaaS discovery tools.
+ *  - subscriptionNumber: auto-generated SAAS-NNNNN.
+ */
+model SaaSSubscription {
+  id                 Int                    @id @default(autoincrement())
+  subscriptionNumber String                 @unique @map("subscription_number")
+  appName            String                 @db.VarChar(200) @map("app_name")
+  vendor             String?                @db.VarChar(200)
+  category           SaaSCategory           @default(other)
+  status             SaaSSubscriptionStatus @default(active)
+
+  // ── Plan / billing ───────────────────────────────────────────────────────────
+  plan         String?          @db.VarChar(100)
+  billingCycle SaaSBillingCycle @default(annual) @map("billing_cycle")
+
+  // ── Admin access ─────────────────────────────────────────────────────────────
+  /// URL of the admin portal / SSO app
+  url        String? @db.VarChar(500)
+  adminEmail String? @db.VarChar(200) @map("admin_email")
+
+  // ── Seat / user tracking ─────────────────────────────────────────────────────
+  /// Licensed / billed seats. null = unlimited or usage-based.
+  totalSeats  Int? @map("total_seats")
+
+  // ── Financial ────────────────────────────────────────────────────────────────
+  monthlyAmount Decimal? @db.Decimal(12, 2) @map("monthly_amount")
+  annualAmount  Decimal? @db.Decimal(12, 2) @map("annual_amount")
+  currency      String   @default("USD") @db.VarChar(3)
+  spendCategory String?  @db.VarChar(100) @map("spend_category")
+
+  // ── Dates ────────────────────────────────────────────────────────────────────
+  startDate        DateTime? @db.Date @map("start_date")
+  trialEndDate     DateTime? @db.Date @map("trial_end_date")
+  renewalDate      DateTime? @db.Date @map("renewal_date")
+  cancellationDate DateTime? @db.Date @map("cancellation_date")
+  autoRenews       Boolean   @default(true) @map("auto_renews")
+
+  // ── Governance ───────────────────────────────────────────────────────────────
+  complianceNotes String? @db.Text @map("compliance_notes")
+  notes           String? @db.Text
+
+  // ── Discovery / integration ──────────────────────────────────────────────────
+  /// ID from discovery source (e.g. Okta app ID, expense-data vendor ID)
+  externalId      String?   @db.VarChar(200) @map("external_id")
+  /// Source: "okta" | "g_suite" | "azure_ad" | "expense_tool" | "manual"
+  discoverySource String?   @db.VarChar(50)  @map("discovery_source")
+  lastSyncAt      DateTime? @map("last_sync_at")
+
+  // ── Ownership ────────────────────────────────────────────────────────────────
+  ownerId     String?  @map("owner_id")
+  owner       User?    @relation("SaaSSubscriptionOwner",     fields: [ownerId],     references: [id])
+  teamId      Int?     @map("team_id")
+  createdById String?  @map("created_by_id")
+  createdBy   User?    @relation("SaaSSubscriptionCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  userAssignments SaaSUserAssignment[]
+
+  @@index([category])
+  @@index([status])
+  @@index([ownerId])
+  @@index([renewalDate])
+  @@index([externalId])
+  @@index([discoverySource])
+  @@map("saas_subscription")
+}
+
+/**
+ * SaaSUserAssignment — provisions a user onto a SaaS application.
+ *
+ * role is application-defined (viewer, editor, admin, owner — stored as free text).
+ * Active assignments have unassignedAt = null.
+ * lastActiveAt is updated by discovery sync to identify dormant users.
+ */
+model SaaSUserAssignment {
+  id             Int              @id @default(autoincrement())
+  subscriptionId Int              @map("subscription_id")
+  subscription   SaaSSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  userId         String @map("user_id")
+  user           User   @relation("SaaSUserAssignmentUser", fields: [userId], references: [id])
+
+  /// Application-level role (e.g. "admin", "editor", "viewer", "billing_admin")
+  role           String?   @db.VarChar(50)
+
+  assignedAt     DateTime  @default(now()) @map("assigned_at")
+  lastActiveAt   DateTime? @map("last_active_at")
+  unassignedAt   DateTime? @map("unassigned_at")
+  note           String?   @db.VarChar(500)
+
+  assignedById String? @map("assigned_by_id")
+  assignedBy   User?   @relation("SaaSUserAssignmentBy", fields: [assignedById], references: [id])
+
+  @@unique([subscriptionId, userId])
+  @@index([subscriptionId])
+  @@index([userId])
+  @@index([subscriptionId, unassignedAt])
+  @@map("saas_user_assignment")
+}
+
+// ── Asset Discovery & Sync ────────────────────────────────────────────────────
+
+enum SyncRunStatus {
+  pending
+  running
+  completed
+  failed
+  cancelled
+}
+
+enum SyncTriggerType {
+  schedule
+  manual
+  import
+}
+
+/**
+ * DiscoveryConnector — a registered source for asset discovery/sync.
+ *
+ * Design principles:
+ *  - source is the unique slug ("jamf", "intune", "csv", "snmp", "custom").
+ *  - config stores non-secret settings: baseUrl, tenantId, clientId, fieldMappings.
+ *    NEVER store API keys or passwords here — those belong in environment variables.
+ *  - scheduleExpression is a cron string; null means manual-trigger only.
+ *  - syncPolicy: "merge" preserves human-set fields; "overwrite" is source-authoritative.
+ */
+model DiscoveryConnector {
+  id                 Int       @id @default(autoincrement())
+  /// Unique slug matching discoverySource on Asset ("jamf", "intune", "csv", etc.)
+  source             String    @unique @db.VarChar(50)
+  label              String    @db.VarChar(200)
+  isEnabled          Boolean   @default(true) @map("is_enabled")
+  /// Cron expression for scheduled syncs (e.g. "0 2 * * *"). Null = manual only.
+  scheduleExpression String?   @db.VarChar(100) @map("schedule_expression")
+  /// "merge" = preserve operator-set fields; "overwrite" = source is authoritative
+  syncPolicy         String    @default("merge") @db.VarChar(20) @map("sync_policy")
+  /// Non-secret configuration (baseUrl, tenantId, clientId, field mappings, etc.)
+  /// NEVER put credentials here — use environment variables instead.
+  config             Json      @default("{}")
+  /// Last successful sync completion
+  lastSyncAt         DateTime? @map("last_sync_at")
+  /// When the next scheduled sync should fire (computed after each run)
+  nextSyncAt         DateTime? @map("next_sync_at")
+  /// Cumulative count of assets ever imported by this connector
+  totalSynced        Int       @default(0) @map("total_synced")
+  description        String?   @db.Text
+
+  createdById String?  @map("created_by_id")
+  createdBy   User?    @relation("DiscoveryConnectorCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  syncRuns DiscoverySyncRun[]
+
+  @@index([source])
+  @@index([isEnabled])
+  @@map("discovery_connector")
+}
+
+/**
+ * DiscoverySyncRun — a single execution of a discovery connector.
+ *
+ * Created before the sync starts (status=pending), updated throughout,
+ * and finalised when complete or on failure. Provides a full audit trail
+ * of every sync: who triggered it, when, how many assets were affected.
+ */
+model DiscoverySyncRun {
+  id          Int              @id @default(autoincrement())
+  connectorId Int              @map("connector_id")
+  connector   DiscoveryConnector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  /// Denormalised for filtering without join
+  source      String           @db.VarChar(50)
+  status      SyncRunStatus    @default(pending)
+  triggerType SyncTriggerType  @default(manual) @map("trigger_type")
+
+  triggeredByUserId String? @map("triggered_by_user_id")
+  triggeredByUser   User?   @relation("DiscoverySyncRunTriggeredBy", fields: [triggeredByUserId], references: [id])
+
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  /// Total records received from the source
+  assetsDiscovered Int @default(0) @map("assets_discovered")
+  /// New assets created in this run
+  assetsCreated    Int @default(0) @map("assets_created")
+  /// Existing assets updated in this run
+  assetsUpdated    Int @default(0) @map("assets_updated")
+  /// Assets already in sync — no changes detected
+  assetsSkipped    Int @default(0) @map("assets_skipped")
+  /// Assets that failed reconciliation (see DiscoverySyncError for details)
+  assetsFailed     Int @default(0) @map("assets_failed")
+  /// Assets previously seen by this source that were absent from this run
+  assetsStale      Int @default(0) @map("assets_stale")
+
+  /// Top-level error if the entire run failed (adapter init error, auth failure, etc.)
+  errorMessage String? @db.Text @map("error_message")
+  /// pg-boss job ID for traceability
+  jobId        String? @db.VarChar(100) @map("job_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  errors    DiscoverySyncError[]
+
+  @@index([connectorId, createdAt])
+  @@index([source])
+  @@index([status])
+  @@map("discovery_sync_run")
+}
+
+/**
+ * DiscoverySyncError — per-asset failure record within a sync run.
+ *
+ * Allows granular inspection of which specific source records failed to
+ * reconcile and why, without polluting the run-level errorMessage.
+ */
+model DiscoverySyncError {
+  id           Int              @id @default(autoincrement())
+  syncRunId    Int              @map("sync_run_id")
+  syncRun      DiscoverySyncRun @relation(fields: [syncRunId], references: [id], onDelete: Cascade)
+  /// The externalId from the source (null if the record was malformed)
+  externalId   String?          @db.VarChar(200) @map("external_id")
+  errorMessage String           @db.Text @map("error_message")
+  /// The raw source record that caused the error (for debugging)
+  rawData      Json             @default("{}") @map("raw_data")
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  @@index([syncRunId])
+  @@map("discovery_sync_error")
 }

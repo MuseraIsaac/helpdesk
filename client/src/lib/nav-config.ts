@@ -35,6 +35,9 @@ import {
   Building2,
   Tag,
   CircleDot,
+  Key,
+  Cloud,
+  Radar,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { can, type Permission } from "core/constants/permission.ts";
@@ -164,6 +167,27 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Server,
         permission: "assets.view",
         badge: "beta",
+      },
+      {
+        id: "software-licenses",
+        to: "/software/licenses",
+        label: "Software Licenses",
+        icon: Key,
+        permission: "software.view",
+      },
+      {
+        id: "saas-subscriptions",
+        to: "/software/saas",
+        label: "SaaS Subscriptions",
+        icon: Cloud,
+        permission: "software.view",
+      },
+      {
+        id: "discovery",
+        to: "/discovery",
+        label: "Discovery & Sync",
+        icon: Radar,
+        permission: "assets.manage",
       },
       {
         id: "approvals",

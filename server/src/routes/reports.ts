@@ -1191,4 +1191,219 @@ router.get("/kb-search-stats", async (req, res) => {
   });
 });
 
+// ── Asset Analytics ───────────────────────────────────────────────────────────
+//
+// GET /api/reports/assets?period=30  (or from=YYYY-MM-DD&to=YYYY-MM-DD)
+//
+// Single-pass aggregate endpoint for the Assets report dashboard.
+// Returns KPIs, distributions, expiry alerts, trend data, and discovery stats.
+
+router.get("/assets", async (req, res) => {
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>, 30);
+  const now = new Date();
+  const in30  = new Date(now.getTime() + 30  * 86_400_000);
+  const in90  = new Date(now.getTime() + 90  * 86_400_000);
+
+  const [
+    // KPI aggregates — one pass
+    kpiRow,
+    // Status breakdown
+    byStatusRows,
+    // Type breakdown
+    byTypeRows,
+    // Team breakdown (top 15)
+    byTeamRows,
+    // Location breakdown (top 15)
+    byLocationRows,
+    // Expiry alerts
+    warrantyExpiring30,
+    warrantyExpiring90,
+    contractsExpiring30,
+    retirementDue90,
+    retirementOverdue,
+    // Discovery
+    discoveryStats,
+    // Incidents
+    incidentStats,
+    // Trend: assets created per day
+    createdTrend,
+    // Trend: retired/disposed
+    retiredTrend,
+  ] = await Promise.all([
+    // ── KPIs ────────────────────────────────────────────────────────────────
+    prisma.$queryRaw<[{
+      total:    bigint;
+      active:   bigint;
+      in_stock: bigint;
+      deployed: bigint;
+      in_use:   bigint;
+      maint:    bigint;
+    }]>`
+      SELECT
+        COUNT(*)                                                     AS total,
+        COUNT(*) FILTER (WHERE status IN ('deployed','in_use'))       AS active,
+        COUNT(*) FILTER (WHERE status = 'in_stock')                  AS in_stock,
+        COUNT(*) FILTER (WHERE status = 'deployed')                  AS deployed,
+        COUNT(*) FILTER (WHERE status = 'in_use')                    AS in_use,
+        COUNT(*) FILTER (WHERE status IN ('under_maintenance','in_repair')) AS maint
+      FROM asset
+    `,
+
+    // ── By status ────────────────────────────────────────────────────────────
+    prisma.$queryRaw<{ status: string; count: bigint }[]>`
+      SELECT status::text AS status, COUNT(*) AS count
+      FROM asset GROUP BY status ORDER BY count DESC
+    `,
+
+    // ── By type ──────────────────────────────────────────────────────────────
+    prisma.$queryRaw<{ type: string; count: bigint }[]>`
+      SELECT type::text AS type, COUNT(*) AS count
+      FROM asset GROUP BY type ORDER BY count DESC
+    `,
+
+    // ── By team ──────────────────────────────────────────────────────────────
+    prisma.$queryRaw<{ team_name: string; count: bigint; active: bigint }[]>`
+      SELECT COALESCE(q.name, 'Unassigned') AS team_name,
+             COUNT(a.id)                       AS count,
+             COUNT(a.id) FILTER (WHERE a.status IN ('deployed','in_use')) AS active
+      FROM asset a LEFT JOIN queue q ON q.id = a.team_id
+      GROUP BY q.name ORDER BY count DESC LIMIT 15
+    `,
+
+    // ── By location ───────────────────────────────────────────────────────────
+    prisma.$queryRaw<{ location: string; count: bigint }[]>`
+      SELECT COALESCE(NULLIF(TRIM(COALESCE(site, location)), ''), 'Unspecified') AS location,
+             COUNT(*) AS count
+      FROM asset
+      GROUP BY COALESCE(NULLIF(TRIM(COALESCE(site, location)), ''), 'Unspecified')
+      ORDER BY count DESC LIMIT 15
+    `,
+
+    // ── Warranty expiring 30d ─────────────────────────────────────────────────
+    prisma.asset.count({
+      where: { warrantyExpiry: { gte: now, lte: in30 }, status: { notIn: ["retired","disposed","lost_stolen"] } },
+    }),
+
+    // ── Warranty expiring 90d ─────────────────────────────────────────────────
+    prisma.asset.count({
+      where: { warrantyExpiry: { gte: now, lte: in90 }, status: { notIn: ["retired","disposed","lost_stolen"] } },
+    }),
+
+    // ── Contracts expiring 30d ────────────────────────────────────────────────
+    prisma.contract.count({
+      where: { endDate: { gte: now, lte: in30 }, status: "active" },
+    }),
+
+    // ── Retirement due 90d ────────────────────────────────────────────────────
+    prisma.asset.count({
+      where: { endOfLifeAt: { gte: now, lte: in90 }, status: { notIn: ["retired","disposed","lost_stolen"] } },
+    }),
+
+    // ── Retirement overdue ────────────────────────────────────────────────────
+    prisma.asset.count({
+      where: { endOfLifeAt: { lt: now }, status: { notIn: ["retired","disposed","lost_stolen"] } },
+    }),
+
+    // ── Discovery stats ───────────────────────────────────────────────────────
+    prisma.$queryRaw<[{ stale: bigint; recently_discovered: bigint; managed: bigint }]>`
+      SELECT
+        COUNT(*) FILTER (WHERE "stale_detected_at" IS NOT NULL)         AS stale,
+        COUNT(*) FILTER (WHERE "last_discovered_at" >= NOW() - INTERVAL '7 days'
+                           AND "stale_detected_at" IS NULL)             AS recently_discovered,
+        COUNT(*) FILTER (WHERE "discovery_source" IS NOT NULL)          AS managed
+      FROM asset
+    `,
+
+    // ── Assets with open incidents ────────────────────────────────────────────
+    prisma.$queryRaw<[{ assets: bigint; incidents: bigint }]>`
+      SELECT
+        COUNT(DISTINCT ail."asset_id") AS assets,
+        COUNT(*)                       AS incidents
+      FROM asset_incident_link ail
+      JOIN incident i ON i.id = ail."incident_id"
+      WHERE i.status NOT IN ('resolved','closed')
+    `,
+
+    // ── Created trend ─────────────────────────────────────────────────────────
+    prisma.$queryRaw<{ date: string; count: bigint }[]>`
+      SELECT TO_CHAR("created_at"::date,'YYYY-MM-DD') AS date, COUNT(*) AS count
+      FROM asset
+      WHERE "created_at" >= ${since} AND "created_at" <= ${until}
+      GROUP BY "created_at"::date ORDER BY "created_at"::date
+    `,
+
+    // ── Retired/disposed trend ────────────────────────────────────────────────
+    prisma.$queryRaw<{ date: string; retired: bigint; disposed: bigint }[]>`
+      SELECT
+        TO_CHAR("retired_at"::date,'YYYY-MM-DD') AS date,
+        COUNT(*) FILTER (WHERE status = 'retired')  AS retired,
+        COUNT(*) FILTER (WHERE status = 'disposed') AS disposed
+      FROM asset
+      WHERE "retired_at" >= ${since} AND "retired_at" <= ${until}
+        AND "retired_at" IS NOT NULL
+        AND status IN ('retired','disposed')
+      GROUP BY "retired_at"::date ORDER BY "retired_at"::date
+    `,
+  ]);
+
+  const kpi = kpiRow[0]!;
+
+  // Fill created trend for full date range
+  const createdLookup = new Map(createdTrend.map(r => [r.date, Number(r.count)]));
+  const retiredLookupR = new Map<string, number>();
+  const retiredLookupD = new Map<string, number>();
+  for (const r of retiredTrend) {
+    retiredLookupR.set(r.date, Number(r.retired));
+    retiredLookupD.set(r.date, Number(r.disposed));
+  }
+
+  const createdTimeSeries = fillDateRange(since, until, createdLookup, 0).map(p => ({ date: p.date, count: p.value }));
+  const retiredTimeSeries = (() => {
+    const cursor = new Date(since);
+    const result: { date: string; retired: number; disposed: number }[] = [];
+    while (cursor <= until) {
+      const d = cursor.toISOString().slice(0, 10);
+      result.push({ date: d, retired: retiredLookupR.get(d) ?? 0, disposed: retiredLookupD.get(d) ?? 0 });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return result;
+  })();
+
+  res.json({
+    // ── KPIs ─────────────────────────────────────────────────────────────────
+    totalAssets:    Number(kpi.total),
+    activeAssets:   Number(kpi.active),
+    inStockAssets:  Number(kpi.in_stock),
+    deployedAssets: Number(kpi.deployed),
+    inUseAssets:    Number(kpi.in_use),
+    maintenanceAssets: Number(kpi.maint),
+
+    // ── Expiry alerts ─────────────────────────────────────────────────────────
+    warrantyExpiring30,
+    warrantyExpiring90,
+    contractsExpiring30,
+    retirementDue90,
+    retirementOverdue,
+
+    // ── Discovery ─────────────────────────────────────────────────────────────
+    staleAssets:          Number(discoveryStats[0]?.stale              ?? 0),
+    recentlyDiscovered:   Number(discoveryStats[0]?.recently_discovered ?? 0),
+    managedByDiscovery:   Number(discoveryStats[0]?.managed            ?? 0),
+
+    // ── Linked incidents ──────────────────────────────────────────────────────
+    assetsWithOpenIncidents: Number(incidentStats[0]?.assets   ?? 0),
+    openIncidentCount:       Number(incidentStats[0]?.incidents ?? 0),
+
+    // ── Distributions ─────────────────────────────────────────────────────────
+    byStatus:   byStatusRows.map(r => ({ status: r.status,   count: Number(r.count) })),
+    byType:     byTypeRows.map(r   => ({ type: r.type,       count: Number(r.count) })),
+    byTeam:     byTeamRows.map(r   => ({ teamName: r.team_name, count: Number(r.count), active: Number(r.active) })),
+    byLocation: byLocationRows.map(r => ({ location: r.location, count: Number(r.count) })),
+
+    // ── Trends ────────────────────────────────────────────────────────────────
+    createdTrend:  createdTimeSeries,
+    retiredTrend:  retiredTimeSeries,
+  });
+});
+
 export default router;

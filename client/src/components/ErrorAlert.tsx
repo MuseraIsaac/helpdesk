@@ -14,7 +14,12 @@ interface ErrorAlertProps {
 
 export function getErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError(error)) {
-    return error.response?.data?.error ?? fallback;
+    const data = error.response?.data;
+    // Server may return { error: "..." } or { message: "..." }
+    if (typeof data?.error   === "string") return data.error;
+    if (typeof data?.message === "string") return data.message;
+    // Network error (no response)
+    if (error.message) return error.message;
   }
   return fallback;
 }

@@ -20,6 +20,8 @@ import portalRouter from "./routes/portal";
 import kbRouter from "./routes/kb";
 import csatRouter from "./routes/csat";
 import reportsRouter from "./routes/reports";
+import reportsShareRouter from "./routes/reports-share";
+import reportsExportRouter from "./routes/reports-export";
 import analyticsRouter from "./routes/analytics";
 import attachmentsRouter from "./routes/attachments";
 import teamsRouter from "./routes/teams";
@@ -52,6 +54,14 @@ import ticketStatusConfigsRouter from "./routes/ticket-status-configs";
 import escalationRulesRouter from "./routes/escalation-rules";
 import presenceRouter from "./routes/presence";
 import cmdbRouter from "./routes/cmdb";
+import assetsRouter from "./routes/assets";
+import assetViewsRouter from "./routes/asset-views";
+import inventoryLocationsRouter from "./routes/inventory-locations";
+import contractsRouter from "./routes/contracts";
+import assetFinancialRouter from "./routes/asset-financial";
+import softwareLicensesRouter from "./routes/software-licenses";
+import saasSubscriptionsRouter from "./routes/saas-subscriptions";
+import discoveryRouter from "./routes/discovery";
 import catalogRouter from "./routes/catalog";
 import notificationsRouter from "./routes/notifications";
 import searchRouter from "./routes/search";
@@ -152,10 +162,20 @@ app.use("/api/problems", problemsRouter);
 app.use("/api/changes", changesRouter);
 app.use("/api/changes/:changeId/attachments", changeAttachmentsRouter);
 app.use("/api/cmdb", cmdbRouter);
+app.use("/api/assets", assetsRouter);
+app.use("/api/asset-views", assetViewsRouter);
+app.use("/api/inventory-locations", inventoryLocationsRouter);
+app.use("/api/contracts", contractsRouter);
+app.use("/api/assets/financial", assetFinancialRouter);
+app.use("/api/software-licenses", softwareLicensesRouter);
+app.use("/api/saas-subscriptions", saasSubscriptionsRouter);
+app.use("/api/discovery", discoveryRouter);
 app.use("/api/catalog", catalogRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/search", searchRouter);
 app.use("/api/analytics", analyticsRouter);
+app.use("/api/reports", reportsShareRouter);
+app.use("/api/reports", reportsExportRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/theme", themeRouter);
 app.use("/api/users", usersRouter);
@@ -186,6 +206,19 @@ app.use("/api/teams", teamsRouter);
 app.use("/api/webhooks", webhooksRouter);
 
 Sentry.setupExpressErrorHandler(app);
+
+// Global JSON error handler — must have 4 params so Express recognises it as an error handler.
+// Runs after Sentry has captured the exception. Ensures all unhandled errors (Prisma, etc.)
+// return { error: "..." } JSON instead of an HTML 500 page.
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const anyErr = err as { status?: number; statusCode?: number; message?: string };
+  const status  = anyErr.status ?? anyErr.statusCode ?? 500;
+  const message =
+    process.env.NODE_ENV === "production"
+      ? (status < 500 ? (anyErr.message ?? "Bad request") : "Internal server error")
+      : (anyErr.message ?? "Internal server error");
+  res.status(status).json({ error: message });
+});
 
 // In production, serve the built React client as static files
 if (isProduction) {

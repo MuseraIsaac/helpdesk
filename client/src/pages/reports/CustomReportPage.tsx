@@ -11,10 +11,14 @@
  *   /reports/custom/:id      — load existing saved report
  */
 import { useState, useCallback, useRef, useEffect } from "react";
-import { useParams, useNavigate } from "react-router";
+import { useParams, useNavigate, useLocation, Link } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import axios from "axios";
 import {
-  Pencil, Save, Download, RotateCcw, ChevronDown, Loader2, Clock,
+  Pencil, Save, Download, RotateCcw, ChevronDown, Loader2, Clock, Lock,
+  ChevronRight, BarChart2, TrendingUp, ShieldCheck, AlertTriangle, Star,
+  Users, UsersRound, BookOpen, Activity, Library, PackageCheck, Bug,
+  CheckCircle2, GitBranch, Mail, FileDown, FileSpreadsheet, FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,9 +26,11 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ErrorAlert from "@/components/ErrorAlert";
+import ShareReportEmailDialog from "@/components/reports/ShareReportEmailDialog";
+import { usePrintReport } from "@/hooks/usePrintReport";
 import { ReportCanvas }      from "@/components/analytics/ReportCanvas";
 import { MetricLibrary, defaultSize } from "@/components/analytics/MetricLibrary";
 import { WidgetConfigPanel } from "@/components/analytics/WidgetConfigPanel";
@@ -33,6 +39,25 @@ import {
   type WidgetLayout, type ReportConfig, type MetricMeta, listMetrics,
 } from "@/lib/reports/analytics-api";
 import { cn } from "@/lib/utils";
+
+// ── Compact reports section nav ───────────────────────────────────────────────
+
+const REPORT_SECTIONS = [
+  { path: "overview",   label: "Overview",       icon: BarChart2   },
+  { path: "tickets",    label: "Tickets",         icon: TrendingUp  },
+  { path: "sla",        label: "SLA",             icon: ShieldCheck },
+  { path: "agents",     label: "Agents",          icon: Users       },
+  { path: "teams",      label: "Teams",           icon: UsersRound  },
+  { path: "incidents",  label: "Incidents",       icon: AlertTriangle },
+  { path: "requests",   label: "Requests",        icon: PackageCheck },
+  { path: "problems",   label: "Problems",        icon: Bug         },
+  { path: "approvals",  label: "Approvals",       icon: CheckCircle2 },
+  { path: "changes",    label: "Changes",         icon: GitBranch   },
+  { path: "csat",       label: "CSAT",            icon: Star        },
+  { path: "kb",         label: "KB",              icon: BookOpen    },
+  { path: "realtime",   label: "Real-time",       icon: Activity    },
+  { path: "library",    label: "Library",         icon: Library     },
+] as const;
 
 // ── Period options ────────────────────────────────────────────────────────────
 
@@ -63,8 +88,11 @@ function uid() { return `w_${Date.now()}_${++_counter}`; }
 
 export default function CustomReportPage() {
   const { id: reportIdParam } = useParams<{ id?: string }>();
-  const reportId = reportIdParam ? Number(reportIdParam) : null;
-  const navigate = useNavigate();
+  const reportId  = reportIdParam ? Number(reportIdParam) : null;
+  const navigate  = useNavigate();
+  const location  = useLocation();
+  // curated=true is passed via location state when viewing a system report read-only
+  const isCuratedView = (location.state as { curated?: boolean } | null)?.curated === true;
   const qc = useQueryClient();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(900);
@@ -92,8 +120,10 @@ export default function CustomReportPage() {
   const [preset,    setPreset]    = useState("last_30_days");
 
   // Widget editor state
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingId,  setEditingId]  = useState<string | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
+  const [shareOpen,  setShareOpen]  = useState(false);
+  const printReport = usePrintReport();
 
   // ── Load existing report ──────────────────────────────────────────────────
 
@@ -214,15 +244,29 @@ export default function CustomReportPage() {
 
   // ── Export ────────────────────────────────────────────────────────────────
 
+  const [exporting, setExporting] = useState<"csv" | "xlsx" | null>(null);
+
   async function handleExport(format: "csv" | "xlsx") {
-    if (widgets.length === 0) return;
-    const w = widgets[0];
-    const blob = await exportMetric({ metricId: w.metricId, dateRange: { preset } }, format);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `${reportName}.${format}`;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (!reportId) return; // report must be saved before exporting
+    setExporting(format);
+    try {
+      const resp = await axios.post(
+        `/api/analytics/reports/${reportId}/export`,
+        { format },
+        { responseType: "blob" },
+      );
+      const ext  = format === "xlsx" ? "xlsx" : "csv";
+      const mime = format === "xlsx"
+        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        : "text/csv";
+      const url  = URL.createObjectURL(new Blob([resp.data as BlobPart], { type: mime }));
+      const a    = document.createElement("a");
+      a.href = url; a.download = `${reportName}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(null);
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -240,13 +284,63 @@ export default function CustomReportPage() {
   }
 
   // Layout note: this page renders inside Layout's <main className="flex-1 px-6 py-8 max-w-[1200px]">.
-  // We break out of that padding with -mx-6 -mt-8 so the toolbar and sidebar span full width,
-  // and use natural document scroll (no h-full) since the parent has no explicit height set.
+  // We break out of that padding with -mx-6 -mt-8 so the toolbar and sidebar span full width.
   return (
     <div className="-mx-6 -mt-8 -mb-8 flex flex-col">
 
-      {/* ── Toolbar — full-width, sticky below Layout header (h-14 = 56px) ── */}
-      <div className="sticky top-14 z-20 flex items-center gap-2 px-4 py-2 border-b border-border/60 bg-background/95 backdrop-blur-sm">
+      {/* ── Reports nav bar — sticky at top-14 (just below the app header) ── */}
+      {/*    Keeps all report section tabs visible no matter where you are.    */}
+      <div className="sticky top-14 z-30 bg-background border-b border-border/60 shadow-sm">
+        {/* Breadcrumb row */}
+        <div className="flex items-center gap-1.5 px-4 py-2 text-xs text-muted-foreground border-b border-border/40">
+          <Link to="/reports/overview" className="hover:text-foreground transition-colors font-medium">
+            Reports
+          </Link>
+          <ChevronRight className="h-3 w-3 opacity-40 shrink-0" />
+          <Link to="/reports/library" className="hover:text-foreground transition-colors">
+            Library
+          </Link>
+          {reportId && (
+            <>
+              <ChevronRight className="h-3 w-3 opacity-40 shrink-0" />
+              <span className="text-foreground font-medium truncate max-w-[200px]">{reportName}</span>
+            </>
+          )}
+          {!reportId && (
+            <>
+              <ChevronRight className="h-3 w-3 opacity-40 shrink-0" />
+              <span className="text-foreground font-medium">New Report</span>
+            </>
+          )}
+          {isCuratedView && (
+            <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border/60">
+              <Lock className="h-2.5 w-2.5" />Read-only
+            </span>
+          )}
+          {editMode && !isCuratedView && (
+            <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+              {reportId ? "Editing" : "Building"}
+            </span>
+          )}
+        </div>
+
+        {/* Section tabs — horizontally scrollable */}
+        <nav className="flex overflow-x-auto scrollbar-none px-2" aria-label="Report sections">
+          {REPORT_SECTIONS.map(({ path, label, icon: Icon }) => (
+            <Link
+              key={path}
+              to={`/reports/${path}?period=30`}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium whitespace-nowrap text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            >
+              <Icon className="h-3 w-3 shrink-0" />
+              {label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+
+      {/* ── Toolbar — sticky below the reports nav bar (~top-14 + 72px = top-32) ── */}
+      <div className="sticky top-32 z-20 flex items-center gap-2 px-4 py-2 border-b border-border/60 bg-background/95 backdrop-blur-sm">
         {editMode ? (
           <Input
             value={reportName}
@@ -279,25 +373,51 @@ export default function CustomReportPage() {
           <>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5">
-                  <Download className="h-3.5 w-3.5" />
+                <Button
+                  variant="outline" size="sm" className="h-7 text-xs gap-1.5"
+                  disabled={!!exporting || !reportId}
+                  title={!reportId ? "Save the report first to enable export" : undefined}
+                >
+                  {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                   Export
                   <ChevronDown className="h-3 w-3 opacity-60" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem className="text-xs" onClick={() => handleExport("csv")}>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem className="text-xs gap-2" onClick={() => handleExport("xlsx")} disabled={exporting === "xlsx"}>
+                  <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
+                  Export as Excel (.xlsx)
+                </DropdownMenuItem>
+                <DropdownMenuItem className="text-xs gap-2" onClick={() => handleExport("csv")} disabled={exporting === "csv"}>
+                  <FileText className="h-3.5 w-3.5 text-blue-500" />
                   Export as CSV
                 </DropdownMenuItem>
-                <DropdownMenuItem className="text-xs" onClick={() => handleExport("xlsx")}>
-                  Export as Excel (.xlsx)
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-xs gap-2"
+                  onClick={() => printReport({
+                    title: reportName,
+                    periodLabel: PERIOD_OPTIONS.find(o => o.value === preset)?.label ?? preset,
+                  })}
+                >
+                  <FileDown className="h-3.5 w-3.5 text-muted-foreground" />
+                  Save as PDF
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button size="sm" className="h-7 text-xs gap-1.5" onClick={() => setEditMode(true)}>
-              <Pencil className="h-3.5 w-3.5" />
-              Edit
+            <Button
+              variant="outline" size="sm" className="h-7 text-xs gap-1.5"
+              onClick={() => setShareOpen(true)}
+            >
+              <Mail className="h-3.5 w-3.5" />
+              Share
             </Button>
+            {!isCuratedView && (
+              <Button size="sm" className="h-7 text-xs gap-1.5" onClick={() => setEditMode(true)}>
+                <Pencil className="h-3.5 w-3.5" />
+                Edit
+              </Button>
+            )}
           </>
         )}
 
@@ -336,11 +456,11 @@ export default function CustomReportPage() {
       )}
 
       {/* ── Body — sidebar + canvas as a natural-height row ─────────────── */}
-      <div className="flex min-h-[calc(100vh-120px)]">
+      <div className="flex min-h-[calc(100vh-160px)]">
 
-        {/* Metric library sidebar — edit mode only, sticky so it stays on screen while scrolling */}
+        {/* Metric library sidebar — edit mode only, sticky below nav + toolbar */}
         {editMode && (
-          <aside className="w-56 shrink-0 border-r border-border/60 bg-background flex flex-col sticky top-[96px] h-[calc(100vh-96px)] overflow-hidden">
+          <aside className="w-56 shrink-0 border-r border-border/60 bg-background flex flex-col sticky top-[168px] h-[calc(100vh-168px)] overflow-hidden">
             <div className="px-3 pt-3 pb-1.5 shrink-0">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                 Metric Library
@@ -354,7 +474,7 @@ export default function CustomReportPage() {
         )}
 
         {/* Canvas — grows with widget content, page scrolls naturally */}
-        <div className="flex-1 min-w-0 bg-muted/20 p-4" ref={containerRef}>
+        <div id="report-print-area" className="flex-1 min-w-0 bg-muted/20 p-4" ref={containerRef}>
           <ReportCanvas
             widgets={widgets}
             dateRange={{ preset }}
@@ -378,6 +498,16 @@ export default function CustomReportPage() {
           onSave={applyWidgetConfig}
         />
       )}
+
+      {/* Share via email dialog */}
+      <ShareReportEmailDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        section="custom"
+        period={preset.replace("last_", "").replace("_days", "")}
+        reportId={reportId ?? undefined}
+        reportName={reportName}
+      />
     </div>
   );
 }

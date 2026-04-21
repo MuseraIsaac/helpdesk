@@ -248,6 +248,39 @@ export interface CsatBreakdown {
   breakdown: CsatBreakdownEntry[];
 }
 
+// ── Assets ────────────────────────────────────────────────────────────────────
+
+export interface AssetReport {
+  // KPIs
+  totalAssets:          number;
+  activeAssets:         number;
+  inStockAssets:        number;
+  deployedAssets:       number;
+  inUseAssets:          number;
+  maintenanceAssets:    number;
+  // Expiry alerts
+  warrantyExpiring30:   number;
+  warrantyExpiring90:   number;
+  contractsExpiring30:  number;
+  retirementDue90:      number;
+  retirementOverdue:    number;
+  // Discovery
+  staleAssets:          number;
+  recentlyDiscovered:   number;
+  managedByDiscovery:   number;
+  // Linked incidents
+  assetsWithOpenIncidents: number;
+  openIncidentCount:       number;
+  // Distributions
+  byStatus:   { status: string;   count: number }[];
+  byType:     { type: string;     count: number }[];
+  byTeam:     { teamName: string; count: number; active: number }[];
+  byLocation: { location: string; count: number }[];
+  // Trends
+  createdTrend: { date: string; count: number }[];
+  retiredTrend: { date: string; retired: number; disposed: number }[];
+}
+
 // ── Operational health ────────────────────────────────────────────────────────
 
 export interface OperationalHealth {

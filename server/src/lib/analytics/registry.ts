@@ -18,6 +18,7 @@ import { AGENT_METRICS }    from "./metrics/agent";
 import { TEAM_METRICS }     from "./metrics/team";
 import { KB_METRICS }       from "./metrics/kb";
 import { REALTIME_METRICS } from "./metrics/realtime";
+import { ASSET_METRICS }   from "./metrics/assets";
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ const ALL_METRICS: MetricDefinition[] = [
   ...TEAM_METRICS,
   ...KB_METRICS,
   ...REALTIME_METRICS,
+  ...ASSET_METRICS,
 ];
 
 /** metricId → MetricDefinition lookup map. */

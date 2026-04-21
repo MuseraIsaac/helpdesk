@@ -28,6 +28,7 @@ import type {
   ApprovalReport,
   ChangeReport,
   KbSearchStatsReport,
+  AssetReport,
 } from "./types";
 
 // ── Overview ──────────────────────────────────────────────────────────────────
@@ -166,5 +167,13 @@ export async function fetchKbSearchStats(period: PeriodOption | string): Promise
   const { data } = await axios.get<KbSearchStatsReport>(
     `/api/reports/kb-search-stats?period=${period}`,
   );
+  return data;
+}
+
+// ── Assets ────────────────────────────────────────────────────────────────────
+
+export async function fetchAssetReport(periodOrQs: PeriodOption | string): Promise<AssetReport> {
+  const qs = periodOrQs.includes("=") ? periodOrQs : `period=${periodOrQs}`;
+  const { data } = await axios.get<AssetReport>(`/api/reports/assets?${qs}`);
   return data;
 }

@@ -97,7 +97,13 @@
       "Bash(timeout 90 bun vite build)",
       "Bash(ls bun.lockb)",
       "Bash(ls bun.lock)",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('ok' if 'user' in d else d\\)\")"
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('ok' if 'user' in d else d\\)\")",
+      "Bash(grep -E \"\\\\.ts$|^d\")",
+      "Bash(bun -e \"import ExcelJS from 'exceljs'; const wb = new ExcelJS.Workbook\\(\\); wb.addWorksheet\\('Test'\\); const buf = await wb.xlsx.writeBuffer\\(\\); console.log\\('ExcelJS OK, buffer size:', buf.byteLength\\)\")",
+      "Bash(bunx --bun shadcn@latest add form)",
+      "PowerShell(Stop-Process *)",
+      "PowerShell(netstat *)",
+      "Bash(xargs ls *)"
     ]
   }
 }

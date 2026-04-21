@@ -183,6 +183,525 @@
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════════
+   PRINT REPORT PORTAL  –  document-grade PDF export
+   ─────────────────────────────────────────────────────────────────────────────
+   The portal (#print-portal) is appended to document.body by usePrintReport.ts
+   alongside #root.  When body.print-active is set, @media print hides #root
+   entirely and renders only the portal — no sidebar, header, or app chrome.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* Always invisible on screen */
+#print-portal { display: none; }
+
+@media print {
+
+/* ── §1  ISOLATION ──────────────────────────────────────────────────────────── */
+
+  body.print-active > * {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  body.print-active > #print-portal {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    width: 100% !important;
+  }
+
+  body.print-active,
+  #print-portal,
+  #print-portal * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    visibility: visible !important;
+    transition: none !important;
+    animation: none !important;
+  }
+
+/* ── §2  PAGE GEOMETRY ──────────────────────────────────────────────────────── */
+
+  @page {
+    size: A4 portrait;
+    margin: 16mm 14mm 22mm 14mm;
+
+    @bottom-left {
+      content: "ITSM Helpdesk  ·  Confidential";
+      font-size: 7pt;
+      color: #9ca3af;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 7pt;
+      color: #9ca3af;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+  }
+
+  @page :first { margin-top: 12mm; }
+
+  body {
+    background: white !important;
+    color: #111827;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 9pt;
+    line-height: 1.4;
+  }
+
+/* ── §3  COVER HEADER ───────────────────────────────────────────────────────── */
+
+  .pf-cover { margin-bottom: 18pt; }
+
+  .pf-cover-layout {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 9pt;
+    gap: 16pt;
+  }
+
+  .pf-cover-left { flex: 1 1 auto; }
+
+  .pf-org {
+    margin: 0 0 5pt;
+    font-size: 8pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: oklch(0.527 0.28 287);
+  }
+
+  .pf-title {
+    margin: 0 0 4pt;
+    font-size: 21pt;
+    font-weight: 800;
+    color: #111827;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+  }
+
+  .pf-period {
+    margin: 0;
+    font-size: 11pt;
+    color: #6b7280;
+    font-weight: 400;
+  }
+
+  .pf-cover-right {
+    flex: 0 0 auto;
+    text-align: right;
+    padding-top: 3pt;
+  }
+
+  .pf-meta-label {
+    margin: 0 0 2pt;
+    font-size: 7pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #9ca3af;
+  }
+
+  .pf-meta-value {
+    margin: 0;
+    font-size: 9pt;
+    color: #374151;
+    font-weight: 500;
+  }
+
+  .pf-gradient-bar {
+    height: 2.5pt;
+    border-radius: 2pt;
+    background: linear-gradient(90deg, oklch(0.527 0.28 287) 0%, oklch(0.623 0.214 259) 60%, transparent 100%);
+  }
+
+/* ── §4  REPORT BODY CONTAINER ──────────────────────────────────────────────── */
+
+  .pf-body {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    background: white !important;
+    min-height: 0 !important;
+  }
+
+  /* Remove the muted bg that report layouts add */
+  .pf-body,
+  .pf-body .min-h-screen,
+  .pf-body .bg-muted\/20 {
+    background: white !important;
+    min-height: 0 !important;
+  }
+
+  /* Reset the px-6 py-6 on #report-print-area */
+  .pf-body.px-6 { padding-left: 0 !important; padding-right: 0 !important; }
+  .pf-body.py-6 { padding-top: 0 !important; padding-bottom: 0 !important; }
+
+/* ── §5  SECTION SPACING & SEPARATORS ──────────────────────────────────────── */
+
+  /* Each direct child of space-y-N gets a subtle top rule (separator) */
+  .pf-body .space-y-4 > * + *,
+  .pf-body .space-y-6 > * + * {
+    margin-top: 0 !important;
+    padding-top: 12pt;
+    border-top: 0.75pt solid #e5e7eb;
+  }
+
+  /* KPI rows (grids) don't need the separator – they flow naturally */
+  .pf-body .space-y-4 > .grid + *,
+  .pf-body .space-y-6 > .grid + * {
+    border-top: 0.75pt solid #e5e7eb;
+  }
+
+  /* Override the Tailwind gap/space utility; trust the border-top padding instead */
+  .pf-body .space-y-4 > *,
+  .pf-body .space-y-6 > * {
+    margin-top: 0 !important;
+  }
+
+/* ── §6  GRID LAYOUT ────────────────────────────────────────────────────────── */
+
+  /* At A4 print viewport ≈ 688px the md: breakpoint (768px) does NOT fire.
+     Chart rows use grid-cols-1 md:grid-cols-2 — force them to 2 columns. */
+  .pf-body .grid.grid-cols-1 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    display: grid !important;
+  }
+
+  /* KPI rows: sm:grid-cols-4 (640px) DOES fire at 688px — leave as-is.
+     However also ensure grid-cols-2 (base) is shown correctly if sm: doesn't fire. */
+  .pf-body .grid.grid-cols-2 {
+    display: grid !important;
+  }
+
+  /* Reduce grid gaps for tighter print layout */
+  .pf-body .gap-4 { gap: 8pt !important; }
+  .pf-body .gap-3 { gap: 6pt !important; }
+
+/* ── §7  KPI CARDS ──────────────────────────────────────────────────────────── */
+
+  /* Target the card shell: flex + rounded + border + overflow-hidden */
+  .pf-body .grid > .rounded-xl {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    border: 0.75pt solid #d1d5db !important;
+  }
+
+  /* KPI value number */
+  .pf-body .grid > .rounded-xl .text-2xl {
+    font-size: 16pt !important;
+    font-weight: 700 !important;
+    line-height: 1.1 !important;
+    letter-spacing: -0.01em !important;
+  }
+
+  /* KPI card metric label (10px uppercase) */
+  .pf-body .grid > .rounded-xl .uppercase.tracking-widest {
+    font-size: 7pt !important;
+    letter-spacing: 0.1em !important;
+  }
+
+  /* Sub-text / trend */
+  .pf-body .grid > .rounded-xl .text-\[11px\],
+  .pf-body .grid > .rounded-xl [class*="text-[11px]"] {
+    font-size: 7.5pt !important;
+  }
+
+  /* Reduce padding so 4 cards fit comfortably across A4 */
+  .pf-body .grid > .rounded-xl .px-4 { padding-left: 8pt !important; padding-right: 8pt !important; }
+  .pf-body .grid > .rounded-xl .py-3\.5 { padding-top: 7pt !important; padding-bottom: 7pt !important; }
+
+  /* Accent colour strip on left edge — keep its gradient colours */
+  .pf-body .grid > .rounded-xl .w-1 {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+/* ── §8  CHART CARDS (ChartCard component) ──────────────────────────────────── */
+
+  .pf-body .bg-card.rounded-xl {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    border: 0.75pt solid #d1d5db !important;
+    background: white !important;
+  }
+
+  /* Card header — title + description */
+  .pf-body .bg-card.rounded-xl > .border-b {
+    padding: 7pt 10pt !important;
+    border-bottom: 0.75pt solid #e5e7eb !important;
+  }
+
+  .pf-body .bg-card.rounded-xl h3 {
+    font-size: 9.5pt !important;
+    font-weight: 700 !important;
+    color: #111827 !important;
+    margin: 0 !important;
+  }
+
+  .pf-body .bg-card.rounded-xl .text-xs.text-muted-foreground {
+    font-size: 7.5pt !important;
+    color: #6b7280 !important;
+    margin-top: 2pt !important;
+  }
+
+  /* Accent colour dot left of title — preserve colour */
+  .pf-body .bg-card.rounded-xl .h-4.w-1 {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Card content area */
+  .pf-body .bg-card.rounded-xl .p-5 {
+    padding: 8pt 10pt !important;
+  }
+
+  /* Tight content (p-0) — tables sit flush */
+  .pf-body .bg-card.rounded-xl .p-0 {
+    padding: 0 !important;
+  }
+
+/* ── §9  CHARTS (Recharts / shadcn ChartContainer) ─────────────────────────── */
+
+  /* [data-slot="chart"] is the shadcn ChartContainer with aspect-video.
+     Give it an explicit print height so charts are not invisible. */
+  .pf-body [data-slot="chart"] {
+    display: block !important;
+    height: 170pt !important;
+    max-height: 170pt !important;
+    aspect-ratio: unset !important;
+    width: 100% !important;
+  }
+
+  /* aspect-video Tailwind class */
+  .pf-body .aspect-video {
+    aspect-ratio: unset !important;
+    height: 170pt !important;
+  }
+
+  /* Recharts wrapper — prevent split across pages */
+  .pf-body .recharts-wrapper {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    overflow: visible !important;
+  }
+
+  .pf-body .recharts-responsive-container {
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* SVG — visible, auto-sized */
+  .pf-body svg {
+    overflow: visible !important;
+    max-width: 100% !important;
+  }
+
+  /* Recharts axis text */
+  .pf-body .recharts-cartesian-axis-tick text,
+  .pf-body .recharts-text {
+    font-size: 7pt !important;
+    fill: #6b7280 !important;
+  }
+
+  /* Recharts grid lines */
+  .pf-body .recharts-cartesian-grid line {
+    stroke: #f3f4f6 !important;
+  }
+
+  /* Chart style injection (ChartStyle component inline <style>) — preserved */
+  .pf-body [data-slot="chart"] style { display: block; }
+
+  /* Pie / donut labels */
+  .pf-body .recharts-label,
+  .pf-body .recharts-pie-label-text { font-size: 7.5pt !important; }
+
+/* ── §10  TABLES (shadcn Table component) ───────────────────────────────────── */
+
+  /* Kill overflow container */
+  .pf-body [data-slot="table-container"] {
+    overflow: visible !important;
+    width: 100% !important;
+  }
+
+  .pf-body [data-slot="table"] {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 8.5pt !important;
+    table-layout: auto !important;
+  }
+
+  /* Header row */
+  .pf-body [data-slot="table-header"] {
+    display: table-header-group !important;
+  }
+
+  .pf-body [data-slot="table-header"] tr {
+    background: #f3f4f6 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .pf-body [data-slot="table-head"] {
+    padding: 5pt 8pt !important;
+    font-size: 7.5pt !important;
+    font-weight: 700 !important;
+    color: #374151 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
+    background: #f3f4f6 !important;
+    border-bottom: 1pt solid #d1d5db !important;
+    white-space: normal !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Data cells */
+  .pf-body [data-slot="table-body"] {
+    display: table-row-group !important;
+  }
+
+  .pf-body [data-slot="table-cell"] {
+    padding: 5pt 8pt !important;
+    font-size: 8.5pt !important;
+    color: #1f2937 !important;
+    border-bottom: 0.5pt solid #f3f4f6 !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+  }
+
+  /* Zebra striping — even rows get a very light tint */
+  .pf-body [data-slot="table-body"] tr:nth-child(even) td {
+    background: #f9fafb !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Last row: remove bottom border */
+  .pf-body [data-slot="table-body"] tr:last-child td {
+    border-bottom: none !important;
+  }
+
+  /* Table rows never split across pages */
+  .pf-body [data-slot="table-body"] tr {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Text alignment helpers */
+  .pf-body [data-slot="table-cell"].text-right,
+  .pf-body [data-slot="table-head"].text-right { text-align: right !important; }
+  .pf-body [data-slot="table-cell"].text-center,
+  .pf-body [data-slot="table-head"].text-center { text-align: center !important; }
+
+/* ── §11  TYPOGRAPHY ────────────────────────────────────────────────────────── */
+
+  .pf-body { font-size: 9pt; line-height: 1.45; }
+
+  .pf-body .text-sm  { font-size: 9pt   !important; }
+  .pf-body .text-xs  { font-size: 8pt   !important; }
+  .pf-body .text-2xl { font-size: 16pt  !important; }
+  .pf-body .text-xl  { font-size: 14pt  !important; }
+  .pf-body .text-lg  { font-size: 11pt  !important; }
+
+  .pf-body h2 { break-after: avoid; }
+  .pf-body h3 { break-after: avoid; font-size: 9.5pt !important; }
+
+  /* tabular numbers — preserve monospace alignment */
+  .pf-body .tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* ── §12  SEMANTIC COLOURS ──────────────────────────────────────────────────── */
+
+  /* Destructive / danger */
+  .pf-body .text-destructive { color: #dc2626 !important; }
+
+  /* Success greens */
+  .pf-body .text-emerald-600,
+  .pf-body .text-emerald-500,
+  .pf-body .text-emerald-400 { color: #059669 !important; }
+
+  /* Warning ambers */
+  .pf-body .text-amber-600,
+  .pf-body .text-amber-500,
+  .pf-body .text-orange-600,
+  .pf-body .text-orange-500 { color: #d97706 !important; }
+
+  /* Info blues */
+  .pf-body .text-blue-600,
+  .pf-body .text-blue-500,
+  .pf-body .text-sky-500,
+  .pf-body .text-sky-600 { color: #2563eb !important; }
+
+  /* Danger reds */
+  .pf-body .text-rose-600,
+  .pf-body .text-rose-500 { color: #e11d48 !important; }
+
+  .pf-body .text-muted-foreground { color: #6b7280 !important; }
+  .pf-body .text-foreground       { color: #111827 !important; }
+
+  /* Coloured background badges — force exact colour rendering */
+  .pf-body [class*="bg-emerald"],
+  .pf-body [class*="bg-rose"],
+  .pf-body [class*="bg-amber"],
+  .pf-body [class*="bg-orange"],
+  .pf-body [class*="bg-blue"],
+  .pf-body [class*="bg-violet"],
+  .pf-body [class*="bg-primary"],
+  .pf-body [class*="bg-gradient"] {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* muted background → white in print */
+  .pf-body [class*="bg-muted"] { background: white !important; }
+
+/* ── §13  REMOVE SCREEN-ONLY ELEMENTS ──────────────────────────────────────── */
+
+  /* Already stripped by usePrintReport.ts; these are fallback declarations */
+  .pf-body button,
+  .pf-body [role="button"],
+  .pf-body [data-no-print],
+  .pf-body .animate-pulse,
+  .pf-body [data-slot="switch"],
+  .pf-body [data-radix-popper-content-wrapper],
+  .pf-body .recharts-tooltip-wrapper { display: none !important; }
+
+  /* Scrollable containers — let content flow naturally on paper */
+  .pf-body .overflow-x-auto,
+  .pf-body .overflow-y-auto,
+  .pf-body .overflow-auto { overflow: visible !important; }
+
+  /* Hover shadows */
+  .pf-body .shadow-sm,
+  .pf-body .shadow-md { box-shadow: none !important; }
+
+/* ── §14  PAGE-BREAK RULES ──────────────────────────────────────────────────── */
+
+  /* Section-level items: allow breaks between, not within */
+  .pf-body .space-y-6 > *,
+  .pf-body .space-y-4 > * { break-inside: avoid !important; }
+
+  /* Grid items (KPI cards, chart pairs) */
+  .pf-body .grid > * { break-inside: avoid !important; }
+
+  /* Chart cards */
+  .pf-body .bg-card.rounded-xl { break-inside: avoid !important; }
+
+  /* Table rows */
+  .pf-body tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+  .pf-body thead { display: table-header-group !important; }
+  .pf-body tfoot { display: table-footer-group !important; }
+
+} /* end @media print */
+
 @utility animate-in-page {
   animation: fadeInUp 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
 }

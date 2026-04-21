@@ -77,7 +77,15 @@
  * │ cmdb.view                    │   ✓   │     ✓      │   ✓   │    ✓     │
  * │ cmdb.manage                  │   ✓   │     ✓      │       │          │
  * │ assets.view                  │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ assets.create                │   ✓   │     ✓      │       │          │
+ * │ assets.update                │   ✓   │     ✓      │       │          │
+ * │ assets.manage_lifecycle      │   ✓   │     ✓      │   ✓   │          │
+ * │ assets.manage_relationships  │   ✓   │     ✓      │       │          │
+ * │ assets.manage_inventory      │   ✓   │     ✓      │       │          │
  * │ assets.manage                │   ✓   │     ✓      │       │          │
+ * │ software.view                │   ✓   │     ✓      │   ✓   │    ✓     │
+ * │ software.create              │   ✓   │     ✓      │       │          │
+ * │ software.manage              │   ✓   │     ✓      │       │          │
  * │ services.view                │   ✓   │     ✓      │   ✓   │    ✓     │
  * │ services.manage              │   ✓   │     ✓      │       │          │
  * │ ── Catalog & Workflow ─────────────────────────────────────────────── │
@@ -173,7 +181,15 @@ export type Permission =
   | "cmdb.view"
   | "cmdb.manage"
   | "assets.view"
+  | "assets.create"
+  | "assets.update"
+  | "assets.manage_lifecycle"
+  | "assets.manage_relationships"
+  | "assets.manage_inventory"
   | "assets.manage"
+  | "software.view"    // View software licenses and SaaS subscriptions
+  | "software.create"  // Register new licenses / subscriptions; assign seats
+  | "software.manage"  // Full CRUD including revoke, delete, lifecycle management
   | "services.view"
   | "services.manage"
 
@@ -256,7 +272,15 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "cmdb.view",
   "cmdb.manage",
   "assets.view",
+  "assets.create",
+  "assets.update",
+  "assets.manage_lifecycle",
+  "assets.manage_relationships",
+  "assets.manage_inventory",
   "assets.manage",
+  "software.view",
+  "software.create",
+  "software.manage",
   "services.view",
   "services.manage",
   // Contacts
@@ -334,11 +358,19 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "tasks.manage",
   // Asset & Configuration Management
   "cmdb.view",
-  "cmdb.manage",       // Configuration item ownership
+  "cmdb.manage",
   "assets.view",
+  "assets.create",
+  "assets.update",
+  "assets.manage_lifecycle",
+  "assets.manage_relationships",
+  "assets.manage_inventory",
   "assets.manage",
+  "software.view",
+  "software.create",
+  "software.manage",
   "services.view",
-  "services.manage",   // Service catalog curation
+  "services.manage",
   // Contacts
   "contacts.view",
   "contacts.manage",
@@ -402,9 +434,11 @@ const AGENT_PERMISSIONS: Permission[] = [
   "tasks.view",
   "tasks.manage",      // Agents own and complete tasks
   // Asset & Configuration Management
-  "cmdb.view",         // Look up CIs when working incidents/requests
-  "assets.view",       // Look up assets when working tickets
-  "services.view",     // Browse service definitions
+  "cmdb.view",              // Look up CIs when working incidents/requests
+  "assets.view",            // Look up assets when working tickets
+  "assets.manage_lifecycle", // Agents can update asset lifecycle (assign, in_use, under_maintenance)
+  "software.view",          // View software licenses and SaaS subscriptions
+  "services.view",          // Browse service definitions
   // Contacts
   "contacts.view",
   "contacts.manage",   // Agents can create and update customer records
@@ -441,6 +475,7 @@ const READONLY_PERMISSIONS: Permission[] = [
   // Asset & Configuration Management
   "cmdb.view",
   "assets.view",
+  "software.view",
   "services.view",
   // Contacts
   "contacts.view",

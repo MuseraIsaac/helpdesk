@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/table";
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { AlertCircle, Clock, CheckCircle2, Ticket, Zap, ShieldAlert, Timer, TrendingUp, GitCompare } from "lucide-react";
+import { AlertCircle, CalendarDays, Clock, CheckCircle2, Ticket, Zap, ShieldAlert, Timer, TrendingUp, GitCompare } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import ErrorAlert from "@/components/ErrorAlert";
@@ -176,8 +176,10 @@ export default function OverviewReport() {
   const period     = searchParams.get("period")  ?? "30";
   const customFrom = searchParams.get("from")    ?? undefined;
   const customTo   = searchParams.get("to")      ?? undefined;
-  const rangeKey   = period === "custom" ? `${customFrom}-${customTo}` : period;
-  const qs         = rangeQS(periodToRange(period, customFrom, customTo));
+  // True only when the custom period has both dates confirmed.
+  const customReady = period !== "custom" || (!!customFrom && !!customTo);
+  const rangeKey    = period === "custom" ? `${customFrom}-${customTo}` : period;
+  const qs          = rangeQS(periodToRange(period, customFrom, customTo));
 
   const [compare, setCompare] = useState(false);
   const navigate = useNavigate();
@@ -185,6 +187,7 @@ export default function OverviewReport() {
   const { data: overview, isLoading: loadingOv, error: ovErr } = useQuery({
     queryKey: ["reports", "overview", rangeKey],
     queryFn: () => fetchOverview(qs),
+    enabled: customReady,
   });
 
   const { data: aging, isLoading: loadingAging } = useQuery({
@@ -202,6 +205,7 @@ export default function OverviewReport() {
   const { data: breakdowns, isLoading: loadingBreakdowns } = useQuery({
     queryKey: ["reports", "breakdowns", rangeKey],
     queryFn: () => fetchBreakdowns(qs),
+    enabled: customReady,
     staleTime: 60_000,
   });
 
@@ -209,10 +213,17 @@ export default function OverviewReport() {
   const { data: prevOverview } = useQuery<ReportOverview>({
     queryKey: ["reports", "overview", "prev", rangeKey],
     queryFn: () => fetchOverview(prevQs),
-    enabled: compare,
+    enabled: compare && customReady,
     staleTime: 120_000,
   });
 
+  if (!customReady) return (
+    <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
+      <CalendarDays className="h-10 w-10 text-muted-foreground/40" />
+      <p className="text-sm font-medium text-muted-foreground">Select a date range to load the report</p>
+      <p className="text-xs text-muted-foreground/60">Use the date picker above to choose a start and end date.</p>
+    </div>
+  );
   if (loadingOv) return <ReportLoading kpiCount={8} chartCount={3} />;
   if (ovErr) return <ErrorAlert error={ovErr as Error} fallback="Failed to load overview data" />;
   if (!overview) return null;

@@ -57,6 +57,12 @@ export function periodToRange(
   if (period === "custom" && customFrom) {
     return { from: customFrom, to: new Date().toISOString().slice(0, 10) };
   }
+  // "custom" with no dates selected yet — fall back to last 30 days so that
+  // _periodToRange never receives the literal string "custom", which produces
+  // NaN dates and throws a RangeError during render.
+  if (period === "custom") {
+    return _periodToRange("30");
+  }
   return _periodToRange(period);
 }
 
