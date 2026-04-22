@@ -28,8 +28,9 @@ import {
 import BackLink from "@/components/BackLink";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
+import AssetLinksPanel from "@/components/AssetLinksPanel";
 import {
-  Pencil, Save, X, Plus, Trash2, ArrowRight, ArrowLeft, Activity
+  Pencil, Save, X, Plus, Trash2, ArrowRight, ArrowLeft, Activity, Server
 } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -385,6 +386,22 @@ export default function CmdbDetailPage() {
                     </div>
                   ))}
                   <AddRelationshipForm ciId={ci.id} onAdded={refresh} />
+                </CardContent>
+              </Card>
+
+              {/* Linked Assets */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center gap-1.5">
+                    <Server className="h-3.5 w-3.5 text-muted-foreground" />
+                    Linked Assets
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <AssetLinksPanel
+                    entityType="ci"
+                    entityId={ci.id}
+                  />
                 </CardContent>
               </Card>
 

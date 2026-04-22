@@ -54,9 +54,11 @@ import {
   Activity,
   Link2,
   BookmarkPlus,
+  Server,
 } from "lucide-react";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
 import FollowButton from "@/components/FollowButton";
+import AssetLinksPanel from "@/components/AssetLinksPanel";
 
 // ── Event label map ───────────────────────────────────────────────────────────
 
@@ -862,6 +864,19 @@ export default function RequestDetailPage() {
               </p>
             </div>
           )}
+
+          {/* Affected Assets */}
+          <div className="rounded-md border p-4 space-y-3">
+            <h3 className="font-medium text-sm flex items-center gap-1.5">
+              <Server className="h-3.5 w-3.5 text-muted-foreground" />
+              Affected Assets
+            </h3>
+            <AssetLinksPanel
+              entityType="requests"
+              entityId={request.id}
+              readonly={isTerminal}
+            />
+          </div>
 
           {/* Approval info card */}
           {request.approvalStatus !== "not_required" && (

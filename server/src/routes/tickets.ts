@@ -438,6 +438,30 @@ router.get("/:id", requireAuth, async (req, res) => {
         select: { id: true, ticketNumber: true, subject: true, mergedAt: true },
         orderBy: { mergedAt: "asc" as const },
       },
+      ciLinks: {
+        orderBy: { linkedAt: "desc" as const },
+        select: {
+          linkedAt: true,
+          ci: {
+            select: {
+              id: true, ciNumber: true, name: true,
+              type: true, status: true, environment: true,
+            },
+          },
+        },
+      },
+      assetLinks: {
+        orderBy: { linkedAt: "desc" as const },
+        select: {
+          linkedAt: true,
+          asset: {
+            select: {
+              id: true, assetNumber: true, name: true,
+              type: true, status: true,
+            },
+          },
+        },
+      },
     },
   });
 
@@ -1042,6 +1066,79 @@ router.post("/bulk", requireAuth, requirePermission("tickets.update"), async (re
       return;
     }
   }
+});
+
+// ── Ticket ↔ CI links ─────────────────────────────────────────────────────────
+//
+// POST   /api/tickets/:id/ci-links/:ciId  — link a CI to a ticket
+// DELETE /api/tickets/:id/ci-links/:ciId  — unlink a CI from a ticket
+
+router.post("/:id/ci-links/:ciId", requireAuth, requirePermission("tickets.update"), async (req, res) => {
+  const ticketId = parseId(req.params.id);
+  const ciId     = parseId(req.params.ciId);
+  if (!ticketId || !ciId) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  const [ticket, ci] = await Promise.all([
+    prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true } }),
+    prisma.configItem.findUnique({ where: { id: ciId }, select: { id: true, name: true, ciNumber: true } }),
+  ]);
+  if (!ticket) { res.status(404).json({ error: "Ticket not found" });         return; }
+  if (!ci)     { res.status(404).json({ error: "Configuration item not found" }); return; }
+
+  await prisma.ticketCiLink.upsert({
+    where:  { ticketId_ciId: { ticketId, ciId } },
+    create: { ticketId, ciId },
+    update: {},
+  });
+
+  res.status(201).json({ ticketId, ciId, ciNumber: ci.ciNumber, name: ci.name });
+});
+
+router.delete("/:id/ci-links/:ciId", requireAuth, requirePermission("tickets.update"), async (req, res) => {
+  const ticketId = parseId(req.params.id);
+  const ciId     = parseId(req.params.ciId);
+  if (!ticketId || !ciId) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  await prisma.ticketCiLink.deleteMany({ where: { ticketId, ciId } });
+  res.status(204).end();
+});
+
+// ── Ticket ↔ Asset links ──────────────────────────────────────────────────────
+//
+// POST   /api/tickets/:id/asset-links/:assetId  — link an asset to a ticket
+// DELETE /api/tickets/:id/asset-links/:assetId  — unlink an asset from a ticket
+//
+// These are convenience endpoints that mirror the asset-centric
+// POST /api/assets/:assetId/links/tickets/:ticketId routes.
+
+router.post("/:id/asset-links/:assetId", requireAuth, requirePermission("tickets.update"), async (req, res) => {
+  const ticketId  = parseId(req.params.id);
+  const assetId   = parseId(req.params.assetId);
+  if (!ticketId || !assetId) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  const [ticket, asset] = await Promise.all([
+    prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true } }),
+    prisma.asset.findUnique({ where: { id: assetId }, select: { id: true, name: true, assetNumber: true } }),
+  ]);
+  if (!ticket) { res.status(404).json({ error: "Ticket not found" }); return; }
+  if (!asset)  { res.status(404).json({ error: "Asset not found" });  return; }
+
+  await prisma.assetTicketLink.upsert({
+    where:  { assetId_ticketId: { assetId, ticketId } },
+    create: { assetId, ticketId },
+    update: {},
+  });
+
+  res.status(201).json({ ticketId, assetId, assetNumber: asset.assetNumber, name: asset.name });
+});
+
+router.delete("/:id/asset-links/:assetId", requireAuth, requirePermission("tickets.update"), async (req, res) => {
+  const ticketId = parseId(req.params.id);
+  const assetId  = parseId(req.params.assetId);
+  if (!ticketId || !assetId) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  await prisma.assetTicketLink.deleteMany({ where: { assetId, ticketId } });
+  res.status(204).end();
 });
 
 export default router;

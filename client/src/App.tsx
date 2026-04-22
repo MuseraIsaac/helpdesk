@@ -90,6 +90,8 @@ import ProblemsReport    from "./pages/reports/ProblemsReport";
 import ApprovalsReport   from "./pages/reports/ApprovalsReport";
 import ChangesReport     from "./pages/reports/ChangesReport";
 import AssetsReport      from "./pages/reports/AssetsReport";
+import InsightsReport    from "./pages/reports/InsightsReport";
+import DemoDataPage      from "./pages/DemoDataPage";
 
 /**
  * Injects the browser favicon from branding settings.
@@ -177,6 +179,7 @@ function App() {
             <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
             <Route path="/automations" element={<ScenariosPage />} />
             <Route path="/catalog/admin" element={<CatalogAdminPage />} />
+            <Route path="/demo-data" element={<DemoDataPage />} />
           </Route>
           <Route element={<SupervisorRoute />}>
             <Route path="/kb" element={<KbPage />} />
@@ -202,6 +205,7 @@ function App() {
               <Route path="approvals" element={<ApprovalsReport />} />
               <Route path="changes"   element={<ChangesReport />} />
               <Route path="assets"    element={<AssetsReport />} />
+              <Route path="insights"  element={<InsightsReport />} />
               <Route path="library"   element={<ReportLibraryPage />} />
             </Route>
           </Route>

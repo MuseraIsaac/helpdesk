@@ -5,7 +5,7 @@ import {
   Users, UsersRound, BookOpen, Activity, Plus, Library,
   PackageCheck, Bug, CheckCircle2, GitBranch,
   FileDown, Mail, ChevronDown, FileSpreadsheet, FileText, Loader2,
-  Server,
+  Server, Network,
 } from "lucide-react";
 import axios from "axios";
 import DateRangePicker from "@/components/DateRangePicker";
@@ -38,6 +38,7 @@ const NAV_ITEMS = [
   { section: "kb",         label: "Knowledge Base",  icon: BookOpen,     color: "text-cyan-500" },
   { section: "realtime",   label: "Real-time",       icon: Activity,     color: "text-red-500" },
   { section: "assets",     label: "Assets",           icon: Server,       color: "text-blue-500" },
+  { section: "insights",   label: "Insights",         icon: Network,      color: "text-fuchsia-500" },
   { section: "library",    label: "Library",          icon: Library,      color: "text-slate-500" },
 ] as const satisfies readonly { section: string; label: string; icon: React.ElementType; color: string }[];
 

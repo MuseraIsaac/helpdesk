@@ -103,7 +103,8 @@
       "Bash(bunx --bun shadcn@latest add form)",
       "PowerShell(Stop-Process *)",
       "PowerShell(netstat *)",
-      "Bash(xargs ls *)"
+      "Bash(xargs ls *)",
+      "Bash(grep -v \"^#\\\\|//\")"
     ]
   }
 }

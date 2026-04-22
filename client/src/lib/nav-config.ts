@@ -38,6 +38,7 @@ import {
   Key,
   Cloud,
   Radar,
+  FlaskConical,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { can, type Permission } from "core/constants/permission.ts";
@@ -317,6 +318,25 @@ export const NAV_SECTIONS: NavSection[] = [
       },
     ],
   },
+
+  // ── Demo Data ──────────────────────────────────────────────────────────────
+  // Shown only to admins AND only when the demo_data.showInSidebar setting
+  // is enabled. Layout.tsx filters this section at render-time via the
+  // `hiddenSectionIds` set derived from that setting.
+  {
+    id: "demo-data",
+    label: "Developer",
+    roles: ["admin"],
+    items: [
+      {
+        id:    "demo-data",
+        to:    "/demo-data",
+        label: "Demo Data",
+        icon:  FlaskConical,
+        roles: ["admin"],
+      },
+    ],
+  },
 ];
 
 // ── Visibility helpers (used by Layout.tsx) ────────────────────────────────────
@@ -354,10 +374,11 @@ export function resolveModuleBreadcrumb(pathname: string, role: string): string 
       if (matched) return `${section.label}  ·  ${item.label}`;
     }
   }
-  if (pathname.startsWith("/settings")) return "Administration  ·  Settings";
-  if (pathname.startsWith("/profile")) return "Account  ·  Profile";
-  if (pathname.startsWith("/customers")) return "Contacts  ·  Customers";
+  if (pathname.startsWith("/settings"))      return "Administration  ·  Settings";
+  if (pathname.startsWith("/profile"))       return "Account  ·  Profile";
+  if (pathname.startsWith("/customers"))     return "Contacts  ·  Customers";
   if (pathname.startsWith("/organizations")) return "Contacts  ·  Organizations";
   if (pathname.startsWith("/notifications")) return "Account  ·  Notifications";
+  if (pathname.startsWith("/demo-data"))     return "Developer  ·  Demo Data";
   return "ITSM Platform";
 }

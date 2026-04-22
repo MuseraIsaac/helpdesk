@@ -26,6 +26,8 @@ export const settingsSections = [
   "security",
   "audit",
   "business_hours",
+  // ── Demo & Developer tools ──
+  "demo_data",
 ] as const;
 
 export type SettingsSection = (typeof settingsSections)[number];
@@ -153,6 +155,11 @@ export const settingsSectionMeta: Record<SettingsSection, SettingsSectionMeta> =
     label: "Business Hours",
     description: "Named business calendars, public holidays, and exclusion periods",
     keywords: ["business hours", "calendar", "holiday", "schedule", "working hours", "exclusion"],
+  },
+  demo_data: {
+    label: "Demo Data",
+    description: "Control visibility of the Demo Data section in the sidebar (Super Admin only)",
+    keywords: ["demo", "sample", "seed", "test data", "generate", "fake", "synthetic", "developer"],
   },
 };
 
@@ -534,6 +541,15 @@ export const auditSettingsSchema = z.object({
   exportFormat:                z.enum(["json", "csv"]).default("json"),
 });
 
+export const demoDataSettingsSchema = z.object({
+  /**
+   * When true, the Demo Data sidebar section and all /api/demo-data endpoints
+   * become accessible to admin-role users. Off by default so the feature is
+   * invisible on production until explicitly opted-in by a Super Admin.
+   */
+  enableDemoDataTools: z.boolean().default(false),
+});
+
 export const businessHoursSettingsSchema = z.object({
   // Default calendar name shown in UI
   defaultCalendarName:         z.string().max(100).default("Default"),
@@ -576,6 +592,7 @@ export const sectionSchemas = {
   security:         securitySettingsSchema,
   audit:            auditSettingsSchema,
   business_hours:   businessHoursSettingsSchema,
+  demo_data:        demoDataSettingsSchema,
 } as const satisfies Record<SettingsSection, z.ZodObject<z.ZodRawShape>>;
 
 // ── Inferred types ────────────────────────────────────────────────────────────
@@ -602,6 +619,7 @@ export type NotificationsSettings    = z.infer<typeof notificationsSettingsSchem
 export type SecuritySettings         = z.infer<typeof securitySettingsSchema>;
 export type AuditSettings            = z.infer<typeof auditSettingsSchema>;
 export type BusinessHoursSettings    = z.infer<typeof businessHoursSettingsSchema>;
+export type DemoDataSettings         = z.infer<typeof demoDataSettingsSchema>;
 
 export type SectionData<S extends SettingsSection> =
   z.infer<(typeof sectionSchemas)[S]>;

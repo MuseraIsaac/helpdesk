@@ -440,6 +440,7 @@ model Ticket {
   linkedServiceRequest   ServiceRequest? @relation("TicketLinkedServiceRequest", fields: [linkedServiceRequestId], references: [id])
   scenarioExecutions     ScenarioExecution[]
   problemLinks           ProblemTicketLink[]
+  assetLinks             AssetTicketLink[]
   followers              TicketFollower[]
   // Merge — when a ticket is merged into another, mergedIntoId is set and the
   // ticket is closed. The parent sees its child tickets via mergedTickets.
@@ -3216,6 +3217,7 @@ model Asset {
   problemLinks   AssetProblemLink[]
   changeLinks    AssetChangeLink[]
   serviceLinks   AssetServiceLink[]
+  ticketLinks    AssetTicketLink[]
 
   @@index([type])
   @@index([status])
@@ -3474,6 +3476,19 @@ model AssetServiceLink {
   @@id([assetId, catalogItemId])
   @@index([catalogItemId])
   @@map("asset_service_link")
+}
+
+/** AssetTicketLink — records which assets are referenced by a support ticket. */
+model AssetTicketLink {
+  assetId  Int    @map("asset_id")
+  asset    Asset  @relation(fields: [assetId],  references: [id], onDelete: Cascade)
+  ticketId Int    @map("ticket_id")
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  linkedAt DateTime @default(now()) @map("linked_at")
+
+  @@id([assetId, ticketId])
+  @@index([ticketId])
+  @@map("asset_ticket_link")
 }
 
 // ── Software License Management ───────────────────────────────────────────────
@@ -3897,4 +3912,52 @@ model DiscoverySyncError {
 
   @@index([syncRunId])
   @@map("discovery_sync_error")
+}
+
+// ── Demo Data Management ──────────────────────────────────────────────────────
+
+/**
+ * DemoBatch — tracks one generation run of synthetic demo data.
+ *
+ * Safety contract:
+ *   - recordIds is a JSON object whose values are arrays of primary-key IDs
+ *     (strings for User PKs, numbers for all other models).
+ *   - The deleter ONLY removes records whose IDs appear in this blob — it will
+ *     never touch records created outside a demo batch.
+ *   - generatedById is informational and carries NO foreign-key constraint,
+ *     so deleting demo-created users does not cascade-delete the batch row.
+ *   - status lifecycle: "generating" → "ready" | "error"
+ *                       "ready" → "deleting" → "deleted"
+ */
+model DemoBatch {
+  id               Int       @id @default(autoincrement())
+  label            String    @db.VarChar(200)
+  /// generating | ready | error | deleting | deleted
+  status           String    @default("generating") @db.VarChar(20)
+  generatedById    String    @map("generated_by_id")
+  generatedByName  String    @default("") @map("generated_by_name") @db.VarChar(200)
+  errorMessage     String?   @db.Text @map("error_message")
+  completedAt      DateTime? @map("completed_at")
+  deletedAt        DateTime? @map("deleted_at")
+  /// Who triggered the deletion (informational — no FK so the user record can be deleted independently).
+  deletedById      String?   @map("deleted_by_id")
+  deletedByName    String    @default("") @map("deleted_by_name") @db.VarChar(200)
+  /// Requested modules (string[]), e.g. ["foundation","tickets","incidents"].
+  /// "all" is expanded server-side before storing.
+  modules          Json      @default("[]") @map("modules")
+  /// Requested size preset: "small" | "medium" | "large"
+  size             String    @default("medium") @db.VarChar(10) @map("size")
+  /// Per-module progress tracking.
+  /// Shape: Record<ModuleKey, { status: "pending"|"running"|"done"|"error"|"skipped", count: number, error?: string }>
+  progress         Json      @default("{}") @map("progress")
+  /// Per-entity arrays of created IDs, e.g.
+  /// { userIds: ["uuid…"], teamIds: [1,2], ticketIds: [5,6,7], … }
+  recordIds        Json      @default("{}") @map("record_ids")
+  /// Human-readable count per entity type for the batch summary card.
+  recordCounts     Json      @default("{}") @map("record_counts")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("demo_batch")
 }

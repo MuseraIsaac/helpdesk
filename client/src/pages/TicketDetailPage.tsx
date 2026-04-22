@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useParams, Link } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
@@ -28,10 +28,12 @@ import { usePresence } from "@/hooks/usePresence";
 import { useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   MessageSquare, Lock, ChevronDown, ChevronRight, Star, Link2,
   X, Forward, BookmarkPlus, Activity, Ticket as TicketIcon, UserCircle, Calendar,
-  Bell, BellOff, Merge, GitMerge,
+  Bell, BellOff, Merge, GitMerge, Server, Database, Plus, Loader2,
+  ExternalLink,
 } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -92,6 +94,272 @@ function LinkedPanel({
   );
 }
 
+// ── Linked Assets panel ───────────────────────────────────────────────────────
+
+type TicketAssetLink = NonNullable<import("core/constants/ticket.ts").Ticket["assetLinks"]>[number];
+type TicketCiLink    = NonNullable<import("core/constants/ticket.ts").Ticket["ciLinks"]>[number];
+
+interface SearchResult { id: number; number: string; name: string; type: string; status: string }
+
+function useDebounce<T>(value: T, ms = 300): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
+}
+
+function LinkedAssetsSection({
+  ticketId,
+  links,
+  onRefresh,
+}: {
+  ticketId: number;
+  links: TicketAssetLink[];
+  onRefresh: () => void;
+}) {
+  const [query, setQuery]   = useState("");
+  const [open,  setOpen]    = useState(false);
+  const dq = useDebounce(query, 280);
+
+  const { data: results = [], isFetching } = useQuery<SearchResult[]>({
+    queryKey: ["ticket-asset-search", dq],
+    queryFn: async () => {
+      const { data } = await axios.get<{ assets: { id: number; assetNumber: string; name: string; type: string; status: string }[] }>(
+        "/api/assets", { params: { search: dq, pageSize: 10 } },
+      );
+      const linked = new Set(links.map(l => l.asset.id));
+      return data.assets
+        .filter(a => !linked.has(a.id))
+        .map(a => ({ id: a.id, number: a.assetNumber, name: a.name, type: a.type, status: a.status }));
+    },
+    enabled: open && dq.length >= 0,
+    staleTime: 10_000,
+  });
+
+  const linkMut = useMutation({
+    mutationFn: (assetId: number) => axios.post(`/api/tickets/${ticketId}/asset-links/${assetId}`),
+    onSuccess: () => { onRefresh(); setQuery(""); },
+  });
+  const unlinkMut = useMutation({
+    mutationFn: (assetId: number) => axios.delete(`/api/tickets/${ticketId}/asset-links/${assetId}`),
+    onSuccess: onRefresh,
+  });
+
+  const ASSET_TYPE_COLOR: Record<string, string> = {
+    server: "text-blue-600", workstation: "text-sky-600", laptop: "text-indigo-600",
+    network_device: "text-teal-600", mobile_device: "text-emerald-600",
+  };
+
+  return (
+    <SectionCard icon={Server} title={`Linked Assets${links.length > 0 ? ` (${links.length})` : ""}`}>
+      {/* Search combobox */}
+      <div className="relative mb-3">
+        <div className="relative">
+          <Input
+            value={query}
+            onChange={e => { setQuery(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            placeholder="Search assets to link…"
+            className="h-8 text-xs pr-7"
+          />
+          {isFetching
+            ? <Loader2 className="absolute right-2.5 top-2 h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            : <Plus className="absolute right-2.5 top-2 h-3.5 w-3.5 text-muted-foreground/60" />
+          }
+        </div>
+        {open && results.length > 0 && (
+          <div className="absolute z-50 w-full mt-1 rounded-lg border border-border/60 bg-popover shadow-lg overflow-hidden">
+            {results.slice(0, 8).map(r => (
+              <button
+                key={r.id}
+                type="button"
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-muted/60 transition-colors group"
+                onMouseDown={e => { e.preventDefault(); linkMut.mutate(r.id); setOpen(false); }}
+              >
+                <Server className={`h-3.5 w-3.5 shrink-0 ${ASSET_TYPE_COLOR[r.type] ?? "text-muted-foreground"}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold truncate">{r.name}</p>
+                  <p className="font-mono text-[10px] text-muted-foreground">{r.number} · {r.type.replace(/_/g, " ")}</p>
+                </div>
+                <span className="text-[10px] text-muted-foreground capitalize shrink-0">{r.status.replace(/_/g, " ")}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {open && (
+          // eslint-disable-next-line jsx-a11y/click-events-have-key-events
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
+        )}
+      </div>
+
+      {/* Linked asset rows */}
+      {links.length === 0 ? (
+        <p className="text-xs text-muted-foreground italic">No assets linked. Search above to add one.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {links.map(l => (
+            <div key={l.asset.id} className="flex items-center gap-2 group py-1 border-b border-border/30 last:border-0">
+              <Server className={`h-3.5 w-3.5 shrink-0 ${ASSET_TYPE_COLOR[l.asset.type] ?? "text-muted-foreground"}`} />
+              <div className="flex-1 min-w-0">
+                <Link
+                  to={`/assets/${l.asset.id}`}
+                  className="text-xs font-semibold hover:text-primary transition-colors truncate flex items-center gap-1"
+                >
+                  {l.asset.name}
+                  <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-60" />
+                </Link>
+                <p className="font-mono text-[10px] text-muted-foreground">{l.asset.assetNumber} · {l.asset.type.replace(/_/g, " ")}</p>
+              </div>
+              <span className="text-[10px] text-muted-foreground capitalize shrink-0 hidden sm:block">
+                {l.asset.status.replace(/_/g, " ")}
+              </span>
+              <button
+                onClick={() => unlinkMut.mutate(l.asset.id)}
+                disabled={unlinkMut.isPending}
+                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all ml-1 shrink-0"
+                title="Remove link"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ── Linked CIs panel ──────────────────────────────────────────────────────────
+
+const CI_ENV_COLOR: Record<string, string> = {
+  production: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400",
+  staging:    "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  development:"bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  test:       "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400",
+};
+
+function LinkedCIsSection({
+  ticketId,
+  links,
+  onRefresh,
+}: {
+  ticketId: number;
+  links: TicketCiLink[];
+  onRefresh: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open,  setOpen]  = useState(false);
+  const dq = useDebounce(query, 280);
+
+  const { data: results = [], isFetching } = useQuery<SearchResult[]>({
+    queryKey: ["ticket-ci-search", dq],
+    queryFn: async () => {
+      const { data } = await axios.get<{ items: { id: number; ciNumber: string; name: string; type: string; status: string }[] }>(
+        "/api/cmdb", { params: { search: dq, pageSize: 10, status: "" } },
+      );
+      const linked = new Set(links.map(l => l.ci.id));
+      return data.items
+        .filter(c => !linked.has(c.id))
+        .map(c => ({ id: c.id, number: c.ciNumber, name: c.name, type: c.type, status: c.status }));
+    },
+    enabled: open,
+    staleTime: 10_000,
+  });
+
+  const linkMut = useMutation({
+    mutationFn: (ciId: number) => axios.post(`/api/tickets/${ticketId}/ci-links/${ciId}`),
+    onSuccess: () => { onRefresh(); setQuery(""); },
+  });
+  const unlinkMut = useMutation({
+    mutationFn: (ciId: number) => axios.delete(`/api/tickets/${ticketId}/ci-links/${ciId}`),
+    onSuccess: onRefresh,
+  });
+
+  return (
+    <SectionCard icon={Database} title={`Linked Config Items${links.length > 0 ? ` (${links.length})` : ""}`}>
+      {/* Search combobox */}
+      <div className="relative mb-3">
+        <div className="relative">
+          <Input
+            value={query}
+            onChange={e => { setQuery(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            placeholder="Search config items to link…"
+            className="h-8 text-xs pr-7"
+          />
+          {isFetching
+            ? <Loader2 className="absolute right-2.5 top-2 h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            : <Plus className="absolute right-2.5 top-2 h-3.5 w-3.5 text-muted-foreground/60" />
+          }
+        </div>
+        {open && results.length > 0 && (
+          <div className="absolute z-50 w-full mt-1 rounded-lg border border-border/60 bg-popover shadow-lg overflow-hidden">
+            {results.slice(0, 8).map(r => (
+              <button
+                key={r.id}
+                type="button"
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-muted/60 transition-colors"
+                onMouseDown={e => { e.preventDefault(); linkMut.mutate(r.id); setOpen(false); }}
+              >
+                <Database className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold truncate">{r.name}</p>
+                  <p className="font-mono text-[10px] text-muted-foreground">{r.number} · {r.type.replace(/_/g, " ")}</p>
+                </div>
+                <span className="text-[10px] text-muted-foreground capitalize shrink-0">{r.status.replace(/_/g, " ")}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {open && (
+          // eslint-disable-next-line jsx-a11y/click-events-have-key-events
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
+        )}
+      </div>
+
+      {/* Linked CI rows */}
+      {links.length === 0 ? (
+        <p className="text-xs text-muted-foreground italic">No config items linked. Search above to add one.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {links.map(l => (
+            <div key={l.ci.id} className="flex items-center gap-2 group py-1 border-b border-border/30 last:border-0">
+              <Database className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <Link
+                  to={`/cmdb/${l.ci.id}`}
+                  className="text-xs font-semibold hover:text-primary transition-colors truncate flex items-center gap-1"
+                >
+                  {l.ci.name}
+                  <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-60" />
+                </Link>
+                <p className="font-mono text-[10px] text-muted-foreground">{l.ci.ciNumber} · {l.ci.type.replace(/_/g, " ")}</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {l.ci.environment && (
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full capitalize hidden sm:inline-flex ${CI_ENV_COLOR[l.ci.environment] ?? "bg-muted text-muted-foreground"}`}>
+                    {l.ci.environment}
+                  </span>
+                )}
+                <button
+                  onClick={() => unlinkMut.mutate(l.ci.id)}
+                  disabled={unlinkMut.isPending}
+                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0"
+                  title="Remove link"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function TicketDetailPage() {
@@ -115,7 +383,7 @@ export default function TicketDetailPage() {
     setTimeout(() => composeRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
   }, []);
 
-  const { data: ticket, isLoading, error } = useQuery({
+  const { data: ticket, isLoading, error, refetch: refetchTicket } = useQuery({
     queryKey: ["ticket", id],
     queryFn: async () => {
       const { data } = await axios.get<Ticket>(`/api/tickets/${id}`);
@@ -484,6 +752,20 @@ export default function TicketDetailPage() {
                 }
               />
             )}
+
+            {/* Linked Assets */}
+            <LinkedAssetsSection
+              ticketId={ticket.id}
+              links={ticket.assetLinks ?? []}
+              onRefresh={() => refetchTicket()}
+            />
+
+            {/* Linked Config Items */}
+            <LinkedCIsSection
+              ticketId={ticket.id}
+              links={ticket.ciLinks ?? []}
+              onRefresh={() => refetchTicket()}
+            />
 
             {/* CSAT */}
             {ticket.csatRating && (

@@ -22,6 +22,7 @@ import csatRouter from "./routes/csat";
 import reportsRouter from "./routes/reports";
 import reportsShareRouter from "./routes/reports-share";
 import reportsExportRouter from "./routes/reports-export";
+import insightsRouter from "./routes/insights";
 import analyticsRouter from "./routes/analytics";
 import attachmentsRouter from "./routes/attachments";
 import teamsRouter from "./routes/teams";
@@ -54,6 +55,13 @@ import ticketStatusConfigsRouter from "./routes/ticket-status-configs";
 import escalationRulesRouter from "./routes/escalation-rules";
 import presenceRouter from "./routes/presence";
 import cmdbRouter from "./routes/cmdb";
+import {
+  incidentAssetLinksRouter,
+  requestAssetLinksRouter,
+  problemAssetLinksRouter,
+  changeAssetLinksRouter,
+  ciAssetLinksRouter,
+} from "./routes/entity-asset-links";
 import assetsRouter from "./routes/assets";
 import assetViewsRouter from "./routes/asset-views";
 import inventoryLocationsRouter from "./routes/inventory-locations";
@@ -65,6 +73,7 @@ import discoveryRouter from "./routes/discovery";
 import catalogRouter from "./routes/catalog";
 import notificationsRouter from "./routes/notifications";
 import searchRouter from "./routes/search";
+import demoDataRouter from "./routes/demo-data";
 import { startQueue, stopQueue } from "./lib/queue";
 import { bootstrapMaterializedViews } from "./lib/materialized-views";
 import { registerApprovalHook } from "./lib/approval-hooks";
@@ -162,6 +171,11 @@ app.use("/api/problems", problemsRouter);
 app.use("/api/changes", changesRouter);
 app.use("/api/changes/:changeId/attachments", changeAttachmentsRouter);
 app.use("/api/cmdb", cmdbRouter);
+app.use("/api/incidents",  incidentAssetLinksRouter);
+app.use("/api/requests",   requestAssetLinksRouter);
+app.use("/api/problems",   problemAssetLinksRouter);
+app.use("/api/changes",    changeAssetLinksRouter);
+app.use("/api/cmdb",       ciAssetLinksRouter);
 app.use("/api/assets", assetsRouter);
 app.use("/api/asset-views", assetViewsRouter);
 app.use("/api/inventory-locations", inventoryLocationsRouter);
@@ -173,9 +187,11 @@ app.use("/api/discovery", discoveryRouter);
 app.use("/api/catalog", catalogRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/search", searchRouter);
+app.use("/api/demo-data", demoDataRouter);
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/reports", reportsShareRouter);
 app.use("/api/reports", reportsExportRouter);
+app.use("/api/reports/insights", insightsRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/theme", themeRouter);
 app.use("/api/users", usersRouter);

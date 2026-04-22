@@ -219,6 +219,7 @@ export interface AssetSummary {
     requests:      number;
     problems:      number;
     changes:       number;
+    tickets:       number;
   };
 }
 
@@ -298,6 +299,7 @@ export interface AssetDetail extends AssetSummary {
   problems:           AssetLinkedEntity[];
   changes:            AssetLinkedEntity[];
   services:           AssetLinkedEntity[];
+  tickets:            AssetLinkedEntity[];
   events:             AssetEvent[];
   movements:          AssetMovementRecord[];
 }

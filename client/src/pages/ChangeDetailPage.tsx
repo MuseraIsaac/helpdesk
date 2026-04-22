@@ -41,6 +41,7 @@ import RichTextRenderer from "@/components/RichTextRenderer";
 import ChangeApprovalPanel from "@/components/ChangeApprovalPanel";
 import ChangeConflictsTab from "@/components/ChangeConflictsTab";
 import ChangeCiLinksPanel from "@/components/ChangeCiLinksPanel";
+import AssetLinksPanel from "@/components/AssetLinksPanel";
 import ChangeTimeline from "@/components/ChangeTimeline";
 import ChangeAttachmentsPanel from "@/components/ChangeAttachmentsPanel";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
@@ -58,6 +59,7 @@ import {
   Database,
   Activity,
   Shield,
+  Server,
   ListChecks,
   ClipboardCheck,
   Clock,
@@ -1241,6 +1243,19 @@ export default function ChangeDetailPage() {
                 linkedCis={change.ciLinks ?? []}
                 readonly={isClosed}
                 onChanged={invalidateChange}
+              />
+            </div>
+
+            {/* Asset Links */}
+            <div className="p-4 border-t">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-3 flex items-center gap-1.5">
+                <Server className="h-3 w-3" />
+                Affected Assets
+              </p>
+              <AssetLinksPanel
+                entityType="changes"
+                entityId={changeId}
+                readonly={isClosed}
               />
             </div>
           </div>

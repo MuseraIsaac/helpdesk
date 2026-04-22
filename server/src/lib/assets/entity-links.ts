@@ -163,3 +163,35 @@ export async function unlinkAssetFromService(
   await prisma.assetServiceLink.deleteMany({ where: { assetId, catalogItemId } });
   await logAssetEvent(assetId, actorId, "asset.unlinked_from_service", { catalogItemId });
 }
+
+// ── Ticket links ──────────────────────────────────────────────────────────────
+
+export async function linkAssetToTicket(
+  assetId: number, ticketId: number, actorId: string
+): Promise<void> {
+  const [asset, ticket] = await Promise.all([
+    prisma.asset.findUnique({ where: { id: assetId }, select: { id: true } }),
+    prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true, subject: true, ticketNumber: true } }),
+  ]);
+  if (!asset)  throw Object.assign(new Error("Asset not found"),  { status: 404 });
+  if (!ticket) throw Object.assign(new Error("Ticket not found"), { status: 404 });
+
+  await prisma.assetTicketLink.upsert({
+    where:  { assetId_ticketId: { assetId, ticketId } },
+    create: { assetId, ticketId },
+    update: {},
+  });
+
+  await logAssetEvent(assetId, actorId, "asset.linked_to_ticket", {
+    ticketId,
+    ticketNumber: ticket.ticketNumber,
+    title: ticket.subject,
+  });
+}
+
+export async function unlinkAssetFromTicket(
+  assetId: number, ticketId: number, actorId: string
+): Promise<void> {
+  await prisma.assetTicketLink.deleteMany({ where: { assetId, ticketId } });
+  await logAssetEvent(assetId, actorId, "asset.unlinked_from_ticket", { ticketId });
+}

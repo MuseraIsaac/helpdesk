@@ -42,6 +42,7 @@ import BackLink from "@/components/BackLink";
 import ErrorAlert from "@/components/ErrorAlert";
 import { ProblemStatusBadge, ProblemPriorityBadge } from "./ProblemsPage";
 import CiLinksPanel from "@/components/CiLinksPanel";
+import AssetLinksPanel from "@/components/AssetLinksPanel";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
 import FollowButton from "@/components/FollowButton";
 import {
@@ -882,6 +883,15 @@ export default function ProblemDetailPage() {
                 linkedCis={problem.ciLinks ?? []}
                 readonly={isTerminal}
                 onChanged={() => refetch()}
+              />
+            </SectionCard>
+
+            {/* Affected Assets */}
+            <SectionCard icon={Server} title="Affected Assets">
+              <AssetLinksPanel
+                entityType="problems"
+                entityId={Number(id)}
+                readonly={isTerminal}
               />
             </SectionCard>
 

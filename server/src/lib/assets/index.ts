@@ -7,6 +7,7 @@ export {
   linkAssetToProblem,  unlinkAssetFromProblem,
   linkAssetToChange,   unlinkAssetFromChange,
   linkAssetToService,  unlinkAssetFromService,
+  linkAssetToTicket,   unlinkAssetFromTicket,
 } from "./entity-links";
 export type { AssetDiscoveryAdapter, DiscoveredAsset, ReconcileResult } from "./discovery-adapter";
 export { reconcileDiscoveredAsset } from "./discovery-adapter";

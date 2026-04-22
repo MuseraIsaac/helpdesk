@@ -35,6 +35,7 @@ import {
 } from "./IncidentsPage";
 import NewProblemDialog from "@/components/NewProblemDialog";
 import CiLinksPanel from "@/components/CiLinksPanel";
+import AssetLinksPanel from "@/components/AssetLinksPanel";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
 import IncidentPresenceIndicator from "@/components/IncidentPresenceIndicator";
 import FollowButton from "@/components/FollowButton";
@@ -855,6 +856,14 @@ export default function IncidentDetailPage() {
                 entityId={incident.id}
                 linkedCis={incident.ciLinks ?? []}
                 onChanged={() => queryClient.invalidateQueries({ queryKey: ["incident", id] })}
+              />
+            </SectionCard>
+
+            {/* Affected Assets */}
+            <SectionCard icon={Server} title="Affected Assets">
+              <AssetLinksPanel
+                entityType="incidents"
+                entityId={incident.id}
               />
             </SectionCard>
 

@@ -290,3 +290,170 @@ export interface OperationalHealth {
   atRisk: number;
   assignedNotReplied: number;
 }
+
+// ── Insights (cross-module relationship analytics) ────────────────────────────
+
+export interface InsightAsset {
+  id:          number;
+  assetNumber: string;
+  name:        string;
+  type:        string;
+  status:      string;
+}
+
+export interface InsightsOverview {
+  totalCrossModuleLinks: number;
+  linksByType: { type: string; label: string; count: number }[];
+  assets: {
+    withOpenIncidents: number;
+    withOpenProblems:  number;
+    inActiveChanges:   number;
+  };
+  problems: {
+    total:         number;
+    withIncidents: number;
+    recurring:     number;
+  };
+  standaloneIncidents: number;
+  changes: {
+    linkedToProblems:     number;
+    linkedToOpenProblems: number;
+  };
+  incidentDistribution: { bucket: string; count: number }[];
+  topImpactedAssets: (InsightAsset & {
+    incidents: number; problems: number; changes: number;
+    requests:  number; tickets:  number; total:   number;
+  })[];
+}
+
+export interface InsightsAssetImpact {
+  topAssets: (InsightAsset & {
+    incidents: number; openIncidents: number;
+    problems:  number; openProblems:  number;
+    changes:   number; activeChanges: number;
+    requests:  number; tickets:       number;
+    total:     number;
+  })[];
+  concurrentRisk: (InsightAsset & {
+    openIncidents: number;
+    activeChanges: number;
+  })[];
+  byAssetType: {
+    type:      string;
+    incidents: number;
+    problems:  number;
+    changes:   number;
+    requests:  number;
+  }[];
+  requestsByAssetType: { type: string; requestCount: number }[];
+}
+
+export interface InsightsProblemChains {
+  avgIncidentsPerProblem: number;
+  recurrenceDistribution: { bucket: string; label: string; count: number }[];
+  resolutionBreakdown: {
+    noChange:         number;
+    changeResolved:   number;
+    changeFailed:     number;
+    changeInProgress: number;
+    changeTerminal:   number;
+  };
+  topProblems: {
+    id:            number;
+    problemNumber: string;
+    title:         string;
+    status:        string;
+    incidentCount: number;
+    ticketCount:   number;
+    assetCount:    number;
+    linkedChange:  { id: number; changeNumber: string; state: string } | null;
+  }[];
+  topProblemAssets: (InsightAsset & {
+    problemCount:     number;
+    openProblemCount: number;
+  })[];
+  byStatus: { status: string; count: number; totalIncidents: number; avgIncidents: number }[];
+}
+
+export interface InsightsChangeRisk {
+  successByRisk: {
+    risk: string; total: number; failed: number;
+    successRate: number | null; avgAssets: number;
+  }[];
+  successByType: {
+    changeType: string; total: number; failed: number;
+    successRate: number | null; avgAssets: number;
+  }[];
+  assetScopeDistribution: {
+    bucket: string; changeCount: number; failedCount: number; failureRate: number;
+  }[];
+  changesLinkedToOpenProblems: {
+    id: number; changeNumber: string; title: string;
+    state: string; risk: string; changeType: string; assetCount: number;
+    problem: { id: number; number: string; title: string; status: string };
+  }[];
+  recentFailedChanges: {
+    id: number; changeNumber: string; title: string;
+    risk: string; failedAt: string; assetCount: number; linkedProblem: string | null;
+  }[];
+}
+
+export interface InsightsTickets {
+  relationships: {
+    total:       number;
+    withIncident: number;
+    withRequest:  number;
+    withProblem:  number;
+    withAsset:    number;
+    withCi:       number;
+    standalone:   number;
+  };
+  byCategory: { category: string; count: number; open: number; slaBreached: number }[];
+  byPriority: { priority: string; count: number; slaBreached: number }[];
+  byTeam:     { teamId: number | null; teamName: string; count: number; open: number; slaBreached: number }[];
+  bySource:   { source: string; count: number }[];
+  byHourOfDay:  { hour: number; label: string; count: number }[];
+  byDayOfWeek:  { dow: number; name: string; count: number }[];
+  byDayOfMonth: { day: number; count: number }[];
+  topCustomers: {
+    customerId:       number;
+    name:             string;
+    email:            string;
+    ticketCount:      number;
+    openCount:        number;
+    slaBreachedCount: number;
+  }[];
+  priorityStatusMatrix: { priority: string; status: string; count: number }[];
+  slaByCategory: { category: string; total: number; breached: number; breachRate: number }[];
+  topLinkedProblems: {
+    problemId: number; problemNumber: string; title: string; status: string; ticketCount: number;
+  }[];
+  customFields: {
+    fieldName:      string;
+    totalResponses: number;
+    values:         { value: string; count: number }[];
+  }[];
+}
+
+export interface InsightsServiceHealth {
+  topServices: {
+    id: number; name: string;
+    requestCount: number; openRequests: number;
+    assetCount: number; assetsWithIncidents: number;
+    openIncidentCount: number; healthScore: number;
+  }[];
+  servicesWithFailingAssets: {
+    id: number; name: string;
+    linkedAssets: number; assetsWithIncidents: number; openIncidentCount: number;
+  }[];
+  requestImpact: {
+    totalOpenRequests:           number;
+    requestsWithAssetLinks:      number;
+    requestsAffectedByIncidents: number;
+    impactRate:                  number;
+  };
+  servicesByChange: {
+    id: number; name: string;
+    changeCount: number; failedCount: number; failureRate: number;
+  }[];
+}

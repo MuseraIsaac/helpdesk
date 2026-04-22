@@ -72,6 +72,7 @@ import {
   securitySettingsSchema,
   auditSettingsSchema,
   businessHoursSettingsSchema,
+  demoDataSettingsSchema,
   type GeneralSettings,
   type BrandingSettings,
   type TicketsSettings,
@@ -95,6 +96,7 @@ import {
   type SecuritySettings,
   type AuditSettings,
   type BusinessHoursSettings,
+  type DemoDataSettings,
 } from "core/schemas/settings.ts";
 import {
   languages,
@@ -3073,6 +3075,76 @@ export function BusinessHoursSection() {
           <Input id="exclusionPeriods" placeholder="2025-12-26:2026-01-02" {...register("exclusionPeriods")} />
         </SettingsField>
       </SettingsGroup>
+    </SettingsFormShell>
+  );
+}
+
+// ── Demo Data ────────────────────────────────────────────────────────────────
+
+export function DemoDataSection() {
+  const { data, isLoading } = useSettings("demo_data");
+  const updateSettings = useUpdateSettings("demo_data");
+  const {
+    handleSubmit,
+    reset,
+    control,
+    formState: { isDirty },
+  } = useForm<DemoDataSettings>({
+    resolver: zodResolver(demoDataSettingsSchema),
+  });
+
+  useEffect(() => {
+    if (data) reset(data);
+  }, [data, reset]);
+
+  const onSubmit = handleSubmit((values) => updateSettings.mutate(values));
+
+  if (isLoading) return (
+    <div className="space-y-4 max-w-2xl">
+      <Skeleton className="h-7 w-36" />
+      <Skeleton className="h-4 w-96" />
+      <Skeleton className="h-px w-full" />
+      <Skeleton className="h-16 w-full" />
+    </div>
+  );
+
+  return (
+    <SettingsFormShell
+      title="Demo Data Tools"
+      description="Control whether the Demo Data module is accessible. When enabled, a Developer section appears in the sidebar and the generation/deletion APIs become active. This setting is Super Admin only and is off by default."
+      onSubmit={onSubmit}
+      isPending={updateSettings.isPending}
+      isDirty={isDirty}
+      error={updateSettings.error}
+      isSuccess={updateSettings.isSuccess}
+    >
+      <SettingsGroup title="Access Control">
+        <SettingsSwitchRow
+          label="Enable Demo Data Tools"
+          description="When on, the Demo Data section appears in the sidebar for admin users and the /api/demo-data endpoints become accessible. Turn off before going live with real users."
+        >
+          <Controller name="enableDemoDataTools" control={control} render={({ field }) => (
+            <Switch
+              id="enableDemoDataTools"
+              checked={field.value}
+              onCheckedChange={field.onChange}
+            />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
+
+      <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-950/20 p-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-amber-600 dark:text-amber-400 text-base">⚠</span>
+          <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Super Admin only — read before enabling</p>
+        </div>
+        <ul className="text-xs text-amber-700 dark:text-amber-400 space-y-1 list-disc list-inside">
+          <li>Demo data tools are only accessible to users with the <strong>admin</strong> role, enforced on both the backend API and the frontend route.</li>
+          <li>Generated demo records are tagged to a batch and can be deleted in one click — they never affect real data.</li>
+          <li>Demo user accounts use the <code className="bg-amber-100 dark:bg-amber-900/40 px-1 rounded font-mono text-[11px]">@demo.local</code> domain and a shared password. Do not use on a live production instance.</li>
+          <li>Disable this setting (and delete all batches) before opening the system to real users.</li>
+        </ul>
+      </div>
     </SettingsFormShell>
   );
 }

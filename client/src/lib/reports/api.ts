@@ -29,6 +29,12 @@ import type {
   ChangeReport,
   KbSearchStatsReport,
   AssetReport,
+  InsightsOverview,
+  InsightsAssetImpact,
+  InsightsProblemChains,
+  InsightsChangeRisk,
+  InsightsServiceHealth,
+  InsightsTickets,
 } from "./types";
 
 // ── Overview ──────────────────────────────────────────────────────────────────
@@ -175,5 +181,41 @@ export async function fetchKbSearchStats(period: PeriodOption | string): Promise
 export async function fetchAssetReport(periodOrQs: PeriodOption | string): Promise<AssetReport> {
   const qs = periodOrQs.includes("=") ? periodOrQs : `period=${periodOrQs}`;
   const { data } = await axios.get<AssetReport>(`/api/reports/assets?${qs}`);
+  return data;
+}
+
+// ── Insights (cross-module relationship analytics) ────────────────────────────
+
+function insightsQS(periodOrQs: string): string {
+  return periodOrQs.includes("=") ? periodOrQs : `period=${periodOrQs}`;
+}
+
+export async function fetchInsightsOverview(periodOrQs: string): Promise<InsightsOverview> {
+  const { data } = await axios.get<InsightsOverview>(`/api/reports/insights/overview?${insightsQS(periodOrQs)}`);
+  return data;
+}
+
+export async function fetchInsightsAssetImpact(periodOrQs: string): Promise<InsightsAssetImpact> {
+  const { data } = await axios.get<InsightsAssetImpact>(`/api/reports/insights/asset-impact?${insightsQS(periodOrQs)}`);
+  return data;
+}
+
+export async function fetchInsightsProblemChains(periodOrQs: string): Promise<InsightsProblemChains> {
+  const { data } = await axios.get<InsightsProblemChains>(`/api/reports/insights/problem-chains?${insightsQS(periodOrQs)}`);
+  return data;
+}
+
+export async function fetchInsightsChangeRisk(periodOrQs: string): Promise<InsightsChangeRisk> {
+  const { data } = await axios.get<InsightsChangeRisk>(`/api/reports/insights/change-risk?${insightsQS(periodOrQs)}`);
+  return data;
+}
+
+export async function fetchInsightsServiceHealth(periodOrQs: string): Promise<InsightsServiceHealth> {
+  const { data } = await axios.get<InsightsServiceHealth>(`/api/reports/insights/service-health?${insightsQS(periodOrQs)}`);
+  return data;
+}
+
+export async function fetchInsightsTickets(periodOrQs: string): Promise<InsightsTickets> {
+  const { data } = await axios.get<InsightsTickets>(`/api/reports/insights/tickets?${insightsQS(periodOrQs)}`);
   return data;
 }

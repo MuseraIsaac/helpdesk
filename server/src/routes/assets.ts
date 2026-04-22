@@ -34,6 +34,7 @@ import {
   linkAssetToProblem,     unlinkAssetFromProblem,
   linkAssetToChange,      unlinkAssetFromChange,
   linkAssetToService,     unlinkAssetFromService,
+  linkAssetToTicket,      unlinkAssetFromTicket,
 } from "../lib/assets";
 import prisma from "../db";
 import type { Prisma, AssetType, AssetStatus, AssetCondition, DepreciationMethod, AssetRelationshipType } from "../generated/prisma/client";
@@ -91,6 +92,7 @@ const ASSET_SUMMARY_SELECT = {
       requestLinks:      true,
       problemLinks:      true,
       changeLinks:       true,
+      ticketLinks:       true,
     },
   },
 } as const;
@@ -161,6 +163,12 @@ const ASSET_DETAIL_SELECT = {
     select: {
       linkedAt:    true,
       catalogItem: { select: { id: true, name: true, isActive: true } },
+    },
+  },
+  ticketLinks: {
+    select: {
+      linkedAt: true,
+      ticket: { select: { id: true, ticketNumber: true, subject: true, status: true } },
     },
   },
   // Movement history (recent 50)
@@ -275,11 +283,13 @@ router.get(
       problemCount,
       changeCount,
       serviceCount,
+      ticketCount,
       assetsWithLinks,
       openIncidentAssets,
       activeChangeAssets,
       openProblemAssets,
       pendingRequestAssets,
+      openTicketAssets,
       topImpacted,
     ] = await Promise.all([
       prisma.assetIncidentLink.count(),
@@ -287,6 +297,7 @@ router.get(
       prisma.assetProblemLink.count(),
       prisma.assetChangeLink.count(),
       prisma.assetServiceLink.count(),
+      prisma.assetTicketLink.count(),
 
       prisma.asset.count({
         where: {
@@ -296,6 +307,7 @@ router.get(
             { problemLinks:  { some: {} } },
             { changeLinks:   { some: {} } },
             { serviceLinks:  { some: {} } },
+            { ticketLinks:   { some: {} } },
           ],
         },
       }),
@@ -340,6 +352,17 @@ router.get(
         },
       }),
 
+      // Assets with an open ticket
+      prisma.asset.count({
+        where: {
+          ticketLinks: {
+            some: {
+              ticket: { status: { notIn: ["resolved", "closed"] } },
+            },
+          },
+        },
+      }),
+
       // Top 10 most-linked assets
       prisma.asset.findMany({
         where: {
@@ -348,6 +371,7 @@ router.get(
             { requestLinks:  { some: {} } },
             { problemLinks:  { some: {} } },
             { changeLinks:   { some: {} } },
+            { ticketLinks:   { some: {} } },
           ],
         },
         select: {
@@ -363,6 +387,7 @@ router.get(
               problemLinks:  true,
               changeLinks:   true,
               serviceLinks:  true,
+              ticketLinks:   true,
             },
           },
         },
@@ -370,7 +395,7 @@ router.get(
       }),
     ]);
 
-    const totalLinks = incidentCount + requestCount + problemCount + changeCount + serviceCount;
+    const totalLinks = incidentCount + requestCount + problemCount + changeCount + serviceCount + ticketCount;
 
     res.json({
       totalLinks,
@@ -380,6 +405,7 @@ router.get(
         problems:  problemCount,
         changes:   changeCount,
         services:  serviceCount,
+        tickets:   ticketCount,
       },
       assetsWithLinks,
       activeAlerts: {
@@ -387,6 +413,7 @@ router.get(
         activeChangeAssets,
         openProblemAssets,
         pendingRequestAssets,
+        openTicketAssets,
       },
       topImpacted: topImpacted
         .map(a => ({
@@ -395,13 +422,14 @@ router.get(
           name:        a.name,
           type:        a.type,
           status:      a.status,
-          totalLinks:  a._count.incidentLinks + a._count.requestLinks + a._count.problemLinks + a._count.changeLinks + a._count.serviceLinks,
+          totalLinks:  a._count.incidentLinks + a._count.requestLinks + a._count.problemLinks + a._count.changeLinks + a._count.serviceLinks + a._count.ticketLinks,
           counts: {
             incidents: a._count.incidentLinks,
             requests:  a._count.requestLinks,
             problems:  a._count.problemLinks,
             changes:   a._count.changeLinks,
             services:  a._count.serviceLinks,
+            tickets:   a._count.ticketLinks,
           },
         }))
         .sort((a, b) => b.totalLinks - a.totalLinks),
@@ -1129,6 +1157,7 @@ entityLinkRoutes("requests",  linkAssetToRequest,  unlinkAssetFromRequest);
 entityLinkRoutes("problems",  linkAssetToProblem,  unlinkAssetFromProblem);
 entityLinkRoutes("changes",   linkAssetToChange,   unlinkAssetFromChange);
 entityLinkRoutes("services",  linkAssetToService,  unlinkAssetFromService);
+entityLinkRoutes("tickets",   linkAssetToTicket,   unlinkAssetFromTicket);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1164,6 +1193,7 @@ function normaliseSummary(raw: RawSummary) {
       requests:      _count.requestLinks,
       problems:      _count.problemLinks,
       changes:       _count.changeLinks,
+      tickets:       _count.ticketLinks,
     },
   };
 }
@@ -1209,6 +1239,7 @@ function normaliseDetail(raw: RawDetail) {
       requests:      _count.requestLinks,
       problems:      _count.problemLinks,
       changes:       _count.changeLinks,
+      tickets:       _count.ticketLinks,
     },
     relationships,
     movements: movements.map((m) => ({
@@ -1267,6 +1298,13 @@ function normaliseDetail(raw: RawDetail) {
       number:   String(l.catalogItem.id),
       title:    l.catalogItem.name,
       status:   l.catalogItem.isActive ? "active" : "inactive",
+      linkedAt: l.linkedAt,
+    })),
+    tickets: raw.ticketLinks.map((l) => ({
+      id:       l.ticket.id,
+      number:   l.ticket.ticketNumber,
+      title:    l.ticket.subject,
+      status:   l.ticket.status,
       linkedAt: l.linkedAt,
     })),
   };

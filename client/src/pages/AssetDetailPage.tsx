@@ -56,6 +56,7 @@ import {
   Layers, Clock, ExternalLink, Circle, ChevronDown, Server,
   FileText, Zap, Wrench, AlertCircle, CheckCircle2, CalendarClock,
   Database, Truck, Warehouse, UserCheck, CornerDownLeft, TrendingDown,
+  Ticket,
 } from "lucide-react";
 import {
   CONTRACT_TYPE_LABEL, CONTRACT_STATUS_LABEL, CONTRACT_STATUS_COLOR, CONTRACT_TYPE_COLOR,
@@ -106,6 +107,8 @@ const EVENT_ICON: Record<string, React.ReactNode> = {
   "asset.linked_to_problem":    <AlertCircle   className="h-3 w-3 text-orange-500 shrink-0 mt-0.5" />,
   "asset.linked_to_change":     <Wrench        className="h-3 w-3 text-amber-500 shrink-0 mt-0.5" />,
   "asset.linked_to_request":    <Layers        className="h-3 w-3 text-sky-500 shrink-0 mt-0.5" />,
+  "asset.linked_to_ticket":     <Ticket        className="h-3 w-3 text-violet-500 shrink-0 mt-0.5" />,
+  "asset.unlinked_from_ticket": <Ticket        className="h-3 w-3 text-muted-foreground shrink-0 mt-0.5" />,
   "asset.discovery_sync":       <RotateCcw     className="h-3 w-3 text-muted-foreground shrink-0 mt-0.5" />,
   "asset.discovered":           <Server        className="h-3 w-3 text-emerald-500 shrink-0 mt-0.5" />,
 };
@@ -124,6 +127,8 @@ const EVENT_LABEL: Record<string, (m: Record<string, unknown>) => string> = {
   "asset.linked_to_problem":    (m) => `Linked to problem — ${m.title ?? `#${m.problemId}`}`,
   "asset.linked_to_change":     (m) => `Linked to change — ${m.title ?? `#${m.changeId}`}`,
   "asset.linked_to_request":    (m) => `Linked to request — ${m.title ?? `#${m.requestId}`}`,
+  "asset.linked_to_ticket":     (m) => `Linked to ticket ${m.ticketNumber ?? `#${m.ticketId}`} — ${m.title ?? ""}`,
+  "asset.unlinked_from_ticket": (m) => `Unlinked from ticket #${m.ticketId}`,
   "asset.discovery_sync":       (m) => `Discovery sync from ${m.source} (${m.policy})`,
   "asset.discovered":           (m) => `Discovered via ${m.source}`,
   "asset.received":             (m) => `Received into ${m.toLocation}${m.reference ? ` — ref ${m.reference}` : ""}`,
@@ -349,7 +354,7 @@ function EntityRow({
 
 // ── Link entity dialog ────────────────────────────────────────────────────────
 
-type LinkTarget = "incidents" | "requests" | "problems" | "changes" | "services" | "cis";
+type LinkTarget = "incidents" | "requests" | "problems" | "changes" | "services" | "cis" | "tickets";
 
 interface SearchResult {
   id: number;
@@ -438,6 +443,17 @@ function buildConfig(asset: AssetDetail): Record<LinkTarget, LinkEntityConfig> {
         body: { ciId: entityId },
       }),
       alreadyLinked: (a) => (a.ci ? [a.ci.id] : []),
+    },
+    tickets: {
+      label: "Ticket", icon: Ticket, iconColor: "text-violet-500",
+      search: async (q) => {
+        const { data } = await axios.get<{ tickets: { id: number; ticketNumber: string; subject: string; status: string }[] }>(
+          "/api/tickets", { params: { search: q, pageSize: 15 } },
+        );
+        return data.tickets.map(t => ({ id: t.id, number: t.ticketNumber, title: t.subject, status: t.status }));
+      },
+      linkPath: (assetId, entityId) => ({ url: `/api/assets/${assetId}/links/tickets/${entityId}`, method: "post" }),
+      alreadyLinked: (a) => (a.tickets ?? []).map(t => t.id),
     },
   };
 }
@@ -1370,7 +1386,7 @@ export default function AssetDetailPage() {
   function patch(d: UpdateAssetInput) { patchMut.mutate(d); }
 
   const totalLinked = asset
-    ? (asset._counts.incidents + asset._counts.requests + asset._counts.problems + asset._counts.changes + (asset.services?.length ?? 0))
+    ? (asset._counts.incidents + asset._counts.requests + asset._counts.problems + asset._counts.changes + asset._counts.tickets + (asset.services?.length ?? 0))
     : 0;
 
   return (
@@ -1768,6 +1784,7 @@ export default function AssetDetailPage() {
                 const activeChanges   = (asset.changes   ?? []).filter(c => !["closed","cancelled","failed"].includes(c.status)).length;
                 const openProblems    = (asset.problems  ?? []).filter(p => !["resolved","closed"].includes(p.status)).length;
                 const pendingRequests = (asset.requests  ?? []).filter(r => !["fulfilled","closed","rejected","cancelled"].includes(r.status)).length;
+                const openTickets     = (asset.tickets   ?? []).filter(t => !["resolved","closed"].includes(t.status)).length;
 
                 const TABS: Array<{
                   key: LinkTarget; label: string; entity: string;
@@ -1780,9 +1797,10 @@ export default function AssetDetailPage() {
                   { key: "changes",   label: "Changes",   entity: "changes",   icon: Wrench,        iconColor: "text-amber-500",  items: asset.changes   ?? [], href: (i) => `/changes/${i}`   },
                   { key: "services",  label: "Services",  entity: "services",  icon: CheckCircle2,  iconColor: "text-teal-500",   items: asset.services  ?? [], href: (i) => `/catalog/${i}`   },
                   { key: "cis",       label: "Config Item",entity: "cis",      icon: Database,      iconColor: "text-purple-500", items: asset.ci ? [{ id: asset.ci.id, number: asset.ci.ciNumber ?? "CI", title: asset.ci.name, status: asset.ci.status ?? "active", linkedAt: "" }] : [], href: (i) => `/cmdb/${i}` },
+                  { key: "tickets",   label: "Tickets",   entity: "tickets",   icon: Ticket,        iconColor: "text-violet-500", items: asset.tickets  ?? [], href: (i) => `/tickets/${i}` },
                 ];
 
-                const hasAlerts = openIncidents > 0 || activeChanges > 0 || openProblems > 0;
+                const hasAlerts = openIncidents > 0 || activeChanges > 0 || openProblems > 0 || openTickets > 0;
 
                 return (
                   <Section
@@ -1826,6 +1844,7 @@ export default function AssetDetailPage() {
                             {activeChanges   > 0 && <span className="text-amber-700 dark:text-amber-400 font-medium">{activeChanges} active change{activeChanges > 1 ? "s" : ""}</span>}
                             {openProblems    > 0 && <span className="text-orange-700 dark:text-orange-400 font-medium">{openProblems} open problem{openProblems > 1 ? "s" : ""}</span>}
                             {pendingRequests > 0 && <span className="text-sky-700 dark:text-sky-400 font-medium">{pendingRequests} pending request{pendingRequests > 1 ? "s" : ""}</span>}
+                            {openTickets     > 0 && <span className="text-violet-700 dark:text-violet-400 font-medium">{openTickets} open ticket{openTickets > 1 ? "s" : ""}</span>}
                           </div>
                         )}
                       </div>

@@ -24,6 +24,7 @@ import {
   ShieldCheck,
   ScrollText,
   CalendarDays,
+  FlaskConical,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -56,6 +57,7 @@ import {
   SecuritySection,
   AuditSection,
   BusinessHoursSection,
+  DemoDataSection,
 } from "./settings/sections";
 
 // ── Section groups for sidebar organisation ───────────────────────────────────
@@ -80,6 +82,10 @@ const SECTION_GROUPS: { label: string; sections: SettingsSection[] }[] = [
   {
     label: "System",
     sections: ["notifications", "security", "audit", "integrations"],
+  },
+  {
+    label: "Developer",
+    sections: ["demo_data"],
   },
 ];
 
@@ -108,6 +114,7 @@ const sectionIcons: Record<SettingsSection, React.ReactNode> = {
   security:         <ShieldCheck className="h-4 w-4" />,
   audit:            <ScrollText className="h-4 w-4" />,
   business_hours:   <CalendarDays className="h-4 w-4" />,
+  demo_data:        <FlaskConical className="h-4 w-4" />,
 };
 
 // ── Section component map ─────────────────────────────────────────────────────
@@ -135,6 +142,7 @@ const sectionComponents: Record<SettingsSection, React.FC> = {
   security:         SecuritySection,
   audit:            AuditSection,
   business_hours:   BusinessHoursSection,
+  demo_data:        DemoDataSection,
 };
 
 // ── Search index ──────────────────────────────────────────────────────────────

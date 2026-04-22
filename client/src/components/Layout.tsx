@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import {
   NAV_SECTIONS,
   isNavItemVisible,
@@ -126,12 +128,13 @@ interface SidebarContentProps {
   role: string;
   name: string;
   email: string;
+  showDemoData?: boolean;
   onToggleCollapse?: () => void;
   onClose?: () => void;
   onSignOut: () => void;
 }
 
-function SidebarContent({ collapsed, role, name, email, onToggleCollapse, onClose, onSignOut }: SidebarContentProps) {
+function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCollapse, onClose, onSignOut }: SidebarContentProps) {
   const initials = getInitials(name);
   const { data: branding } = useBranding();
   const logoDataUrl = branding?.logoDataUrl;
@@ -184,7 +187,12 @@ function SidebarContent({ collapsed, role, name, email, onToggleCollapse, onClos
 
       {/* ── Navigation ── */}
       <nav className="flex-1 overflow-y-auto py-2 px-2 min-h-0 sidebar-scrollbar">
-        {NAV_SECTIONS.filter((s) => isNavSectionVisible(s, role)).map((section: NavSection) => {
+        {NAV_SECTIONS
+          .filter((s) => {
+            if (s.id === "demo-data" && !showDemoData) return false;
+            return isNavSectionVisible(s, role);
+          })
+          .map((section: NavSection) => {
           const visibleItems = section.items.filter((item) => isNavItemVisible(item, role));
           return (
             <div key={section.id}>
@@ -313,6 +321,19 @@ export default function Layout() {
   const name  = session?.user?.name  ?? "";
   const email = session?.user?.email ?? "";
 
+  // Fetch demo_data setting only for admins — determines sidebar section visibility.
+  // staleTime is generous (5 min) since this rarely changes during a session.
+  const { data: demoSettings } = useQuery({
+    queryKey: ["settings", "demo_data"],
+    queryFn:  () =>
+      axios
+        .get<{ section: string; data: { enableDemoDataTools: boolean } }>("/api/settings/demo_data")
+        .then((r) => r.data.data),
+    enabled:   role === "admin",
+    staleTime: 5 * 60_000,
+  });
+  const showDemoData = role === "admin" && (demoSettings?.enableDemoDataTools ?? false);
+
   const breadcrumb = resolveModuleBreadcrumb(pathname, role);
 
   const handleSignOut = async () => {
@@ -320,7 +341,7 @@ export default function Layout() {
     navigate("/login", { replace: true });
   };
 
-  const sharedProps: SidebarContentProps = { collapsed, role, name, email, onSignOut: handleSignOut };
+  const sharedProps: SidebarContentProps = { collapsed, role, name, email, showDemoData, onSignOut: handleSignOut };
 
   return (
     <div className="min-h-screen flex bg-muted/20">

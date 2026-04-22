@@ -117,4 +117,29 @@ export interface Ticket {
     createdAt: string;
     updatedAt: string;
   } | null;
+
+  /** Configuration Items linked to this ticket — present in GET /api/tickets/:id */
+  ciLinks?: Array<{
+    linkedAt: string;
+    ci: {
+      id: number;
+      ciNumber: string;
+      name: string;
+      type: string;
+      status: string;
+      environment: string | null;
+    };
+  }>;
+
+  /** Assets linked to this ticket — present in GET /api/tickets/:id */
+  assetLinks?: Array<{
+    linkedAt: string;
+    asset: {
+      id: number;
+      assetNumber: string;
+      name: string;
+      type: string;
+      status: string;
+    };
+  }>;
 }
