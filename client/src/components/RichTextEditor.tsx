@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef, useMemo } from "react";
+import { useEffect, useCallback, useState, useRef, useMemo, useImperativeHandle, forwardRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { useEditor, EditorContent, ReactRenderer } from "@tiptap/react";
@@ -34,6 +34,11 @@ import {
   Minus,
 } from "lucide-react";
 import "./RichTextEditor.css";
+
+export interface RichTextEditorHandle {
+  /** Insert HTML at the current cursor position (or end if editor has no selection). */
+  insertAtCursor: (html: string) => void;
+}
 
 export interface RichTextEditorProps {
   /** Initial HTML content */
@@ -137,7 +142,7 @@ const MentionWithEmail = Mention.extend({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function RichTextEditor({
+const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor({
   content = "",
   onChange,
   placeholder = "Write something…",
@@ -146,7 +151,7 @@ export default function RichTextEditor({
   className = "",
   editorClassName = "",
   enableMentions = false,
-}: RichTextEditorProps) {
+}, ref) {
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
 
@@ -257,7 +262,15 @@ export default function RichTextEditor({
     },
   });
 
-  // Sync content from outside (e.g. macro insert, AI polish)
+  // Expose insertAtCursor for parent components (e.g. macro insertion)
+  useImperativeHandle(ref, () => ({
+    insertAtCursor(html: string) {
+      if (!editor) return;
+      editor.chain().focus().insertContent(html).run();
+    },
+  }), [editor]);
+
+  // Sync content from outside (e.g. AI polish, draft injection)
   useEffect(() => {
     if (!editor) return;
     const current = editor.isEmpty ? "" : editor.getHTML();
@@ -445,4 +458,6 @@ export default function RichTextEditor({
       </Dialog>
     </div>
   );
-}
+});
+
+export default RichTextEditor;

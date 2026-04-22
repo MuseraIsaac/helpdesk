@@ -21,6 +21,29 @@ import { notify } from "./notify";
  * Matches any opening <span> tag that has data-type="mention" and data-id="..."
  * regardless of attribute order.
  */
+/**
+ * Extract unique email addresses from @mention spans in TipTap HTML.
+ * Matches <span data-type="mention" data-email="..."> rendered by MentionWithEmail.
+ * Returns a deduplicated list; entries with no email are omitted.
+ */
+export function extractMentionedEmails(html: string | null | undefined): string[] {
+  if (!html) return [];
+  const seen = new Set<string>();
+
+  const tagRegex   = /<span\s[^>]*>/gi;
+  const isMention  = /data-type="mention"/i;
+  const extractEmail = /data-email="([^"]+)"/i;
+
+  let tagMatch: RegExpExecArray | null;
+  while ((tagMatch = tagRegex.exec(html)) !== null) {
+    const tag = tagMatch[0];
+    if (!isMention.test(tag)) continue;
+    const m = extractEmail.exec(tag);
+    if (m?.[1]?.trim()) seen.add(m[1].trim().toLowerCase());
+  }
+  return [...seen];
+}
+
 export function extractMentionedUserIds(html: string | null | undefined): string[] {
   if (!html) return [];
   const ids: string[] = [];

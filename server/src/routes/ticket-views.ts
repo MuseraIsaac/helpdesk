@@ -110,12 +110,16 @@ router.put("/:id", async (req, res) => {
     res.status(404).json({ error: "View not found" }); return;
   }
 
+  // Only admins/supervisors can share views
+  const canShare = req.user.role === "admin" || req.user.role === "supervisor";
+
   const view = await prisma.savedTicketView.update({
     where: { id },
     data: {
-      ...(data.name   !== undefined && { name: data.name }),
-      ...(data.emoji  !== undefined && { emoji: data.emoji }),
-      ...(data.config !== undefined && { config: data.config as object }),
+      ...(data.name     !== undefined && { name: data.name }),
+      ...(data.emoji    !== undefined && { emoji: data.emoji }),
+      ...(data.config   !== undefined && { config: data.config as object }),
+      ...(data.isShared !== undefined && canShare && { isShared: data.isShared }),
     },
   });
 

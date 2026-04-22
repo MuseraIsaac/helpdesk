@@ -178,7 +178,7 @@ router.get(
       search, page, pageSize, sortBy, sortOrder,
     } = query;
 
-    const where: Prisma.ProblemWhereInput = {};
+    const where: Prisma.ProblemWhereInput = { deletedAt: null };
     if (status)        where.status = status;
     if (priority)      where.priority = priority as TicketPriority;
     if (isKnownError !== undefined) where.isKnownError = isKnownError;
@@ -843,7 +843,10 @@ router.post("/bulk", requireAuth, requirePermission("problems.manage"), async (r
   if (!data) return;
   switch (data.action) {
     case "delete": {
-      const { count } = await prisma.problem.deleteMany({ where: { id: { in: data.ids } } });
+      const { count } = await prisma.problem.updateMany({
+        where: { id: { in: data.ids }, deletedAt: null },
+        data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
+      });
       res.json({ affected: count }); return;
     }
     case "assign": {

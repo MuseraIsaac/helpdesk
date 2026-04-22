@@ -162,7 +162,7 @@ router.get(
 
     const { state, changeType, risk, priority, assignedToMe, search, page, pageSize, sortBy, sortOrder } = query;
 
-    const where: Prisma.ChangeWhereInput = {};
+    const where: Prisma.ChangeWhereInput = { deletedAt: null };
     if (state)      where.state      = state;
     if (changeType) where.changeType = changeType;
     if (risk)       where.risk       = risk;
@@ -1071,7 +1071,10 @@ router.post("/bulk", requireAuth, requirePermission("changes.manage"), async (re
   if (!data) return;
   switch (data.action) {
     case "delete": {
-      const { count } = await prisma.change.deleteMany({ where: { id: { in: data.ids } } });
+      const { count } = await prisma.change.updateMany({
+        where: { id: { in: data.ids }, deletedAt: null },
+        data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
+      });
       res.json({ affected: count }); return;
     }
     case "assign": {

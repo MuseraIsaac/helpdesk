@@ -29,6 +29,9 @@ import { EscalationIcon } from "@/components/EscalationBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -225,7 +228,8 @@ const ALL_COLUMN_DEFS: Record<ColumnId, ColumnDef<Ticket>> = {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS  = [10, 25, 50, 100] as const;
 
 interface TicketsTableProps {
   filters: TicketFilters;
@@ -242,7 +246,7 @@ export default function TicketsTable({ filters, viewConfig, onSelectionChange, s
   ]);
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
-    pageSize: PAGE_SIZE,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
@@ -305,7 +309,7 @@ export default function TicketsTable({ filters, viewConfig, onSelectionChange, s
   const sortOrder = sorting[0]?.desc ?? true ? "desc" : "asc";
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["tickets", apiSortKey, sortOrder, filters, pagination.pageIndex],
+    queryKey: ["tickets", apiSortKey, sortOrder, filters, pagination.pageIndex, pagination.pageSize],
     queryFn: async () => {
       const { data } = await axios.get<TicketsResponse>("/api/tickets", {
         params: {
@@ -421,59 +425,81 @@ export default function TicketsTable({ filters, viewConfig, onSelectionChange, s
       </Table>
 
       {!isLoading && !error && (
-        <div className="flex items-center justify-between mt-4">
-          <p className="text-sm text-muted-foreground">
+        <div className="flex items-center justify-between mt-4 gap-4 flex-wrap">
+          {/* Left: record count */}
+          <p className="text-sm text-muted-foreground tabular-nums shrink-0">
             {total === 0
               ? "No tickets"
-              : `Showing ${pagination.pageIndex * pagination.pageSize + 1}–${Math.min(
+              : `${pagination.pageIndex * pagination.pageSize + 1}–${Math.min(
                   (pagination.pageIndex + 1) * pagination.pageSize,
                   total,
-                )} of ${total} tickets`}
+                )} of ${total.toLocaleString()} ticket${total !== 1 ? "s" : ""}`}
           </p>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => table.firstPage()}
-              disabled={!table.getCanPreviousPage()}
-              aria-label="First page"
-            >
-              <ChevronsLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
-              aria-label="Previous page"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm px-2">
-              Page {pagination.pageIndex + 1} of {pageCount || 1}
-            </span>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
-              aria-label="Next page"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => table.lastPage()}
-              disabled={!table.getCanNextPage()}
-              aria-label="Last page"
-            >
-              <ChevronsRight className="h-4 w-4" />
-            </Button>
+
+          {/* Right: per-page selector + page navigation */}
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Per-page selector */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Rows per page</span>
+              <Select
+                value={String(pagination.pageSize)}
+                onValueChange={(v) =>
+                  setPagination({ pageIndex: 0, pageSize: Number(v) })
+                }
+              >
+                <SelectTrigger className="h-8 w-[70px] text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <SelectItem key={n} value={String(n)} className="text-sm">
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="h-4 w-px bg-border shrink-0" />
+
+            {/* Page navigation */}
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline" size="icon" className="h-8 w-8"
+                onClick={() => table.firstPage()}
+                disabled={!table.getCanPreviousPage()}
+                aria-label="First page"
+              >
+                <ChevronsLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline" size="icon" className="h-8 w-8"
+                onClick={() => table.previousPage()}
+                disabled={!table.getCanPreviousPage()}
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm px-2 tabular-nums whitespace-nowrap">
+                {pagination.pageIndex + 1} / {pageCount || 1}
+              </span>
+              <Button
+                variant="outline" size="icon" className="h-8 w-8"
+                onClick={() => table.nextPage()}
+                disabled={!table.getCanNextPage()}
+                aria-label="Next page"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline" size="icon" className="h-8 w-8"
+                onClick={() => table.lastPage()}
+                disabled={!table.getCanNextPage()}
+                aria-label="Last page"
+              >
+                <ChevronsRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       )}

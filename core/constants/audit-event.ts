@@ -17,9 +17,11 @@ export const auditActions = [
   "ticket.sla_breached",
   "ticket.escalated",
   "ticket.deescalated",
-  // Merge
+  // Merge / unmerge
   "ticket.merged",
   "ticket.received_merge",
+  "ticket.unmerged",
+  "ticket.child_unmerged",
   // Collaboration
   "reply.created",
   "note.created",

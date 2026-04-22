@@ -145,6 +145,31 @@ export const WIDGET_LAYOUT_DEFAULTS: Record<
   approval_turnaround: { x: 0, w:  6, h: 6, minW: 4,  minH: 4 },
 };
 
+// ── Widget appearance / customisation ────────────────────────────────────────
+
+/** A single colour threshold rule: "if <metric> <op> <value> → use <color>" */
+export const widgetThresholdSchema = z.object({
+  metric:   z.string().max(60),
+  operator: z.enum(["gt", "lt", "gte", "lte", "eq"]),
+  value:    z.number(),
+  color:    z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  label:    z.string().max(40).optional(),
+});
+
+export const widgetAppearanceSchema = z.object({
+  /** Hex accent colour applied to the widget header icon and border hint */
+  accentColor:   z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  /** Override the default chart/vis type for this widget */
+  chartType:     z.enum(["default", "bar", "line", "area", "pie", "heatmap"]).optional(),
+  /** Up to 8 numeric threshold rules that recolour metric values */
+  thresholds:    z.array(widgetThresholdSchema).max(8).optional(),
+  /** Optional display name override shown in the widget header */
+  titleOverride: z.string().max(80).optional(),
+});
+
+export type WidgetThreshold = z.infer<typeof widgetThresholdSchema>;
+export type WidgetAppearance = z.infer<typeof widgetAppearanceSchema>;
+
 // ── Zod schemas ────────────────────────────────────────────────────────────────
 
 export const widgetConfigSchema = z.object({
@@ -156,6 +181,8 @@ export const widgetConfigSchema = z.object({
   y: z.number().int().min(0).optional(),
   w: z.number().int().min(1).max(12).optional(),
   h: z.number().int().min(1).optional(),
+  /** Per-widget visual customisation — colours, chart type, thresholds */
+  appearance: widgetAppearanceSchema.optional(),
 });
 
 export const dashboardConfigDataSchema = z.object({

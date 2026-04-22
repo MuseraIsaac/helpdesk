@@ -9,6 +9,7 @@ import { registerCheckReportSchedulesWorker } from "./check-report-schedules";
 import { registerRefreshMatViewsWorker } from "./refresh-materialized-views";
 import { registerDiscoverySyncWorker } from "./run-discovery-sync";
 import { registerCheckDiscoverySchedulesWorker } from "./check-discovery-schedules";
+import { registerPurgeTrashWorker } from "./purge-trash";
 
 const boss = new PgBoss({
   connectionString: process.env.DATABASE_URL!,
@@ -38,6 +39,7 @@ export async function startQueue(): Promise<void> {
     boss.createQueue("refresh-materialized-views"),
     boss.createQueue("run-discovery-sync",        { retryLimit: 2, retryDelay: 30, retryBackoff: true }),
     boss.createQueue("check-discovery-schedules"),
+    boss.createQueue("purge-trash"),
   ]);
 
   await registerClassifyWorker(boss);
@@ -49,6 +51,7 @@ export async function startQueue(): Promise<void> {
   await registerRefreshMatViewsWorker(boss);
   await registerDiscoverySyncWorker(boss);
   await registerCheckDiscoverySchedulesWorker(boss);
+  await registerPurgeTrashWorker(boss);
 
   console.log("Job queue started");
 }

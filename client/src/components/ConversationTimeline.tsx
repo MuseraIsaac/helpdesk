@@ -298,121 +298,135 @@ function ReplyCard({
     : ticket.senderName;
   const isForward = reply.replyType === "forward";
 
-  // QuoteData built from this message — passed to the compose area when replying inline
   const thisAsQuote: QuoteData = {
     bodyHtml: reply.bodyHtml ?? `<p>${reply.body}</p>`,
     senderName: displayName,
     createdAt: reply.createdAt,
   };
 
+  // ── Visual tokens per sender type ──────────────────────────────────────────
+  const card = isAgent
+    ? {
+        wrap:    "border border-primary/20 bg-primary/[0.03] dark:bg-primary/[0.06]",
+        stripe:  "bg-primary/50",
+        divider: "border-primary/10",
+        avatar:  "bg-primary/15 text-primary",
+        badge:   "border-primary/20 bg-primary/8 text-primary/80",
+        badgeTx: "Support",
+      }
+    : {
+        wrap:    "border border-slate-200 dark:border-slate-700/60 bg-slate-50 dark:bg-slate-900/30",
+        stripe:  "bg-slate-400/60 dark:bg-slate-500/50",
+        divider: "border-slate-200/80 dark:border-slate-700/40",
+        avatar:  "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300",
+        badge:   "border-slate-300/70 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400",
+        badgeTx: "Customer",
+      };
+
   return (
-    <div
-      className={`group/card rounded-xl border overflow-hidden transition-all duration-150 hover:shadow-sm ${
-        isAgent
-          ? "border-primary/20 bg-primary/[0.015]"
-          : "border-border bg-background"
-      }`}
-    >
-      {/* ── Header ── */}
-      <div className="flex items-start gap-3 px-4 py-3">
-        <Avatar
-          name={displayName}
-          colorClass={
-            isAgent
-              ? "bg-primary/15 text-primary"
-              : "bg-muted text-muted-foreground"
-          }
-        />
+    <div className={`group/card rounded-xl overflow-hidden transition-all duration-150 hover:shadow-md ${card.wrap} flex`}>
+      {/* Left colour stripe */}
+      <div className={`w-1 shrink-0 ${card.stripe}`} />
 
-        <div className="flex-1 min-w-0">
-          {/* Name row */}
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-              <span className="text-sm font-semibold leading-tight truncate">
-                {displayName}
-              </span>
+      <div className="flex-1 min-w-0">
+        {/* ── Header ── */}
+        <div className="flex items-start gap-3 px-4 py-3">
+          <Avatar name={displayName} colorClass={card.avatar} />
 
-              {/* Channel badge */}
-              {reply.channel && (
-                <span className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0 text-[10px] font-medium text-muted-foreground bg-background shrink-0">
-                  <span>{CHANNEL_ICON[reply.channel]}</span>
-                  <span>{CHANNEL_SHORT_LABEL[reply.channel]}</span>
+          <div className="flex-1 min-w-0">
+            {/* Name row */}
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                <span className="text-sm font-semibold leading-tight truncate">
+                  {displayName}
                 </span>
-              )}
 
-              {/* Forward badge */}
-              {isForward && (
-                <span className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0 text-[10px] font-medium border-blue-200 text-blue-600 bg-blue-50/60 shrink-0">
-                  <Forward className="h-2.5 w-2.5" />
-                  Forwarded
+                {/* Sender-type badge */}
+                <span className={`inline-flex items-center rounded-full border px-2 py-0 text-[10px] font-semibold shrink-0 ${card.badge}`}>
+                  {card.badgeTx}
                 </span>
-              )}
-            </div>
 
-            {/* Timestamp + actions */}
-            <div className="flex items-center gap-1 shrink-0">
-              {/* Action buttons — subtle, brighten on card hover */}
-              <div className="flex items-center opacity-0 group-hover/card:opacity-100 transition-opacity duration-150">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
-                  onClick={() => onCompose?.("reply_all", thisAsQuote)}
-                  title="Reply to All"
-                >
-                  <ReplyIcon className="h-3.5 w-3.5" />
-                  Reply
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
-                  onClick={() => onCompose?.("reply_sender", thisAsQuote)}
-                  title="Reply to Sender only"
-                >
-                  <Users className="h-3.5 w-3.5" />
-                  Sender
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
-                  onClick={() => onCompose?.("forward", thisAsQuote)}
-                  title="Forward"
-                >
-                  <Forward className="h-3.5 w-3.5" />
-                  Fwd
-                </Button>
+                {/* Channel badge */}
+                {reply.channel && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0 text-[10px] font-medium text-muted-foreground bg-background shrink-0">
+                    <span>{CHANNEL_ICON[reply.channel]}</span>
+                    <span>{CHANNEL_SHORT_LABEL[reply.channel]}</span>
+                  </span>
+                )}
+
+                {/* Forward badge */}
+                {isForward && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0 text-[10px] font-medium border-blue-200 text-blue-600 bg-blue-50/60 shrink-0">
+                    <Forward className="h-2.5 w-2.5" />
+                    Forwarded
+                  </span>
+                )}
               </div>
 
-              <span className="text-[11px] text-muted-foreground tabular-nums">
-                {formatTime(reply.createdAt)}
-              </span>
+              {/* Timestamp + hover actions */}
+              <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center opacity-0 group-hover/card:opacity-100 transition-opacity duration-150">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                    onClick={() => onCompose?.("reply_all", thisAsQuote)}
+                    title="Reply to All"
+                  >
+                    <ReplyIcon className="h-3.5 w-3.5" />
+                    Reply
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                    onClick={() => onCompose?.("reply_sender", thisAsQuote)}
+                    title="Reply to Sender only"
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                    Sender
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                    onClick={() => onCompose?.("forward", thisAsQuote)}
+                    title="Forward"
+                  >
+                    <Forward className="h-3.5 w-3.5" />
+                    Fwd
+                  </Button>
+                </div>
+
+                <span className="text-[11px] text-muted-foreground tabular-nums">
+                  {formatTime(reply.createdAt)}
+                </span>
+              </div>
             </div>
+
+            {/* Recipient row */}
+            <RecipientRow reply={reply} ticket={ticket} />
           </div>
-
-          {/* Recipient row */}
-          <RecipientRow reply={reply} ticket={ticket} />
         </div>
-      </div>
 
-      {/* ── Divider ── */}
-      <div className="border-t border-border/50 mx-4" />
+        {/* ── Divider ── */}
+        <div className={`border-t mx-4 ${card.divider}`} />
 
-      {/* ── Body ── */}
-      <div className="px-4 py-3 pl-[52px]">
-        <RichTextRenderer content={reply.bodyHtml ?? reply.body} />
-        <AttachmentList ticketId={ticket.id} attachments={reply.attachments} />
-        {reply.quotedHtml && (
-          <StoredQuotedTrail
-            quotedHtml={reply.quotedHtml}
-            isForward={reply.replyType === "forward"}
-            ticket={ticket}
-          />
-        )}
+        {/* ── Body ── */}
+        <div className="px-4 py-3 pl-[52px]">
+          <RichTextRenderer content={reply.bodyHtml ?? reply.body} />
+          <AttachmentList ticketId={ticket.id} attachments={reply.attachments} />
+          {reply.quotedHtml && (
+            <StoredQuotedTrail
+              quotedHtml={reply.quotedHtml}
+              isForward={reply.replyType === "forward"}
+              ticket={ticket}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

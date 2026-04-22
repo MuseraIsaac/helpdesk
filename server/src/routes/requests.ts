@@ -129,7 +129,7 @@ router.get(
 
     const { status, priority, assignedToMe, search, page, pageSize, sortBy, sortOrder } = query;
 
-    const where: Prisma.ServiceRequestWhereInput = {};
+    const where: Prisma.ServiceRequestWhereInput = { deletedAt: null };
     if (status) where.status = status;
     if (priority) where.priority = priority as TicketPriority;
     if (assignedToMe) where.assignedToId = req.user.id;
@@ -710,7 +710,10 @@ router.post("/bulk", requireAuth, requirePermission("requests.manage"), async (r
   if (!data) return;
   switch (data.action) {
     case "delete": {
-      const { count } = await prisma.serviceRequest.deleteMany({ where: { id: { in: data.ids } } });
+      const { count } = await prisma.serviceRequest.updateMany({
+        where: { id: { in: data.ids }, deletedAt: null },
+        data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
+      });
       res.json({ affected: count }); return;
     }
     case "assign": {

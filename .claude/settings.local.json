@@ -104,7 +104,16 @@
       "PowerShell(Stop-Process *)",
       "PowerShell(netstat *)",
       "Bash(xargs ls *)",
-      "Bash(grep -v \"^#\\\\|//\")"
+      "Bash(grep -v \"^#\\\\|//\")",
+      "Bash(awk '{print $2}')",
+      "Bash(xargs wc *)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(bunx tsc *)",
+      "Bash(bunx shadcn@latest add checkbox collapsible --yes)",
+      "Bash(bunx shadcn@latest add tooltip --yes)",
+      "Bash(bunx shadcn@latest add tooltip)",
+      "Bash(bun check-users.ts)",
+      "PowerShell(Get-NetTCPConnection *)"
     ]
   }
 }

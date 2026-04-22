@@ -62,15 +62,19 @@ const columnEntrySchema = z.object({
  * applied as the initial URL params (user can still refine from there).
  */
 const savedViewFiltersSchema = z.object({
-  status:       z.string().optional(),
-  ticketType:   z.string().optional(),
-  category:     z.string().optional(),
-  priority:     z.string().optional(),
-  severity:     z.string().optional(),
-  escalated:    z.boolean().optional(),
-  assignedToMe: z.boolean().optional(),
-  teamId:       z.union([z.number().int().positive(), z.literal("none")]).optional(),
+  status:             z.string().optional(),
+  customStatusId:     z.number().int().positive().optional(),
+  ticketType:         z.string().optional(),
+  customTicketTypeId: z.number().int().positive().optional(),
+  category:           z.string().optional(),
+  priority:           z.string().optional(),
+  severity:           z.string().optional(),
+  escalated:          z.boolean().optional(),
+  assignedToMe:       z.boolean().optional(),
+  teamId:             z.union([z.number().int().positive(), z.literal("none")]).optional(),
 }).optional();
+
+export type SavedViewFilters = NonNullable<z.infer<typeof savedViewFiltersSchema>>;
 
 export const savedViewConfigSchema = z.object({
   columns: z.array(columnEntrySchema),
@@ -103,7 +107,8 @@ export const createSavedViewSchema = z.object({
 });
 
 export const updateSavedViewSchema = z.object({
-  name:   z.string().trim().min(1).max(100).optional(),
-  emoji:  z.string().max(10).optional(),
-  config: savedViewConfigSchema.optional(),
+  name:     z.string().trim().min(1).max(100).optional(),
+  emoji:    z.string().max(10).optional(),
+  isShared: z.boolean().optional(),
+  config:   savedViewConfigSchema.optional(),
 });

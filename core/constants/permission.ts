@@ -48,7 +48,8 @@
  * │ attachments.delete_any       │   ✓   │     ✓      │       │          │
  * │ replies.create               │   ✓   │     ✓      │   ✓   │          │
  * │ macros.view                  │   ✓   │     ✓      │   ✓   │    ✓     │
- * │ macros.manage                │   ✓   │            │       │          │
+ * │ macros.create                │   ✓   │     ✓      │   ✓   │          │
+ * │ macros.manage                │   ✓   │     ✓      │       │          │
  * │ templates.view               │   ✓   │     ✓      │   ✓   │    ✓     │
  * │ templates.create             │   ✓   │     ✓      │   ✓   │          │
  * │ templates.manage             │   ✓   │            │       │          │
@@ -146,6 +147,7 @@ export type Permission =
   | "attachments.delete_any"
   | "replies.create"
   | "macros.view"
+  | "macros.create"
   | "macros.manage"
   | "templates.view"
   | "templates.create"
@@ -243,6 +245,7 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "attachments.delete_any",
   "replies.create",
   "macros.view",
+  "macros.create",
   "macros.manage",
   "templates.view",
   "templates.create",
@@ -332,6 +335,8 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "attachments.delete_any",
   "replies.create",
   "macros.view",
+  "macros.create",
+  "macros.manage",
   "templates.view",
   "templates.create",
   "templates.manage",
@@ -417,6 +422,7 @@ const AGENT_PERMISSIONS: Permission[] = [
   "notes.create",
   "replies.create",
   "macros.view",
+  "macros.create",
   "templates.view",
   "templates.create",
   // ITSM Modules

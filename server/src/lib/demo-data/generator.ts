@@ -419,14 +419,25 @@ async function generateChanges(ctx: GeneratorContext, batchId: number, progress:
       });
       ctx.approvalRequestIds.push(approvalReq.id); approvalCount++;
 
-      await prisma.approvalStep.create({
+      const step = await prisma.approvalStep.create({
         data: {
           approvalRequestId: approvalReq.id, stepOrder: 1,
           approverId: ctx.adminId,
           status: spec.state === "authorize" ? "pending" : "approved",
-          ...(spec.state !== "authorize" ? { decidedAt: daysAgo(jitter(0, 2)), comment: "Approved. Risk is acceptable and rollback plan is documented." } : {}),
         },
       });
+
+      if (spec.state !== "authorize") {
+        await prisma.approvalDecision.create({
+          data: {
+            stepId:      step.id,
+            decidedById: ctx.adminId,
+            decision:    "approved",
+            comment:     "Approved. Risk is acceptable and rollback plan is documented.",
+            decidedAt:   daysAgo(jitter(0, 2)),
+          },
+        });
+      }
     }
   }
 

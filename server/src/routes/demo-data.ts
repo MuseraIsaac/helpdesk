@@ -16,6 +16,7 @@
  */
 
 import { Router } from "express";
+import multer        from "multer";
 import { requireAuth }  from "../middleware/require-auth";
 import { requireAdmin } from "../middleware/require-admin";
 import { parseId }      from "../lib/parse-id";
@@ -28,12 +29,31 @@ import {
   deleteAllDemoBatches,
 } from "../lib/demo-data/deleter";
 import { buildExcelTemplate } from "../lib/demo-data/excel";
+import { validateExcelImport, runExcelImport } from "../lib/demo-data/importer";
 import {
   ALL_MODULE_KEYS, MODULE_META,
   type ModuleKey, type GeneratorSize,
 } from "../lib/demo-data/types";
 
 const router = Router();
+
+// Multer for xlsx uploads (max 20 MB, xlsx MIME only)
+const xlsxUpload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 20 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+      "application/octet-stream",
+    ];
+    if (allowed.includes(file.mimetype) || file.originalname.endsWith(".xlsx")) {
+      cb(null, true);
+    } else {
+      cb(Object.assign(new Error("Only .xlsx files are accepted"), { status: 415 }));
+    }
+  },
+});
 
 // ── Guard — feature must be enabled in settings ───────────────────────────────
 
@@ -198,5 +218,72 @@ router.get("/template", requireAuth, requireAdmin, requireDemoEnabled, async (_r
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(buffer);
 });
+
+// ── POST /api/demo-data/import/validate ───────────────────────────────────────
+// Dry-run: parses the uploaded workbook, validates every row, returns a
+// structured ValidationResult. No database writes are performed.
+
+router.post(
+  "/import/validate",
+  requireAuth, requireAdmin, requireDemoEnabled,
+  xlsxUpload.single("file"),
+  async (req, res) => {
+    if (!req.file) {
+      res.status(400).json({ error: "No file uploaded. Send the workbook as multipart field 'file'." });
+      return;
+    }
+    const result = await validateExcelImport(req.file.buffer);
+    res.json({ result });
+  },
+);
+
+// ── POST /api/demo-data/import ────────────────────────────────────────────────
+// Validates + inserts the uploaded workbook as a new DemoBatch.
+// Responds 202 immediately; import runs async. Poll /batches/:id for progress.
+
+router.post(
+  "/import",
+  requireAuth, requireAdmin, requireDemoEnabled,
+  xlsxUpload.single("file"),
+  async (req, res) => {
+    if (!req.file) {
+      res.status(400).json({ error: "No file uploaded. Send the workbook as multipart field 'file'." });
+      return;
+    }
+
+    const validation = await validateExcelImport(req.file.buffer);
+    if (!validation.canImport) {
+      res.status(422).json({ error: "No valid rows found in the uploaded file.", validation });
+      return;
+    }
+
+    const label = (req.body?.label as string | undefined)?.trim()
+      || `Excel Import — ${new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+
+    const batch = await prisma.demoBatch.create({
+      data: {
+        label,
+        status:          "generating",
+        generatedById:   req.user.id,
+        generatedByName: req.user.name,
+        size:            "small",
+        modules:         ["foundation"] as unknown as object,
+      },
+    });
+
+    res.status(202).json({ batch });
+
+    // Keep a ref to the buffer so it stays in scope across the async boundary
+    const fileBuffer = req.file.buffer;
+
+    runExcelImport(fileBuffer, batch.id, req.user.id, req.user.name).catch(async (err) => {
+      console.error("[demo-import] Fatal error:", err);
+      await prisma.demoBatch.update({
+        where: { id: batch.id },
+        data:  { status: "error", errorMessage: err instanceof Error ? err.message : String(err) },
+      }).catch(() => {});
+    });
+  },
+);
 
 export default router;

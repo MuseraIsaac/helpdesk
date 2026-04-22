@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Trash2, RotateCcw, CalendarClock } from "lucide-react";
 import {
   generalSettingsSchema,
   brandingSettingsSchema,
@@ -72,7 +73,9 @@ import {
   securitySettingsSchema,
   auditSettingsSchema,
   businessHoursSettingsSchema,
+  trashSettingsSchema,
   demoDataSettingsSchema,
+  type TrashSettings,
   type GeneralSettings,
   type BrandingSettings,
   type TicketsSettings,
@@ -3144,6 +3147,115 @@ export function DemoDataSection() {
           <li>Demo user accounts use the <code className="bg-amber-100 dark:bg-amber-900/40 px-1 rounded font-mono text-[11px]">@demo.local</code> domain and a shared password. Do not use on a live production instance.</li>
           <li>Disable this setting (and delete all batches) before opening the system to real users.</li>
         </ul>
+      </div>
+    </SettingsFormShell>
+  );
+}
+
+// ── Trash ─────────────────────────────────────────────────────────────────────
+
+export function TrashSection() {
+  const { data, isLoading } = useSettings("trash");
+  const updateSettings = useUpdateSettings("trash");
+  const {
+    handleSubmit, reset, control, register,
+    formState: { isDirty, errors },
+  } = useForm<TrashSettings>({
+    resolver: zodResolver(trashSettingsSchema),
+  });
+
+  useEffect(() => {
+    if (data) reset(data);
+  }, [data, reset]);
+
+  const onSubmit = handleSubmit((values) => updateSettings.mutate(values));
+
+  if (isLoading) return (
+    <div className="space-y-4 max-w-2xl">
+      <Skeleton className="h-7 w-36" />
+      <Skeleton className="h-4 w-96" />
+      <Skeleton className="h-px w-full" />
+      <Skeleton className="h-16 w-full" />
+      <Skeleton className="h-16 w-full" />
+    </div>
+  );
+
+  return (
+    <SettingsFormShell
+      title="Trash & Recycle Bin"
+      description="Configure how long deleted records are retained before automatic purge, and whether the trash bin feature is active."
+      onSubmit={onSubmit}
+      isPending={updateSettings.isPending}
+      isDirty={isDirty}
+      error={updateSettings.error}
+      isSuccess={updateSettings.isSuccess}
+    >
+      <SettingsGroup title="Trash Bin">
+        <SettingsSwitchRow
+          label="Enable trash bin"
+          description="When enabled, deleted records move to the trash bin instead of being immediately destroyed. Admins can restore or permanently delete items from the Trash page."
+        >
+          <Controller name="enabled" control={control} render={({ field }) => (
+            <Switch id="trash-enabled" checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Retention Policy">
+        <SettingsField
+          label="Retention period (days)"
+          description="Number of days deleted items are kept in the trash before automatic purge. Minimum 1, maximum 365."
+          error={errors.retentionDays?.message}
+        >
+          <div className="flex items-center gap-2 max-w-48">
+            <CalendarClock className="h-4 w-4 text-muted-foreground shrink-0" />
+            <input
+              type="number"
+              min={1}
+              max={365}
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 tabular-nums"
+              {...register("retentionDays", { valueAsNumber: true })}
+            />
+            <span className="text-sm text-muted-foreground shrink-0">days</span>
+          </div>
+        </SettingsField>
+
+        <SettingsSwitchRow
+          label="Automatic purge"
+          description="When enabled, items older than the retention period are automatically and permanently deleted at 02:00 UTC every night. When disabled, items accumulate until manually emptied."
+        >
+          <Controller name="autoEmptyEnabled" control={control} render={({ field }) => (
+            <Switch id="trash-auto-empty" checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
+
+      {/* Coverage guide */}
+      <div className="rounded-xl border bg-muted/20 p-4 space-y-3">
+        <p className="text-sm font-semibold flex items-center gap-2">
+          <Trash2 className="h-4 w-4 text-muted-foreground" />
+          What gets soft-deleted
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs text-muted-foreground">
+          {[
+            "Support Tickets",
+            "Incidents",
+            "Service Requests",
+            "Problems",
+            "Change Requests",
+            "IT Assets",
+            "KB Articles",
+          ].map((item) => (
+            <div key={item} className="flex items-center gap-1.5">
+              <RotateCcw className="h-3 w-3 text-emerald-500 shrink-0" />
+              {item}
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground/70">
+          Soft-deleted records are hidden from all standard views and inaccessible to agents and customers.
+          They are only visible in the Trash page under Administration.
+        </p>
       </div>
     </SettingsFormShell>
   );

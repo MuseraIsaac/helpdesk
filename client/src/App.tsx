@@ -92,6 +92,7 @@ import ChangesReport     from "./pages/reports/ChangesReport";
 import AssetsReport      from "./pages/reports/AssetsReport";
 import InsightsReport    from "./pages/reports/InsightsReport";
 import DemoDataPage      from "./pages/DemoDataPage";
+import TrashPage         from "./pages/TrashPage";
 
 /**
  * Injects the browser favicon from branding settings.
@@ -177,6 +178,7 @@ function App() {
             <Route path="/admin/cab-groups" element={<CabGroupsPage />} />
             <Route path="/admin/ticket-types" element={<TicketTypesPage />} />
             <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
+            <Route path="/admin/trash" element={<TrashPage />} />
             <Route path="/automations" element={<ScenariosPage />} />
             <Route path="/catalog/admin" element={<CatalogAdminPage />} />
             <Route path="/demo-data" element={<DemoDataPage />} />

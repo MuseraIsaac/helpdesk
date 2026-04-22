@@ -48,6 +48,11 @@ enum TicketCategory {
   refund_request
 }
 
+enum MacroVisibility {
+  global
+  personal
+}
+
 enum TicketPriority {
   low
   medium
@@ -458,6 +463,11 @@ model Ticket {
   // Accumulated pause time in minutes (historical total, for reporting).
   slaPausedMinutes       Int                 @default(0)
 
+  deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
+  deletedByName String?   @map("deleted_by_name")
+
+  @@index([deletedAt])
   @@map("ticket")
 }
 
@@ -627,15 +637,17 @@ model Note {
  *   {{agent_name}}      name of the currently logged-in agent
  */
 model Macro {
-  id          Int             @id @default(autoincrement())
+  id          Int              @id @default(autoincrement())
   title       String
   body        String
   category    TicketCategory?
-  isActive    Boolean         @default(true)
+  isActive    Boolean          @default(true)
+  isSystem    Boolean          @default(false)
+  visibility  MacroVisibility  @default(global)
   createdById String
-  createdBy   User            @relation(fields: [createdById], references: [id])
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  createdBy   User             @relation(fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
   @@map("macro")
 }
@@ -934,9 +946,14 @@ model KbArticle {
   feedback        KbArticleFeedback[]
 
   customFields           Json                @default("{}")
+  deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
+  deletedByName String?   @map("deleted_by_name")
+
   @@index([status])
   @@index([reviewStatus])
   @@index([categoryId])
+  @@index([deletedAt])
   @@map("kb_article")
 }
 
@@ -1270,11 +1287,16 @@ model Incident {
   // Back-relation: the source ticket that generated this incident (if any)
   sourceTicket     Ticket?              @relation("TicketLinkedIncident")
 
+  deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
+  deletedByName String?   @map("deleted_by_name")
+
   @@index([status])
   @@index([priority])
   @@index([isMajor])
   @@index([commanderId])
   @@index([assignedToId])
+  @@index([deletedAt])
   @@map("incident")
 }
 
@@ -1779,10 +1801,15 @@ model ServiceRequest {
   @@index([status])
   @@index([priority])
   customFields           Json                @default("{}")
+  deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
+  deletedByName String?   @map("deleted_by_name")
+
   @@index([requesterId])
   @@index([requesterCustomerId])
   @@index([assignedToId])
   @@index([teamId])
+  @@index([deletedAt])
   @@map("service_request")
 }
 
@@ -1973,10 +2000,15 @@ model Problem {
 
   @@index([status])
   customFields           Json                @default("{}")
+  deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
+  deletedByName String?   @map("deleted_by_name")
+
   @@index([priority])
   @@index([isKnownError])
   @@index([ownerId])
   @@index([assignedToId])
+  @@index([deletedAt])
   @@map("problem")
 }
 
@@ -2403,10 +2435,15 @@ model Change {
   @@index([assignedToId])
   @@index([coordinatorGroupId])
   customFields           Json                @default("{}")
+  deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
+  deletedByName String?   @map("deleted_by_name")
+
   @@index([linkedProblemId])
   @@index([configurationItemId])
   @@index([serviceId])
   @@index([plannedStart, plannedEnd])
+  @@index([deletedAt])
   @@map("change_request")
 }
 
@@ -3221,12 +3258,17 @@ model Asset {
 
   @@index([type])
   @@index([status])
+  deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
+  deletedByName String?   @map("deleted_by_name")
+
   @@index([assignedToId])
   @@index([ownerId])
   @@index([ciId])
   @@index([externalId])
   @@index([discoverySource])
   @@index([inventoryLocationId])
+  @@index([deletedAt])
   @@map("asset")
 }
 

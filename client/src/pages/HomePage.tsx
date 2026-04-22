@@ -63,6 +63,7 @@ import ErrorAlert from "@/components/ErrorAlert";
 import DashboardCustomizer from "@/components/DashboardCustomizer";
 import DashboardTemplateDialog from "@/components/DashboardTemplateDialog";
 import DashboardSwitcher from "@/components/DashboardSwitcher";
+import WidgetAppearanceEditor from "@/components/WidgetAppearanceEditor";
 import {
   Dialog,
   DialogContent,
@@ -77,7 +78,9 @@ import {
   WIDGET_LAYOUT_DEFAULTS,
   WIDGET_CATEGORIES,
   WIDGET_PRESENTATION,
+  SYSTEM_DEFAULT_CONFIG,
   type WidgetConfig,
+  type WidgetAppearance,
 } from "core/schemas/dashboard.ts";
 import { ticketsUrl } from "@/lib/drill-down";
 import {
@@ -118,7 +121,17 @@ import {
   Inbox,
   Hash,
   LayoutGrid,
+  Undo2,
+  Redo2,
+  Magnet,
+  Move,
+  Palette,
 } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 // ── Grid layout engine ────────────────────────────────────────────────────────
 
@@ -146,77 +159,87 @@ function DashboardWidget({
   id,
   editMode,
   currentW,
+  appearance,
   onWidthChange,
+  onEditStyle,
   children,
 }: {
-  id: WidgetId;
-  editMode: boolean;
-  currentW: number;
+  id:            WidgetId;
+  editMode:      boolean;
+  currentW:      number;
+  appearance?:   WidgetAppearance;
   onWidthChange: (w: number) => void;
-  children: React.ReactNode;
+  onEditStyle?:  () => void;
+  children:      React.ReactNode;
 }) {
-  const label = WIDGET_META[id]?.label ?? id;
+  const label        = appearance?.titleOverride || WIDGET_META[id]?.label || id;
+  const accentColor  = appearance?.accentColor;
 
   return (
     <div
       className={[
         "h-full flex flex-col overflow-hidden rounded-xl transition-shadow",
-        editMode
-          ? "ring-2 ring-primary/40 shadow-lg shadow-primary/5"
-          : "",
+        editMode ? "ring-2 shadow-lg" : "",
       ].join(" ")}
+      style={editMode
+        ? { "--tw-ring-color": accentColor ? `${accentColor}50` : undefined } as React.CSSProperties
+        : undefined}
     >
       {/* Drag handle bar — only visible in edit mode */}
       {editMode && (
-        <div className="widget-drag-handle flex items-center justify-between px-3 py-1.5 bg-primary/5 border-b border-primary/10 cursor-grab active:cursor-grabbing shrink-0 select-none">
+        <div
+          className="widget-drag-handle flex items-center justify-between px-3 py-1.5 border-b cursor-grab active:cursor-grabbing shrink-0 select-none"
+          style={{
+            background:  accentColor ? `${accentColor}10` : "hsl(var(--primary)/0.05)",
+            borderColor: accentColor ? `${accentColor}25` : "hsl(var(--primary)/0.1)",
+          }}
+        >
           <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <GripVertical className="h-3.5 w-3.5 text-primary/50" />
-            <span>{label}</span>
+            <GripVertical className="h-3.5 w-3.5 shrink-0" style={{ color: accentColor ?? "hsl(var(--primary)/0.5)" }} />
+            <span style={{ color: accentColor ?? undefined }}>{label}</span>
+            {accentColor && (
+              <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: accentColor }} />
+            )}
           </div>
-          {/* Width presets */}
+
           <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              title="Half width"
-              onMouseDown={e => e.stopPropagation()}
-              onClick={() => onWidthChange(6)}
-              className={[
-                "px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors",
-                currentW <= 6
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
-              ].join(" ")}
-            >
-              ½
-            </button>
-            <button
-              type="button"
-              title="Two-thirds width"
-              onMouseDown={e => e.stopPropagation()}
-              onClick={() => onWidthChange(8)}
-              className={[
-                "px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors",
-                currentW === 8
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
-              ].join(" ")}
-            >
-              ⅔
-            </button>
-            <button
-              type="button"
-              title="Full width"
-              onMouseDown={e => e.stopPropagation()}
-              onClick={() => onWidthChange(12)}
-              className={[
-                "px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors",
-                currentW === 12
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
-              ].join(" ")}
-            >
-              Full
-            </button>
+            {/* Style editor button */}
+            {onEditStyle && (
+              <button
+                type="button"
+                title="Edit widget style"
+                onMouseDown={e => e.stopPropagation()}
+                onClick={e => { e.stopPropagation(); onEditStyle(); }}
+                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors mr-1"
+              >
+                <Palette className="h-3.5 w-3.5" style={{ color: accentColor ?? undefined }} />
+              </button>
+            )}
+            {/* Separator */}
+            <div className="h-3 w-px bg-border/60 mx-0.5" />
+            {/* Width presets */}
+            {[{ label: "½", w: 6 }, { label: "⅔", w: 8 }, { label: "Full", w: 12 }].map(preset => (
+              <button
+                key={preset.w}
+                type="button"
+                title={`${preset.label} width`}
+                onMouseDown={e => e.stopPropagation()}
+                onClick={() => onWidthChange(preset.w)}
+                className={[
+                  "px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors",
+                  currentW === preset.w || (preset.w === 6 && currentW < 7)
+                    ? "text-white"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                ].join(" ")}
+                style={
+                  currentW === preset.w || (preset.w === 6 && currentW < 7)
+                    ? { background: accentColor ?? "hsl(var(--primary))" }
+                    : undefined
+                }
+              >
+                {preset.label}
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -492,58 +515,96 @@ function complianceVariant(v: number | null): Variant {
 type Variant = "default" | "good" | "warn" | "bad";
 
 interface MetricCardProps {
-  title: string;
-  value: string | number | undefined;
-  icon: React.ElementType;
-  hint?: string;
-  loading?: boolean;
-  variant?: Variant;
-  href?: string;
+  title:       string;
+  value:       string | number | undefined;
+  icon:        React.ElementType;
+  hint?:       string;
+  loading?:    boolean;
+  variant?:    Variant;
+  href?:       string;
+  /** Hex or Tailwind-compatible CSS colour for the icon accent */
+  accentColor?: string;
+  /** Small sub-label below the value */
+  sub?: string;
 }
 
-function MetricCard({ title, value, icon: Icon, hint, loading, variant = "default", href }: MetricCardProps) {
+function MetricCard({
+  title, value, icon: Icon, hint, loading,
+  variant = "default", href, accentColor, sub,
+}: MetricCardProps) {
   const density = useDensity();
-  const valueColor =
-    variant === "good" ? "text-green-600 dark:text-green-400" :
-    variant === "warn" ? "text-amber-500" :
-    variant === "bad"  ? "text-destructive" :
-    "text-foreground";
+
+  // Resolve colour: explicit accentColor wins; fall back to variant colours
+  const resolvedColor =
+    accentColor ? accentColor :
+    variant === "good" ? "#22C55E" :
+    variant === "warn" ? "#F59E0B" :
+    variant === "bad"  ? "#EF4444" :
+    undefined;
+
+  const valueStyle = resolvedColor ? { color: resolvedColor } : undefined;
 
   const card = (
-    <Card className={href ? "hover:bg-accent/50 transition-colors" : ""}>
-      <CardHeader className={density === "compact" ? "pb-1" : "pb-2"}>
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-[13px] font-medium text-muted-foreground leading-tight">
-            {title}
-          </CardTitle>
-          <div className="flex items-center gap-1 shrink-0">
-            {hint && (
-              <TooltipProvider delayDuration={200}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Info className="h-3 w-3 text-muted-foreground/50 cursor-default" />
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-[200px] text-xs">
-                    {hint}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-            <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center">
-              <Icon className="h-4 w-4 text-muted-foreground" />
-            </div>
+    <Card
+      className={[
+        "relative overflow-hidden transition-all",
+        href ? "hover:shadow-md hover:-translate-y-0.5 cursor-pointer" : "",
+      ].join(" ")}
+      style={resolvedColor ? { borderTopColor: resolvedColor, borderTopWidth: 2 } : undefined}
+    >
+      {/* Subtle gradient tint behind the card */}
+      {resolvedColor && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ background: `linear-gradient(135deg, ${resolvedColor}08 0%, transparent 60%)` }}
+        />
+      )}
+
+      <CardHeader className={density === "compact" ? "pb-1 relative" : "pb-2 relative"}>
+        <div className="flex items-start justify-between gap-2">
+          {/* Icon badge */}
+          <div
+            className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0"
+            style={resolvedColor
+              ? { background: `${resolvedColor}18`, border: `1px solid ${resolvedColor}30` }
+              : { background: "hsl(var(--muted))" }
+            }
+          >
+            <Icon
+              className="h-4.5 w-4.5"
+              style={resolvedColor ? { color: resolvedColor } : { color: "hsl(var(--muted-foreground))" }}
+            />
           </div>
+          {/* Hint */}
+          {hint && (
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-3 w-3 text-muted-foreground/40 cursor-default mt-0.5 shrink-0" />
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-[200px] text-xs">{hint}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
         </div>
+        <CardTitle className="text-[12px] font-medium text-muted-foreground leading-tight mt-2">
+          {title}
+        </CardTitle>
       </CardHeader>
-      <CardContent>
+
+      <CardContent className="relative pt-0">
         {loading ? (
-          <Skeleton className="h-9 w-20" />
+          <Skeleton className={density === "compact" ? "h-7 w-16" : "h-9 w-20"} />
         ) : (
-          <p className={`font-semibold tracking-tight ${valueColor} ${
-            density === "compact" ? "text-2xl" : "text-3xl"
-          }`}>
-            {value ?? "—"}
-          </p>
+          <div>
+            <p
+              className={`font-bold tracking-tight leading-none ${density === "compact" ? "text-2xl" : "text-3xl"}`}
+              style={valueStyle}
+            >
+              {value ?? "—"}
+            </p>
+            {sub && <p className="text-[11px] text-muted-foreground mt-1 leading-tight">{sub}</p>}
+          </div>
         )}
       </CardContent>
     </Card>
@@ -551,7 +612,7 @@ function MetricCard({ title, value, icon: Icon, hint, loading, variant = "defaul
 
   if (href) {
     return (
-      <Link to={href} className="block cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl">
+      <Link to={href} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl">
         {card}
       </Link>
     );
@@ -573,12 +634,14 @@ function WidgetHeader({
   description,
   icon: Icon,
   iconColor = "text-primary",
+  accentColor,
   action,
 }: {
   title: string;
   description?: string;
   icon?: React.ElementType;
   iconColor?: string;
+  accentColor?: string;
   action?: React.ReactNode;
 }) {
   return (
@@ -586,8 +649,17 @@ function WidgetHeader({
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
           {Icon && (
-            <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
-              <Icon className={`h-4 w-4 ${iconColor}`} />
+            <div
+              className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0"
+              style={accentColor
+                ? { background: `${accentColor}18`, border: `1px solid ${accentColor}30` }
+                : { background: "hsl(var(--muted))" }
+              }
+            >
+              <Icon
+                className={`h-4 w-4 ${accentColor ? "" : iconColor}`}
+                style={accentColor ? { color: accentColor } : undefined}
+              />
             </div>
           )}
           <div className="min-w-0">
@@ -995,13 +1067,24 @@ export default function HomePage() {
     cloneDashboard,
   } = useDashboardConfig();
 
-  const [customizerOpen, setCustomizerOpen] = useState(false);
-  const [widgetPickerOpen, setWidgetPickerOpen] = useState(false);
+  const [customizerOpen,     setCustomizerOpen]     = useState(false);
+  const [widgetPickerOpen,   setWidgetPickerOpen]   = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
-  const [customRange, setCustomRange] = useState<DateRange | null>(null);
-  const [editMode, setEditMode] = useState(false);
+  const [customRange,        setCustomRange]        = useState<DateRange | null>(null);
+  const [editMode,           setEditMode]           = useState(false);
   // draftLayout holds the in-progress layout while editing; null = use config-derived layout
-  const [draftLayout, setDraftLayout] = useState<Layout | null>(null);
+  const [draftLayout,        setDraftLayout]        = useState<Layout | null>(null);
+
+  // ── Edit-mode enhancements ───────────────────────────────────────────────────
+  /** Whether widgets auto-compact (snap) during edit. Default: free-form (false). */
+  const [snapEnabled,        setSnapEnabled]        = useState(false);
+  /** Undo/redo history: array of Layout snapshots + pointer */
+  const [layoutHistory,      setLayoutHistory]      = useState<Layout[]>([]);
+  const [historyIndex,       setHistoryIndex]       = useState(-1);
+  /** Restore-to-default confirmation popover */
+  const [resetPopoverOpen,   setResetPopoverOpen]   = useState(false);
+  /** Which widget's style editor is open (id | null) */
+  const [styleEditWidget,    setStyleEditWidget]    = useState<WidgetId | null>(null);
 
   // Preset: initialize once from saved config when it first loads.
   // After that, local selection is reflected immediately without auto-saving.
@@ -1026,20 +1109,31 @@ export default function HomePage() {
   const hiddenWidgets  = useMemo(() => sortedWidgets.filter(w => !w.visible), [sortedWidgets]);
 
   // Grid layout — derived from widget configs + defaults (overridden by draftLayout in edit mode)
-  const configLayout = useMemo((): Layout =>
-    orderedWidgets.map(w => {
+  //
+  // y-position strategy:
+  //   • Widgets that have an explicit saved y → use it (preserves gaps the user set)
+  //   • Widgets with no saved y → stack below all positioned widgets
+  //   This eliminates the old y:999 sentinel which caused ~79,920 px of empty space
+  //   when compactType was null (free-form edit mode or gap-preserving view mode).
+  const configLayout = useMemo((): Layout => {
+    // Find the bottom edge of all widgets that have an explicit saved y
+    const maxSavedBottom = orderedWidgets.reduce((m, w) => {
+      if (w.y == null) return m;
       const def = WIDGET_LAYOUT_DEFAULTS[w.id];
+      return Math.max(m, w.y + (w.h ?? def.h));
+    }, 0);
+
+    let nextY = maxSavedBottom;
+    return orderedWidgets.map(w => {
+      const def = WIDGET_LAYOUT_DEFAULTS[w.id];
+      const h = w.h ?? def.h;
+      const y = w.y != null ? w.y : (() => { const yy = nextY; nextY += h; return yy; })();
       return {
-        i:    w.id,
-        x:    w.x    ?? def.x,
-        y:    w.y    ?? 999,   // 999 = "pack at bottom", compaction will sort it
-        w:    w.w    ?? def.w,
-        h:    w.h    ?? def.h,
-        minW: def.minW,
-        minH: def.minH,
+        i: w.id, x: w.x ?? def.x, y, w: w.w ?? def.w, h,
+        minW: def.minW, minH: def.minH,
       };
-    }),
-  [orderedWidgets]);
+    });
+  }, [orderedWidgets]);
 
   const gridLayout = draftLayout ?? configLayout;
 
@@ -1228,28 +1322,69 @@ export default function HomePage() {
 
   // ── Edit-mode layout handlers ─────────────────────────────────────────────
 
+  function pushHistory(layout: Layout) {
+    setLayoutHistory(prev => {
+      const trimmed = prev.slice(0, historyIndex + 1);
+      const next    = [...trimmed, layout].slice(-50);
+      setHistoryIndex(next.length - 1);
+      return next;
+    });
+  }
+
   const handleLayoutChange = useCallback((newLayout: Layout) => {
-    if (editMode) setDraftLayout(newLayout);
-  }, [editMode]);
+    if (!editMode) return;
+    setDraftLayout(newLayout);
+    setLayoutHistory(prev => {
+      const next = [...prev.slice(0, historyIndex + 1), newLayout].slice(-50);
+      setHistoryIndex(next.length - 1);
+      return next;
+    });
+  }, [editMode, historyIndex]);
 
   function handleWidthPreset(widgetId: string, newW: number) {
     setDraftLayout(prev => {
       const base = prev ?? configLayout;
-      return base.map(item =>
+      const next = base.map(item =>
         item.i === widgetId
           ? { ...item, w: Math.min(newW, GRID_COLS), x: item.x + newW > GRID_COLS ? 0 : item.x }
           : item,
       );
+      setLayoutHistory(h => {
+        const trimmed = h.slice(0, historyIndex + 1);
+        const updated = [...trimmed, next].slice(-50);
+        setHistoryIndex(updated.length - 1);
+        return updated;
+      });
+      return next;
     });
   }
 
+  function undoLayout() {
+    if (historyIndex <= 0) return;
+    const idx = historyIndex - 1;
+    setHistoryIndex(idx);
+    setDraftLayout(layoutHistory[idx]);
+  }
+
+  function redoLayout() {
+    if (historyIndex >= layoutHistory.length - 1) return;
+    const idx = historyIndex + 1;
+    setHistoryIndex(idx);
+    setDraftLayout(layoutHistory[idx]);
+  }
+
   function enterEditMode() {
-    setDraftLayout(configLayout.map(item => ({ ...item })));
+    const initial = configLayout.map(item => ({ ...item }));
+    setDraftLayout(initial);
+    setLayoutHistory([initial]);
+    setHistoryIndex(0);
     setEditMode(true);
   }
 
   function cancelEditMode() {
     setDraftLayout(null);
+    setLayoutHistory([]);
+    setHistoryIndex(-1);
     setEditMode(false);
   }
 
@@ -1263,17 +1398,94 @@ export default function HomePage() {
     handleSaveConfig({ ...activeConfig, widgets: newWidgets }, activeDashboard?.name ?? "My Dashboard", {});
     setEditMode(false);
     setDraftLayout(null);
+    setLayoutHistory([]);
+    setHistoryIndex(-1);
+  }
+
+  function restoreToDefault() {
+    handleSaveConfig(SYSTEM_DEFAULT_CONFIG, "My Dashboard", {});
+    setEditMode(false);
+    setDraftLayout(null);
+    setLayoutHistory([]);
+    setHistoryIndex(-1);
+    setResetPopoverOpen(false);
+  }
+
+  function saveWidgetAppearance(widgetId: WidgetId, appearance: WidgetAppearance) {
+    const newWidgets = activeConfig.widgets.map(w =>
+      w.id === widgetId ? { ...w, appearance } : w
+    );
+    handleSaveConfig({ ...activeConfig, widgets: newWidgets }, activeDashboard?.name ?? "My Dashboard", {});
+  }
+
+  /**
+   * Auto-fit: repack all visible widgets into the tightest possible layout
+   * with no gaps, using a greedy top-left first-fit algorithm.
+   * Relative order (by current y then x) is preserved.
+   */
+  function autoFitLayout() {
+    const base = draftLayout ?? configLayout;
+    if (!base.length) return;
+
+    // Sort by reading order (top-to-bottom, left-to-right)
+    const sorted = [...base].sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x);
+
+    // Occupancy grid — track which cells are taken
+    const occupied = new Set<string>();
+    const cell = (x: number, y: number) => `${x},${y}`;
+
+    function canPlace(x: number, y: number, w: number, h: number): boolean {
+      for (let dy = 0; dy < h; dy++)
+        for (let dx = 0; dx < w; dx++)
+          if (occupied.has(cell(x + dx, y + dy))) return false;
+      return true;
+    }
+
+    function markOccupied(x: number, y: number, w: number, h: number) {
+      for (let dy = 0; dy < h; dy++)
+        for (let dx = 0; dx < w; dx++)
+          occupied.add(cell(x + dx, y + dy));
+    }
+
+    const packed = sorted.map(item => {
+      const w = item.w, h = item.h;
+      for (let y = 0; y < 200; y++) {
+        for (let x = 0; x <= GRID_COLS - w; x++) {
+          if (canPlace(x, y, w, h)) {
+            markOccupied(x, y, w, h);
+            return { ...item, x, y };
+          }
+        }
+      }
+      // Fallback: stack at the bottom
+      const maxY = Math.max(0, ...packed.map(p => p.y + p.h));
+      markOccupied(0, maxY, w, h);
+      return { ...item, x: 0, y: maxY };
+    });
+
+    setDraftLayout(packed);
+    setLayoutHistory(prev => {
+      const next = [...prev.slice(0, historyIndex + 1), packed].slice(-50);
+      setHistoryIndex(next.length - 1);
+      return next;
+    });
   }
 
   /** Show a hidden widget by making it visible and appending to the layout */
   function showWidget(id: WidgetId) {
-    const def = WIDGET_LAYOUT_DEFAULTS[id];
-    const maxY = Math.max(0, ...gridLayout.map(l => l.y + l.h));
-    setDraftLayout(prev => [
-      ...(prev ?? configLayout),
-      { i: id, x: def.x, y: maxY, w: def.w, h: def.h, minW: def.minW, minH: def.minH },
-    ]);
-    // Immediately mark the widget as visible in a local draft so it renders
+    const def  = WIDGET_LAYOUT_DEFAULTS[id];
+    const base = draftLayout ?? configLayout;
+    // Use reduce (not spread) to find the real bottom — avoids issues with stale large y values
+    const maxY = base.reduce((m, l) => Math.max(m, l.y + l.h), 0);
+    const newItem = { i: id, x: def.x, y: maxY, w: def.w, h: def.h, minW: def.minW, minH: def.minH };
+    const newLayout = [...base, newItem];
+    setDraftLayout(newLayout);
+    // Push onto history so the add can be undone
+    setLayoutHistory(prev => {
+      const next = [...prev.slice(0, historyIndex + 1), newLayout].slice(-50);
+      setHistoryIndex(next.length - 1);
+      return next;
+    });
     const newWidgets = activeConfig.widgets.map(w => w.id === id ? { ...w, visible: true } : w);
     handleSaveConfig({ ...activeConfig, widgets: newWidgets }, activeDashboard?.name ?? "My Dashboard", {});
   }
@@ -1313,41 +1525,46 @@ export default function HomePage() {
               title="Volume"
               description={`Ticket counts · ${PRESET_LABELS[preset]}`}
               icon={TicketIcon}
-              iconColor="text-primary"
+              accentColor="#6366F1"
             />
             <CardContent>
               <div className={`grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 ${density === "compact" ? "gap-2" : "gap-3"}`}>
-                <MetricCard title="Total Tickets"   value={overview?.totalTickets}     icon={TicketIcon}    loading={overviewLoading} hint="All non-system tickets in the selected period." href={ticketsUrl()} />
-                <MetricCard title="Open"            value={overview?.openTickets}      icon={CircleDot}     loading={overviewLoading} hint="Tickets currently awaiting agent response." href={ticketsUrl({ status: "open" })} />
-                <MetricCard title="Resolved"        value={overview?.resolvedTickets}  icon={TrendingUp}    loading={overviewLoading} hint="Tickets marked resolved or closed." href={ticketsUrl({ status: "resolved" })} />
-                <MetricCard title="Escalated"       value={overview?.escalatedTickets} icon={AlertTriangle} loading={overviewLoading} variant={overview?.escalatedTickets ? "warn" : "default"} hint="Tickets that were escalated at any point." href={ticketsUrl({ escalated: true })} />
-                <MetricCard title="Reopened"        value={overview?.reopenedTickets}  icon={RotateCcw}     loading={overviewLoading} variant={overview?.reopenedTickets ? "warn" : "default"} hint="Resolved tickets that received a new reply and returned to open." href={ticketsUrl({ status: "open" })} />
+                <MetricCard title="Total Tickets"   value={overview?.totalTickets}     icon={TicketIcon}    loading={overviewLoading} accentColor="#6366F1" hint="All non-system tickets in the selected period." href={ticketsUrl()} />
+                <MetricCard title="Open"            value={overview?.openTickets}      icon={CircleDot}     loading={overviewLoading} accentColor="#F97316" hint="Tickets currently awaiting agent response." href={ticketsUrl({ status: "open" })} />
+                <MetricCard title="Resolved"        value={overview?.resolvedTickets}  icon={TrendingUp}    loading={overviewLoading} accentColor="#22C55E" hint="Tickets marked resolved or closed." href={ticketsUrl({ status: "resolved" })} />
+                <MetricCard title="Escalated"       value={overview?.escalatedTickets} icon={AlertTriangle} loading={overviewLoading} accentColor={overview?.escalatedTickets ? "#EF4444" : "#94A3B8"} hint="Tickets that were escalated at any point." href={ticketsUrl({ escalated: true })} />
+                <MetricCard title="Reopened"        value={overview?.reopenedTickets}  icon={RotateCcw}     loading={overviewLoading} accentColor={overview?.reopenedTickets ? "#A855F7" : "#94A3B8"} hint="Resolved tickets that received a new reply and returned to open." href={ticketsUrl({ status: "open" })} />
               </div>
             </CardContent>
           </Card>
         );
 
       // ── Performance ─────────────────────────────────────────────────────────
-      case "performance":
+      case "performance": {
+        const slaColor =
+          slaVariant === "good" ? "#22C55E" :
+          slaVariant === "warn" ? "#F59E0B" :
+          slaVariant === "bad"  ? "#EF4444" : "#3B82F6";
         return (
           <Card key="performance" className="h-full">
             <WidgetHeader
               title="Performance (MTTA / MTTR)"
-              description={`Response &amp; resolution times · ${PRESET_LABELS[preset]}`}
+              description={`Response & resolution times · ${PRESET_LABELS[preset]}`}
               icon={Timer}
-              iconColor="text-blue-500"
+              accentColor="#3B82F6"
             />
             <CardContent>
               <div className={`grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 ${density === "compact" ? "gap-2" : "gap-3"}`}>
-                <MetricCard title="MTTA"            value={formatDuration(overview?.avgFirstResponseSeconds)} icon={Timer}       loading={overviewLoading} hint="Mean Time To Acknowledge — average time from ticket creation to first agent reply." href={ticketsUrl({ status: "open" })} />
-                <MetricCard title="MTTR"            value={formatDuration(overview?.avgResolutionSeconds)}    icon={Hourglass}   loading={overviewLoading} hint="Mean Time To Resolve — average time from creation to resolution." href={ticketsUrl({ status: "open" })} />
-                <MetricCard title="AI Resolution"   value={overview ? `${overview.aiResolutionRate}%` : undefined} icon={Sparkles} loading={overviewLoading} hint="Percentage of resolved tickets handled entirely by the AI agent." href={ticketsUrl({ status: "resolved" })} />
-                <MetricCard title="SLA Compliance"  value={pct(overview?.slaComplianceRate)} icon={ShieldCheck} loading={overviewLoading} variant={slaVariant} hint="Percentage of SLA-tracked tickets resolved within deadline." href={ticketsUrl({ view: "overdue" })} />
-                <MetricCard title="SLA Breached"    value={overview?.breachedTickets} icon={ShieldAlert} loading={overviewLoading} variant={overview?.breachedTickets ? "bad" : "default"} hint="Tickets that exceeded their SLA resolution deadline." href={ticketsUrl({ view: "overdue" })} />
+                <MetricCard title="MTTA"           value={formatDuration(overview?.avgFirstResponseSeconds)} icon={Timer}       loading={overviewLoading} accentColor="#3B82F6" hint="Mean Time To Acknowledge — avg time from creation to first agent reply." href={ticketsUrl({ status: "open" })} />
+                <MetricCard title="MTTR"           value={formatDuration(overview?.avgResolutionSeconds)}    icon={Hourglass}   loading={overviewLoading} accentColor="#6366F1" hint="Mean Time To Resolve — avg time from creation to resolution." href={ticketsUrl({ status: "open" })} />
+                <MetricCard title="AI Resolution"  value={overview ? `${overview.aiResolutionRate}%` : undefined} icon={Sparkles} loading={overviewLoading} accentColor="#A855F7" hint="Percentage of resolved tickets handled entirely by the AI agent." href={ticketsUrl({ status: "resolved" })} />
+                <MetricCard title="SLA Compliance" value={pct(overview?.slaComplianceRate)} icon={ShieldCheck} loading={overviewLoading} accentColor={slaColor} hint="% of SLA-tracked tickets resolved within deadline." href={ticketsUrl({ view: "overdue" })} />
+                <MetricCard title="SLA Breached"   value={overview?.breachedTickets} icon={ShieldAlert} loading={overviewLoading} accentColor={overview?.breachedTickets ? "#EF4444" : "#94A3B8"} hint="Tickets that exceeded their SLA resolution deadline." href={ticketsUrl({ view: "overdue" })} />
               </div>
             </CardContent>
           </Card>
         );
+      }
 
       // ── Tickets Per Day ──────────────────────────────────────────────────────
       case "tickets_per_day":
@@ -1546,62 +1763,79 @@ export default function HomePage() {
 
       // ── SLA by Dimension ─────────────────────────────────────────────────────
       case "sla_by_dimension": {
-        const fmtRow = (rows: SlaDimEntry[]) =>
-          rows.filter(r => r.totalWithSla > 0).map(r => ({
-            ...r,
-            compliancePct: r.compliance ?? 0,
-          }));
-
-        const SlaDimTable = ({ rows }: { rows: SlaDimEntry[] }) => {
-          const filtered = fmtRow(rows);
-          if (!filtered.length) return <p className="text-sm text-muted-foreground py-4 text-center">No SLA-tracked data</p>;
+        const SlaRow = ({ r }: { r: SlaDimEntry }) => {
+          const pct2 = r.compliance ?? 0;
+          const barColor = pct2 >= 90 ? "#22C55E" : pct2 >= 70 ? "#F59E0B" : "#EF4444";
+          const breachRate = r.totalWithSla > 0 ? Math.round((r.breached / r.totalWithSla) * 100) : 0;
           return (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Dimension</TableHead>
-                  <TableHead className="text-right">SLA Total</TableHead>
-                  <TableHead className="text-right">Breached</TableHead>
-                  <TableHead className="text-right">Compliance</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map(r => {
-                  const v = complianceVariant(r.compliance);
-                  const cls = v === "good" ? "text-green-600 dark:text-green-400 font-semibold" : v === "warn" ? "text-amber-500 font-semibold" : v === "bad" ? "text-destructive font-semibold" : "";
-                  return (
-                    <TableRow key={r.key}>
-                      <TableCell className="font-medium">{r.label}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r.totalWithSla}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r.breached}</TableCell>
-                      <TableCell className={`text-right tabular-nums ${cls}`}>{r.compliance != null ? `${r.compliance}%` : "—"}</TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <div className="space-y-1.5 py-2 border-b border-border/40 last:border-0">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium truncate">{r.label}</span>
+                <div className="flex items-center gap-3 shrink-0 text-xs text-muted-foreground">
+                  <span className="tabular-nums">{r.totalWithSla} tracked</span>
+                  {r.breached > 0 && (
+                    <span className="tabular-nums font-medium" style={{ color: "#EF4444" }}>
+                      {r.breached} breached
+                    </span>
+                  )}
+                  <span
+                    className="font-bold tabular-nums w-12 text-right"
+                    style={{ color: barColor }}
+                  >
+                    {r.compliance != null ? `${r.compliance}%` : "—"}
+                  </span>
+                </div>
+              </div>
+              <div className="flex h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                <div className="h-full rounded-full transition-all" style={{ width: `${pct2}%`, background: barColor }} />
+                {breachRate > 0 && (
+                  <div className="h-full rounded-full" style={{ width: `${breachRate}%`, background: "#EF444430" }} />
+                )}
+              </div>
+            </div>
           );
         };
 
+        const SlaDimRows = ({ rows }: { rows: SlaDimEntry[] }) => {
+          const filtered = rows.filter(r => r.totalWithSla > 0);
+          if (!filtered.length) return <p className="text-sm text-muted-foreground py-6 text-center">No SLA-tracked data for this period.</p>;
+          return <div>{filtered.map(r => <SlaRow key={r.key} r={r} />)}</div>;
+        };
+
+        const overallCompliance = slaDim?.byPriority.length
+          ? Math.round(slaDim.byPriority.filter(r => r.totalWithSla > 0).reduce((s, r) => s + (r.compliance ?? 0), 0) / Math.max(1, slaDim.byPriority.filter(r => r.totalWithSla > 0).length))
+          : null;
+        const overallColor = overallCompliance == null ? "#6366F1" : overallCompliance >= 90 ? "#22C55E" : overallCompliance >= 70 ? "#F59E0B" : "#EF4444";
+
         return (
-          <Card key="sla_by_dimension">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> SLA Compliance by Dimension</CardTitle>
-              <CardDescription>Ticket SLA compliance broken down by priority, category, and team · {PRESET_LABELS[preset]}</CardDescription>
-            </CardHeader>
-            <CardContent>
+          <Card key="sla_by_dimension" className="h-full flex flex-col">
+            <WidgetHeader
+              title="SLA Compliance by Dimension"
+              description={`Priority · category · team · ${PRESET_LABELS[preset]}`}
+              icon={ShieldCheck}
+              accentColor={overallColor}
+              action={overallCompliance != null ? (
+                <div className="flex flex-col items-end">
+                  <span className="text-2xl font-bold tabular-nums leading-none" style={{ color: overallColor }}>
+                    {overallCompliance}%
+                  </span>
+                  <span className="text-[10px] text-muted-foreground mt-0.5">avg compliance</span>
+                </div>
+              ) : undefined}
+            />
+            <CardContent className="flex-1 overflow-auto">
               {slaDimLoading ? (
-                <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>
+                <div className="space-y-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
               ) : (
                 <Tabs defaultValue="priority">
-                  <TabsList className="mb-4">
-                    <TabsTrigger value="priority">By Priority</TabsTrigger>
-                    <TabsTrigger value="category">By Category</TabsTrigger>
-                    <TabsTrigger value="team">By Team</TabsTrigger>
+                  <TabsList className="mb-3 h-8">
+                    <TabsTrigger value="priority" className="text-xs h-6 px-2.5">Priority</TabsTrigger>
+                    <TabsTrigger value="category" className="text-xs h-6 px-2.5">Category</TabsTrigger>
+                    <TabsTrigger value="team"     className="text-xs h-6 px-2.5">Team</TabsTrigger>
                   </TabsList>
-                  <TabsContent value="priority"><SlaDimTable rows={slaDim?.byPriority ?? []} /></TabsContent>
-                  <TabsContent value="category"><SlaDimTable rows={slaDim?.byCategory ?? []} /></TabsContent>
-                  <TabsContent value="team"><SlaDimTable rows={slaDim?.byTeam ?? []} /></TabsContent>
+                  <TabsContent value="priority"><SlaDimRows rows={slaDim?.byPriority ?? []} /></TabsContent>
+                  <TabsContent value="category"><SlaDimRows rows={slaDim?.byCategory ?? []} /></TabsContent>
+                  <TabsContent value="team">    <SlaDimRows rows={slaDim?.byTeam     ?? []} /></TabsContent>
                 </Tabs>
               )}
             </CardContent>
@@ -1680,50 +1914,92 @@ export default function HomePage() {
         );
 
       // ── Request Fulfillment ───────────────────────────────────────────────────
-      case "request_fulfillment":
+      case "request_fulfillment": {
+        const reqSlaColor =
+          complianceVariant(requests?.slaCompliance ?? null) === "good" ? "#22C55E" :
+          complianceVariant(requests?.slaCompliance ?? null) === "warn" ? "#F59E0B" :
+          complianceVariant(requests?.slaCompliance ?? null) === "bad"  ? "#EF4444" : "#0EA5E9";
+        const maxReqCount = Math.max(1, ...(requests?.topItems.map(i => i.count) ?? [1]));
+        const RANK_COLORS = ["#F59E0B", "#94A3B8", "#CD7F32"];
+
         return (
-          <section key="request_fulfillment" className="space-y-4">
-            <SectionHeading>Request Fulfillment</SectionHeading>
-            <div className={`grid grid-cols-2 sm:grid-cols-4 ${density === "compact" ? "gap-2" : "gap-4"}`}>
-              <MetricCard title="Total Requests"       value={requests?.total}                                   icon={PackageCheck}  loading={requestsLoading} href="/requests" />
-              <MetricCard title="Avg Fulfillment Time" value={formatDuration(requests?.avgFulfillmentSeconds)}   icon={Hourglass}     loading={requestsLoading} hint="Average time from request submission to fulfilment (closed/resolved)." />
-              <MetricCard title="SLA Compliance"       value={pct(requests?.slaCompliance)}                      icon={ShieldCheck}   loading={requestsLoading} variant={complianceVariant(requests?.slaCompliance ?? null)} hint="Percentage of SLA-tracked requests fulfilled within target." />
-              <MetricCard title="SLA Breached"         value={requests?.slaBreached}                             icon={ShieldAlert}   loading={requestsLoading} variant={requests?.slaBreached ? "bad" : "default"} />
-            </div>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Top Catalog Items</CardTitle>
-                <CardDescription>Most requested · {PRESET_LABELS[preset]} · avg fulfillment time per item</CardDescription>
-              </CardHeader>
-              <CardContent>
+          <Card key="request_fulfillment" className="h-full flex flex-col">
+            <WidgetHeader
+              title="Request Fulfillment"
+              description={`Service requests · ${PRESET_LABELS[preset]}`}
+              icon={PackageCheck}
+              accentColor="#0EA5E9"
+            />
+            <CardContent className="flex-1 flex flex-col gap-4 overflow-auto">
+              {/* KPI strip */}
+              <div className={`grid grid-cols-2 sm:grid-cols-4 ${density === "compact" ? "gap-2" : "gap-3"}`}>
+                <MetricCard title="Total Requests"       value={requests?.total}                                  icon={PackageCheck}  loading={requestsLoading} accentColor="#0EA5E9" href="/requests" />
+                <MetricCard title="Avg Fulfillment"      value={formatDuration(requests?.avgFulfillmentSeconds)}  icon={Hourglass}     loading={requestsLoading} accentColor="#6366F1" hint="Average time from request submission to fulfilment." />
+                <MetricCard title="SLA Compliance"       value={pct(requests?.slaCompliance)}                     icon={ShieldCheck}   loading={requestsLoading} accentColor={reqSlaColor} hint="% of SLA-tracked requests fulfilled within target." />
+                <MetricCard title="SLA Breached"         value={requests?.slaBreached}                            icon={ShieldAlert}   loading={requestsLoading} accentColor={requests?.slaBreached ? "#EF4444" : "#94A3B8"} />
+              </div>
+
+              {/* Top catalog items */}
+              <div className="flex-1 min-h-0">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Top Catalog Items</p>
+                  <p className="text-[10px] text-muted-foreground/60">avg fulfillment · {PRESET_LABELS[preset]}</p>
+                </div>
+
                 {requestsLoading ? (
-                  <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>
+                  <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
                 ) : !(requests?.topItems.length) ? (
                   <p className="text-sm text-muted-foreground py-4 text-center">No requests in this period.</p>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Catalog Item</TableHead>
-                        <TableHead className="text-right">Requests</TableHead>
-                        <TableHead className="text-right">Avg Fulfillment</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {requests.topItems.map((item, i) => (
-                        <TableRow key={i}>
-                          <TableCell className="font-medium">{item.name}</TableCell>
-                          <TableCell className="text-right tabular-nums">{item.count}</TableCell>
-                          <TableCell className="text-right text-muted-foreground">{formatDuration(item.avgSeconds)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  <div className="space-y-2">
+                    {requests.topItems.map((item, i) => (
+                      <div key={i} className="flex items-center gap-3 group">
+                        {/* Rank badge */}
+                        <div
+                          className="h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+                          style={{ background: RANK_COLORS[i] ?? "#6366F1" }}
+                        >
+                          {i + 1}
+                        </div>
+
+                        {/* Name + bar */}
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-medium truncate">{item.name}</span>
+                            <div className="flex items-center gap-2 shrink-0 text-xs">
+                              <span
+                                className="font-bold tabular-nums"
+                                style={{ color: "#0EA5E9" }}
+                              >
+                                {item.count}
+                              </span>
+                              {item.avgSeconds > 0 && (
+                                <span className="text-muted-foreground tabular-nums">
+                                  {formatDuration(item.avgSeconds)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${(item.count / maxReqCount) * 100}%`,
+                                background: RANK_COLORS[i] ?? "#0EA5E9",
+                                opacity: 0.8,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </CardContent>
-            </Card>
-          </section>
+              </div>
+            </CardContent>
+          </Card>
         );
+      }
 
       // ── Problem Recurrence ────────────────────────────────────────────────────
       case "problem_recurrence":
@@ -2317,29 +2593,115 @@ export default function HomePage() {
 
           {/* ── Edit mode banner ───────────────────────────────────────────── */}
           {editMode && (
-            <div className="flex items-center justify-between gap-4 px-4 py-2.5 rounded-xl bg-primary/5 border border-primary/20">
-              <div className="flex items-center gap-2 text-sm text-primary font-medium">
-                <PenLine className="h-4 w-4" />
-                <span className="hidden sm:inline">Drag to reorder · resize from corners · snap widths with presets</span>
-                <span className="sm:hidden">Edit layout</span>
+            <div className="rounded-xl bg-primary/5 border border-primary/20 overflow-hidden">
+              {/* Top row: info + main actions */}
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                <div className="flex items-center gap-2 text-sm text-primary font-medium min-w-0">
+                  <PenLine className="h-4 w-4 shrink-0" />
+                  <span className="hidden md:inline truncate">
+                    Drag freely · resize from corners · use <Palette className="inline h-3 w-3" /> to style each widget
+                  </span>
+                  <span className="md:hidden">Edit layout</span>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Undo */}
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                    title="Undo (Ctrl+Z)" disabled={historyIndex <= 0}
+                    onClick={undoLayout}>
+                    <Undo2 className="h-3.5 w-3.5" />
+                  </Button>
+                  {/* Redo */}
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                    title="Redo" disabled={historyIndex >= layoutHistory.length - 1}
+                    onClick={redoLayout}>
+                    <Redo2 className="h-3.5 w-3.5" />
+                  </Button>
+
+                  <div className="h-4 w-px bg-border/60 mx-0.5" />
+
+                  {/* Snap toggle */}
+                  <Button
+                    variant={snapEnabled ? "default" : "outline"}
+                    size="sm"
+                    className={`h-8 gap-1.5 text-xs ${snapEnabled ? "" : "text-muted-foreground"}`}
+                    title={snapEnabled ? "Snapping on — click to go free-form" : "Free-form — click to enable snapping"}
+                    onClick={() => setSnapEnabled(s => !s)}
+                  >
+                    {snapEnabled
+                      ? <Magnet    className="h-3.5 w-3.5" />
+                      : <Move className="h-3.5 w-3.5" />}
+                    <span className="hidden sm:inline">{snapEnabled ? "Snap On" : "Free"}</span>
+                  </Button>
+
+                  <div className="h-4 w-px bg-border/60 mx-0.5" />
+
+                  {/* Widgets picker */}
+                  <Button variant="outline" size="sm" className="gap-1.5 h-8"
+                    onClick={() => setWidgetPickerOpen(true)}>
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Widgets</span>
+                  </Button>
+
+                  {/* Auto-fit */}
+                  <Button variant="outline" size="sm" className="gap-1.5 h-8"
+                    title="Repack all widgets to eliminate gaps"
+                    onClick={autoFitLayout}>
+                    <Layers className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Auto-fit</span>
+                  </Button>
+
+                  {/* Reset to default */}
+                  <Popover open={resetPopoverOpen} onOpenChange={setResetPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" className="gap-1.5 h-8 text-muted-foreground hover:text-destructive hover:border-destructive/40">
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Reset</span>
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-72 p-4">
+                      <div className="space-y-3">
+                        <div className="flex items-start gap-2.5">
+                          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-sm font-semibold">Restore to default?</p>
+                            <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
+                              This will replace the current layout with the system default. All custom widget positions, sizes, and styles will be lost.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="destructive" className="flex-1 h-7 text-xs gap-1"
+                            onClick={restoreToDefault}>
+                            <RotateCcw className="h-3 w-3" /> Restore Default
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-7 text-xs"
+                            onClick={() => setResetPopoverOpen(false)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+
+                  <div className="h-4 w-px bg-border/60 mx-0.5" />
+
+                  <Button variant="outline" size="sm" className="h-8" onClick={cancelEditMode}>
+                    Cancel
+                  </Button>
+                  <Button size="sm" className="h-8 gap-1.5" onClick={saveLayout} disabled={saveDashboard.isPending}>
+                    {saveDashboard.isPending && <Settings2 className="h-3.5 w-3.5 animate-spin" />}
+                    Save Layout
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => setWidgetPickerOpen(true)}
-                >
-                  <LayoutGrid className="h-3.5 w-3.5" />
-                  Widgets
-                </Button>
-                <Button variant="outline" size="sm" onClick={cancelEditMode}>
-                  Cancel
-                </Button>
-                <Button size="sm" onClick={saveLayout} disabled={saveDashboard.isPending} className="gap-1.5">
-                  {saveDashboard.isPending ? <Settings2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                  Save Layout
-                </Button>
+
+              {/* Bottom hint strip */}
+              <div className="px-4 py-1.5 border-t border-primary/10 bg-primary/[0.03] flex items-center gap-4 text-[10px] text-muted-foreground/70 flex-wrap">
+                <span className="flex items-center gap-1"><Magnet className="h-2.5 w-2.5" /> Toggle snap for auto-compaction</span>
+                <span className="flex items-center gap-1"><Layers className="h-2.5 w-2.5" /> Auto-fit repacks widgets to eliminate empty space</span>
+                <span className="flex items-center gap-1"><Palette className="h-2.5 w-2.5" /> Click the palette icon on a widget's drag bar to style it</span>
+                <span className="flex items-center gap-1"><Undo2 className="h-2.5 w-2.5" /> Undo/redo with the arrows · <RotateCcw className="inline h-2.5 w-2.5 mx-0.5" /> Reset restores defaults</span>
               </div>
             </div>
           )}
@@ -2355,24 +2717,28 @@ export default function HomePage() {
             rowHeight={rowHeight}
             margin={[12, 12]}
             containerPadding={[0, 0]}
-            compactType="vertical"
+            compactType={editMode && snapEnabled ? "vertical" : null}
             isDraggable={editMode}
             isResizable={editMode}
             draggableHandle=".widget-drag-handle"
             onLayoutChange={handleLayoutChange}
             className={editMode ? "rgl-edit-mode" : ""}
             useCSSTransforms
+            preventCollision={editMode && !snapEnabled}
           >
             {orderedWidgets.map(w => {
               const currentItem = gridLayout.find(l => l.i === w.id);
-              const currentW = currentItem?.w ?? (w.w ?? WIDGET_LAYOUT_DEFAULTS[w.id].w);
+              const currentW    = currentItem?.w ?? (w.w ?? WIDGET_LAYOUT_DEFAULTS[w.id].w);
+              const appearance  = (w as any).appearance as WidgetAppearance | undefined;
               return (
                 <div key={w.id}>
                   <DashboardWidget
                     id={w.id}
                     editMode={editMode}
                     currentW={currentW}
+                    appearance={appearance}
                     onWidthChange={newW => handleWidthPreset(w.id, newW)}
+                    onEditStyle={editMode ? () => setStyleEditWidget(w.id) : undefined}
                   >
                     {renderWidget(w.id)}
                   </DashboardWidget>
@@ -2380,6 +2746,17 @@ export default function HomePage() {
               );
             })}
           </RGL>
+
+          {/* ── Widget appearance editor ──────────────────────────────────── */}
+          {styleEditWidget && (
+            <WidgetAppearanceEditor
+              open={!!styleEditWidget}
+              onOpenChange={v => { if (!v) setStyleEditWidget(null); }}
+              widgetId={styleEditWidget}
+              appearance={(activeConfig.widgets.find(w => w.id === styleEditWidget) as any)?.appearance}
+              onSave={appearance => saveWidgetAppearance(styleEditWidget, appearance)}
+            />
+          )}
 
           {/* ── Widget picker dialog ──────────────────────────────────────── */}
           <WidgetPickerDialog

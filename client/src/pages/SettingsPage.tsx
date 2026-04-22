@@ -25,6 +25,7 @@ import {
   ScrollText,
   CalendarDays,
   FlaskConical,
+  Trash2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -58,6 +59,7 @@ import {
   AuditSection,
   BusinessHoursSection,
   DemoDataSection,
+  TrashSection,
 } from "./settings/sections";
 
 // ── Section groups for sidebar organisation ───────────────────────────────────
@@ -82,6 +84,10 @@ const SECTION_GROUPS: { label: string; sections: SettingsSection[] }[] = [
   {
     label: "System",
     sections: ["notifications", "security", "audit", "integrations"],
+  },
+  {
+    label: "Data Lifecycle",
+    sections: ["trash"],
   },
   {
     label: "Developer",
@@ -114,6 +120,7 @@ const sectionIcons: Record<SettingsSection, React.ReactNode> = {
   security:         <ShieldCheck className="h-4 w-4" />,
   audit:            <ScrollText className="h-4 w-4" />,
   business_hours:   <CalendarDays className="h-4 w-4" />,
+  trash:            <Trash2 className="h-4 w-4" />,
   demo_data:        <FlaskConical className="h-4 w-4" />,
 };
 
@@ -142,6 +149,7 @@ const sectionComponents: Record<SettingsSection, React.FC> = {
   security:         SecuritySection,
   audit:            AuditSection,
   business_hours:   BusinessHoursSection,
+  trash:            TrashSection,
   demo_data:        DemoDataSection,
 };
 

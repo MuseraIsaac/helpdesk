@@ -459,7 +459,10 @@ router.post(
           });
           return;
         }
-        const { count } = await prisma.asset.deleteMany({ where: { id: { in: data.ids } } });
+        const { count } = await prisma.asset.updateMany({
+          where: { id: { in: data.ids }, deletedAt: null },
+          data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
+        });
         res.json({ affected: count });
         break;
       }
@@ -580,7 +583,7 @@ router.get(
       discoverySource, warrantyExpiringSoon, search, page, pageSize, sortBy, sortOrder,
     } = q;
 
-    const where: Prisma.AssetWhereInput = {};
+    const where: Prisma.AssetWhereInput = { deletedAt: null };
     if (type) where.type = type as AssetType;
     if (statuses) {
       const list = statuses.split(",").map((s: string) => s.trim())
@@ -838,7 +841,10 @@ router.delete(
       return;
     }
 
-    await prisma.asset.delete({ where: { id } });
+    await prisma.asset.update({
+      where: { id },
+      data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
+    });
     res.status(204).end();
   }
 );

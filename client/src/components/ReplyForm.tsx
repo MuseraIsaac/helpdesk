@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ErrorAlert from "@/components/ErrorAlert";
 import MacroPicker from "@/components/MacroPicker";
-import RichTextEditor from "@/components/RichTextEditor";
+import SaveMacroDialog from "@/components/SaveMacroDialog";
+import RichTextEditor, { type RichTextEditorHandle } from "@/components/RichTextEditor";
 import { useSession } from "@/lib/auth-client";
 import { useMe } from "@/hooks/useMe";
 import { useSettings } from "@/hooks/useSettings";
-import { BookOpen, Paperclip, X, ChevronDown, Send, Sparkles, Quote } from "lucide-react";
+import { BookOpen, BookmarkPlus, Paperclip, X, ChevronDown, Send, Sparkles, Quote } from "lucide-react";
 import RichTextRenderer from "@/components/RichTextRenderer";
 
 export type ReplyType = "reply_all" | "reply_sender" | "forward";
@@ -103,9 +104,11 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
   const { data: ticketSettings } = useSettings("tickets");
 
   const [macroPickerOpen, setMacroPickerOpen] = useState(false);
+  const [saveMacroOpen, setSaveMacroOpen] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<RichTextEditorHandle>(null);
 
   // Addressing fields — "to" is editable and pre-seeded from the ticket
   const [to, setTo] = useState(replyType === "forward" ? "" : ticket.senderEmail);
@@ -233,7 +236,7 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
       .split("\n\n")
       .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
       .join("");
-    setEditorContent(html);
+    editorRef.current?.insertAtCursor(html);
   }
 
   const isBusy = replyMutation.isPending || polishMutation.isPending;
@@ -313,6 +316,7 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
         {/* Editor area */}
         <div className="px-1">
           <RichTextEditor
+            ref={editorRef}
             content={editorContent}
             onChange={handleEditorChange}
             placeholder="Write your reply… Use @ to mention a team member"
@@ -401,6 +405,19 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
             variant="ghost"
             size="sm"
             className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
+            onClick={() => setSaveMacroOpen(true)}
+            disabled={isBusy || !bodyText.trim()}
+            title={!bodyText.trim() ? "Write a reply first to save it as a macro" : "Save reply as macro"}
+          >
+            <BookmarkPlus className="h-4 w-4" />
+            Save as Macro
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
             disabled={!bodyText.trim() || isBusy}
             onClick={() => polishMutation.mutate()}
           >
@@ -436,6 +453,16 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
           ticketId: ticket.id,
           agentName: session?.user?.name ?? "Agent",
         }}
+      />
+
+      <SaveMacroDialog
+        open={saveMacroOpen}
+        onClose={() => setSaveMacroOpen(false)}
+        bodyText={bodyText}
+        canManage={
+          (session?.user as any)?.role === "admin" ||
+          (session?.user as any)?.role === "supervisor"
+        }
       />
     </>
   );

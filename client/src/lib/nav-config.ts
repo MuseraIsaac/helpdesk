@@ -39,6 +39,7 @@ import {
   Cloud,
   Radar,
   FlaskConical,
+  Trash2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { can, type Permission } from "core/constants/permission.ts";
@@ -316,6 +317,12 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Macros",
         icon: Wrench,
       },
+      {
+        id: "trash",
+        to: "/admin/trash",
+        label: "Trash",
+        icon: Trash2,
+      },
     ],
   },
 
@@ -379,6 +386,7 @@ export function resolveModuleBreadcrumb(pathname: string, role: string): string 
   if (pathname.startsWith("/customers"))     return "Contacts  ·  Customers";
   if (pathname.startsWith("/organizations")) return "Contacts  ·  Organizations";
   if (pathname.startsWith("/notifications")) return "Account  ·  Notifications";
+  if (pathname.startsWith("/admin/trash"))   return "Administration  ·  Trash";
   if (pathname.startsWith("/demo-data"))     return "Developer  ·  Demo Data";
   return "ITSM Platform";
 }

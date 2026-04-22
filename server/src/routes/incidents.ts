@@ -126,7 +126,7 @@ router.get(
     const { status, priority, isMajor, assignedToMe, search, page, pageSize, sortBy, sortOrder } =
       query;
 
-    const where: Prisma.IncidentWhereInput = {};
+    const where: Prisma.IncidentWhereInput = { deletedAt: null };
     if (status) where.status = status;
     if (priority) where.priority = priority;
     if (isMajor !== undefined) where.isMajor = isMajor;
@@ -177,8 +177,8 @@ router.get(
     const id = parseId(req.params.id);
     if (id === null) { res.status(400).json({ error: "Invalid ID" }); return; }
 
-    const incident = await prisma.incident.findUnique({
-      where: { id },
+    const incident = await prisma.incident.findFirst({
+      where: { id, deletedAt: null },
       select: DETAIL_SELECT,
     });
     if (!incident) { res.status(404).json({ error: "Incident not found" }); return; }
@@ -654,7 +654,10 @@ router.post("/bulk", requireAuth, requirePermission("incidents.manage"), async (
   if (!data) return;
   switch (data.action) {
     case "delete": {
-      const { count } = await prisma.incident.deleteMany({ where: { id: { in: data.ids } } });
+      const { count } = await prisma.incident.updateMany({
+        where: { id: { in: data.ids }, deletedAt: null },
+        data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
+      });
       res.json({ affected: count }); return;
     }
     case "assign": {

@@ -26,6 +26,8 @@ export const settingsSections = [
   "security",
   "audit",
   "business_hours",
+  // ── Data lifecycle ──
+  "trash",
   // ── Demo & Developer tools ──
   "demo_data",
 ] as const;
@@ -155,6 +157,11 @@ export const settingsSectionMeta: Record<SettingsSection, SettingsSectionMeta> =
     label: "Business Hours",
     description: "Named business calendars, public holidays, and exclusion periods",
     keywords: ["business hours", "calendar", "holiday", "schedule", "working hours", "exclusion"],
+  },
+  trash: {
+    label: "Trash",
+    description: "Soft-delete retention period and automatic purge settings for the recycle bin",
+    keywords: ["trash", "recycle", "bin", "delete", "restore", "retention", "purge", "soft delete"],
   },
   demo_data: {
     label: "Demo Data",
@@ -541,6 +548,12 @@ export const auditSettingsSchema = z.object({
   exportFormat:                z.enum(["json", "csv"]).default("json"),
 });
 
+export const trashSettingsSchema = z.object({
+  enabled:            z.boolean().default(true),
+  retentionDays:      z.number().int().min(1).max(365).default(30),
+  autoEmptyEnabled:   z.boolean().default(true),
+});
+
 export const demoDataSettingsSchema = z.object({
   /**
    * When true, the Demo Data sidebar section and all /api/demo-data endpoints
@@ -592,6 +605,7 @@ export const sectionSchemas = {
   security:         securitySettingsSchema,
   audit:            auditSettingsSchema,
   business_hours:   businessHoursSettingsSchema,
+  trash:            trashSettingsSchema,
   demo_data:        demoDataSettingsSchema,
 } as const satisfies Record<SettingsSection, z.ZodObject<z.ZodRawShape>>;
 
@@ -619,6 +633,7 @@ export type NotificationsSettings    = z.infer<typeof notificationsSettingsSchem
 export type SecuritySettings         = z.infer<typeof securitySettingsSchema>;
 export type AuditSettings            = z.infer<typeof auditSettingsSchema>;
 export type BusinessHoursSettings    = z.infer<typeof businessHoursSettingsSchema>;
+export type TrashSettings            = z.infer<typeof trashSettingsSchema>;
 export type DemoDataSettings         = z.infer<typeof demoDataSettingsSchema>;
 
 export type SectionData<S extends SettingsSection> =

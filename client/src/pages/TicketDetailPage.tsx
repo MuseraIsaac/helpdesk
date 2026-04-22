@@ -18,6 +18,7 @@ import RunScenarioButton from "@/components/RunScenarioButton";
 import PresenceIndicator from "@/components/PresenceIndicator";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
 import MergeTicketDialog from "@/components/MergeTicketDialog";
+import AddChildTicketDialog from "@/components/AddChildTicketDialog";
 import StatusBadge from "@/components/StatusBadge";
 import TicketTypeBadge from "@/components/TicketTypeBadge";
 import { EscalationBadge } from "@/components/EscalationBadge";
@@ -33,8 +34,9 @@ import {
   MessageSquare, Lock, ChevronDown, ChevronRight, Star, Link2,
   X, Forward, BookmarkPlus, Activity, Ticket as TicketIcon, UserCircle, Calendar,
   Bell, BellOff, Merge, GitMerge, Server, Database, Plus, Loader2,
-  ExternalLink,
+  ExternalLink, Scissors, ArrowDownToLine, ArrowUpRight, AlertTriangle,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -126,11 +128,11 @@ function LinkedAssetsSection({
   const { data: results = [], isFetching } = useQuery<SearchResult[]>({
     queryKey: ["ticket-asset-search", dq],
     queryFn: async () => {
-      const { data } = await axios.get<{ assets: { id: number; assetNumber: string; name: string; type: string; status: string }[] }>(
+      const { data } = await axios.get<{ items: { id: number; assetNumber: string; name: string; type: string; status: string }[] }>(
         "/api/assets", { params: { search: dq, pageSize: 10 } },
       );
       const linked = new Set(links.map(l => l.asset.id));
-      return data.assets
+      return (data.items ?? [])
         .filter(a => !linked.has(a.id))
         .map(a => ({ id: a.id, number: a.assetNumber, name: a.name, type: a.type, status: a.status }));
     },
@@ -257,7 +259,7 @@ function LinkedCIsSection({
     queryKey: ["ticket-ci-search", dq],
     queryFn: async () => {
       const { data } = await axios.get<{ items: { id: number; ciNumber: string; name: string; type: string; status: string }[] }>(
-        "/api/cmdb", { params: { search: dq, pageSize: 10, status: "" } },
+        "/api/cmdb", { params: { search: dq, pageSize: 10 } },
       );
       const linked = new Set(links.map(l => l.ci.id));
       return data.items
@@ -372,9 +374,11 @@ export default function TicketDetailPage() {
 
   const [composeMode, setComposeMode] = useState<ComposeMode>(null);
   const [quoteData, setQuoteData] = useState<QuoteData | null>(null);
-  const [templateDialog, setTemplateDialog] = useState(false);
-  const [mergeDialog, setMergeDialog] = useState(false);
-  const [activityOpen, setActivityOpen] = useState(false);
+  const [templateDialog,  setTemplateDialog]  = useState(false);
+  const [mergeDialog,     setMergeDialog]     = useState(false);
+  const [addChildDialog,  setAddChildDialog]  = useState(false);
+  const [unmergeConfirm,  setUnmergeConfirm]  = useState<number | null>(null);
+  const [activityOpen,    setActivityOpen]    = useState(false);
   const composeRef = useRef<HTMLDivElement>(null);
 
   const openCompose = useCallback((mode: ComposeMode, quote?: QuoteData) => {
@@ -418,6 +422,26 @@ export default function TicketDetailPage() {
       }
     },
     onSuccess: () => refetchFollow(),
+  });
+
+  // Unmerge: detach a child ticket from this parent (called from parent view)
+  const unmergeMutation = useMutation({
+    mutationFn: (childId: number) =>
+      axios.post(`/api/tickets/${childId}/unmerge`),
+    onSuccess: (_data, childId) => {
+      setUnmergeConfirm(null);
+      void queryClient.invalidateQueries({ queryKey: ["ticket", id] });
+      void queryClient.invalidateQueries({ queryKey: ["ticket", String(childId)] });
+    },
+  });
+
+  // Unmerge self: detach this child from its parent (called from child view)
+  const unmergeSelfMutation = useMutation({
+    mutationFn: () => axios.post(`/api/tickets/${ticket?.id}/unmerge`),
+    onSuccess: () => {
+      setUnmergeConfirm(null);
+      void queryClient.invalidateQueries({ queryKey: ["ticket", id] });
+    },
   });
 
   if (isLoading) {
@@ -503,11 +527,19 @@ export default function TicketDetailPage() {
               </Button>
 
               {mergeEnabled && !ticket.mergedIntoId && (
-                <Button type="button" variant="outline" size="sm" className="gap-1.5 h-8"
-                  onClick={() => setMergeDialog(true)}>
-                  <Merge className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Merge</span>
-                </Button>
+                ticket.mergedTickets && ticket.mergedTickets.length > 0 ? (
+                  <Button type="button" variant="outline" size="sm" className="gap-1.5 h-8 border-violet-300/70 text-violet-700 hover:bg-violet-500/10 hover:border-violet-400 dark:border-violet-700/50 dark:text-violet-400"
+                    onClick={() => setAddChildDialog(true)}>
+                    <ArrowDownToLine className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Add Child</span>
+                  </Button>
+                ) : (
+                  <Button type="button" variant="outline" size="sm" className="gap-1.5 h-8"
+                    onClick={() => setMergeDialog(true)}>
+                    <Merge className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Merge</span>
+                  </Button>
+                )
               )}
 
               <Button type="button" variant="outline" size="sm" className="gap-1.5 h-8"
@@ -559,22 +591,106 @@ export default function TicketDetailPage() {
           {/* ── Main column ── */}
           <div className="space-y-4 min-w-0">
 
-            {/* Merged-into banner */}
+            {/* ── Child ticket: merged-into panel ── */}
             {ticket.mergedIntoId && ticket.mergedInto && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10 px-4 py-3 flex items-start gap-3">
-                <GitMerge className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                <div className="text-sm">
-                  <p className="font-medium text-amber-800 dark:text-amber-300">This ticket has been merged</p>
-                  <p className="text-amber-700/80 dark:text-amber-400/70 mt-0.5 text-xs">
-                    All activity is now tracked under{" "}
-                    <Link
-                      to={`/tickets/${ticket.mergedIntoId}`}
-                      className="font-semibold underline underline-offset-2 hover:opacity-80"
-                    >
-                      {ticket.mergedInto.ticketNumber}
-                    </Link>
-                    {" "}— {ticket.mergedInto.subject}
+              <div className="rounded-xl border border-amber-300/60 bg-amber-50/80 dark:border-amber-800/40 dark:bg-amber-950/20 overflow-hidden">
+                {/* Header */}
+                <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-amber-200/60 dark:border-amber-800/30 bg-amber-100/50 dark:bg-amber-900/20">
+                  <GitMerge className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span className="text-[11px] font-semibold uppercase tracking-widest text-amber-700/80 dark:text-amber-400/80 flex-1">
+                    Merged Ticket
+                  </span>
+                  <span className="text-[10px] text-amber-600/70 dark:text-amber-500/60">
+                    {ticket.mergedAt
+                      ? new Date(ticket.mergedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+                      : ""}
+                  </span>
+                </div>
+
+                {/* Parent ticket card */}
+                <div className="px-4 py-3 space-y-3">
+                  <p className="text-xs text-amber-700/80 dark:text-amber-400/70">
+                    This ticket has been merged. All activity is now tracked under the parent ticket:
                   </p>
+
+                  <div className="rounded-lg border border-amber-200/70 dark:border-amber-800/30 bg-background/70 p-3 flex items-start gap-3">
+                    <div className="h-8 w-8 rounded-lg bg-amber-500/10 border border-amber-400/20 flex items-center justify-center shrink-0">
+                      <GitMerge className="h-4 w-4 text-amber-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/tickets/${ticket.mergedIntoId}`}
+                          className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline"
+                        >
+                          {ticket.mergedInto.ticketNumber}
+                        </Link>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-medium border border-amber-200/60 dark:border-amber-800/30">
+                          Parent
+                        </span>
+                      </div>
+                      <p className="text-sm text-foreground font-medium mt-0.5 leading-snug line-clamp-2">
+                        {ticket.mergedInto.subject}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2">
+                    <Link to={`/tickets/${ticket.mergedIntoId}`}>
+                      <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs border-amber-300/70 text-amber-700 hover:bg-amber-100 dark:border-amber-700/40 dark:text-amber-400 dark:hover:bg-amber-900/30">
+                        <ArrowUpRight className="h-3 w-3" />
+                        View Parent
+                      </Button>
+                    </Link>
+
+                    {mergeEnabled && (
+                      <Popover
+                        open={unmergeConfirm === -1}
+                        onOpenChange={v => setUnmergeConfirm(v ? -1 : null)}
+                      >
+                        <PopoverTrigger asChild>
+                          <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                            <Scissors className="h-3 w-3" />
+                            Unmerge
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="start" side="top" className="w-72 p-4">
+                          <div className="space-y-3">
+                            <div className="flex items-start gap-2.5">
+                              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-sm font-semibold">Unmerge this ticket?</p>
+                                <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
+                                  This ticket will be detached from{" "}
+                                  <span className="font-mono font-semibold text-foreground">{ticket.mergedInto.ticketNumber}</span>{" "}
+                                  and reopened as a standalone ticket.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="flex-1 h-7 text-xs gap-1"
+                                disabled={unmergeSelfMutation.isPending}
+                                onClick={() => unmergeSelfMutation.mutate()}
+                              >
+                                {unmergeSelfMutation.isPending
+                                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                                  : <Scissors className="h-3 w-3" />}
+                                Yes, Unmerge
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-7 text-xs"
+                                onClick={() => setUnmergeConfirm(null)}>
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -799,34 +915,128 @@ export default function TicketDetailPage() {
               </div>
             )}
 
-            {/* Merged tickets (children merged into this one) */}
-            {ticket.mergedTickets && ticket.mergedTickets.length > 0 && (
-              <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/50 bg-muted/20">
-                  <GitMerge className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
-                    Merged Tickets ({ticket.mergedTickets.length})
+            {/* ── Parent ticket: merged children panel ── */}
+            {(ticket.mergedTickets && ticket.mergedTickets.length > 0) || (!ticket.mergedIntoId && mergeEnabled) ? (
+              <div className="rounded-xl border border-violet-200/60 dark:border-violet-800/30 bg-card shadow-sm overflow-hidden">
+                {/* Header */}
+                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-violet-200/50 dark:border-violet-800/25 bg-violet-50/60 dark:bg-violet-950/20">
+                  <GitMerge className="h-3.5 w-3.5 text-violet-500 shrink-0" />
+                  <span className="text-[11px] font-semibold uppercase tracking-widest text-violet-600/80 dark:text-violet-400/70 flex-1">
+                    Merged Children
                   </span>
+                  {ticket.mergedTickets && ticket.mergedTickets.length > 0 && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 border border-violet-200/60 dark:border-violet-800/30">
+                      {ticket.mergedTickets.length}
+                    </span>
+                  )}
                 </div>
-                <div className="p-3 space-y-1.5">
-                  {ticket.mergedTickets.map((m) => (
-                    <Link
-                      key={m.id}
-                      to={`/tickets/${m.id}`}
-                      className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 hover:bg-muted/50 transition-colors group"
-                    >
-                      <GitMerge className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0 mt-0.5" />
-                      <div className="min-w-0">
-                        <p className="font-mono text-[11px] font-semibold text-primary group-hover:underline">
-                          {m.ticketNumber}
-                        </p>
-                        <p className="text-xs text-muted-foreground truncate leading-snug">{m.subject}</p>
+
+                {/* Children list */}
+                {ticket.mergedTickets && ticket.mergedTickets.length > 0 ? (
+                  <div className="divide-y divide-border/30">
+                    {ticket.mergedTickets.map((m) => (
+                      <div key={m.id} className="flex items-start gap-2.5 px-3 py-2.5 hover:bg-muted/30 transition-colors group">
+                        {/* Colour dot + icon */}
+                        <div className="h-6 w-6 rounded-md bg-violet-500/10 border border-violet-400/20 flex items-center justify-center shrink-0 mt-0.5">
+                          <GitMerge className="h-3 w-3 text-violet-400" />
+                        </div>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <Link
+                              to={`/tickets/${m.id}`}
+                              className="font-mono text-[11px] font-bold text-violet-600 dark:text-violet-400 hover:underline"
+                            >
+                              {m.ticketNumber}
+                            </Link>
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate leading-snug mt-0.5">{m.subject}</p>
+                          {m.mergedAt && (
+                            <p className="text-[10px] text-muted-foreground/50 mt-0.5">
+                              Merged {new Date(m.mergedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Link to={`/tickets/${m.id}`} title="Open ticket">
+                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground">
+                              <ArrowUpRight className="h-3 w-3" />
+                            </Button>
+                          </Link>
+
+                          {mergeEnabled && (
+                            <Popover
+                              open={unmergeConfirm === m.id}
+                              onOpenChange={v => setUnmergeConfirm(v ? m.id : null)}
+                            >
+                              <PopoverTrigger asChild>
+                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive" title="Unmerge">
+                                  <Scissors className="h-3 w-3" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent align="end" side="left" className="w-64 p-4">
+                                <div className="space-y-3">
+                                  <div className="flex items-start gap-2">
+                                    <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                                    <div>
+                                      <p className="text-sm font-semibold">Unmerge this ticket?</p>
+                                      <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
+                                        <span className="font-mono font-semibold text-foreground">{m.ticketNumber}</span>{" "}
+                                        will be detached and reopened as a standalone ticket.
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      className="flex-1 h-7 text-xs gap-1"
+                                      disabled={unmergeMutation.isPending && unmergeConfirm === m.id}
+                                      onClick={() => unmergeMutation.mutate(m.id)}
+                                    >
+                                      {unmergeMutation.isPending && unmergeConfirm === m.id
+                                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                                        : <Scissors className="h-3 w-3" />}
+                                      Unmerge
+                                    </Button>
+                                    <Button size="sm" variant="outline" className="h-7 text-xs"
+                                      onClick={() => setUnmergeConfirm(null)}>
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          )}
+                        </div>
                       </div>
-                    </Link>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="px-4 py-4 text-center">
+                    <p className="text-xs text-muted-foreground/60">No child tickets yet.</p>
+                  </div>
+                )}
+
+                {/* Add child footer */}
+                {mergeEnabled && !ticket.mergedIntoId && (
+                  <div className="px-3 py-2 border-t border-violet-200/40 dark:border-violet-800/20 bg-violet-50/30 dark:bg-violet-950/10">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="w-full h-7 text-xs gap-1.5 text-violet-600 dark:text-violet-400 hover:bg-violet-100/60 dark:hover:bg-violet-900/30 hover:text-violet-700"
+                      onClick={() => setAddChildDialog(true)}
+                    >
+                      <Plus className="h-3 w-3" />
+                      Add Child Ticket
+                    </Button>
+                  </div>
+                )}
               </div>
-            )}
+            ) : null}
 
             {/* Customer history */}
             {ticket.customer && (
@@ -836,16 +1046,25 @@ export default function TicketDetailPage() {
         </div>
       </div>
 
-      {/* Merge dialog */}
+      {/* Merge into parent dialog (regular ticket) */}
       {mergeEnabled && (
         <MergeTicketDialog
           open={mergeDialog}
           onOpenChange={setMergeDialog}
           sourceIds={[ticket.id]}
           sourceLabel={ticket.ticketNumber}
-          onMerged={() => {
-            // The query invalidation in the dialog covers the refetch
-          }}
+          onMerged={() => void queryClient.invalidateQueries({ queryKey: ["ticket", id] })}
+        />
+      )}
+
+      {/* Add child ticket dialog (parent ticket) */}
+      {mergeEnabled && (
+        <AddChildTicketDialog
+          open={addChildDialog}
+          onOpenChange={setAddChildDialog}
+          parentId={ticket.id}
+          parentNumber={ticket.ticketNumber}
+          onAdded={() => void queryClient.invalidateQueries({ queryKey: ["ticket", id] })}
         />
       )}
 

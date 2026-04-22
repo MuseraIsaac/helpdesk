@@ -65,23 +65,25 @@ export function useTicketViews() {
       emoji,
       config,
       setAsDefault,
+      isShared,
     }: {
-      viewId: number | null;
-      name: string;
-      emoji?: string;
-      config: SavedViewConfig;
+      viewId:       number | null;
+      name:         string;
+      emoji?:       string;
+      config:       SavedViewConfig;
       setAsDefault?: boolean;
+      isShared?:    boolean;
     }): Promise<StoredView> => {
       if (viewId) {
         const { data } = await axios.put<{ view: StoredView }>(
           `/api/ticket-views/${viewId}`,
-          { name, emoji, config },
+          { name, emoji, config, isShared },
         );
         return data.view;
       }
       const { data } = await axios.post<{ view: StoredView }>(
         "/api/ticket-views",
-        { name, emoji, config, setAsDefault: setAsDefault ?? true },
+        { name, emoji, config, setAsDefault: setAsDefault ?? false, isShared: isShared ?? false },
       );
       return data.view;
     },

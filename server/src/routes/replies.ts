@@ -9,7 +9,7 @@ import { htmlToText } from "../lib/html-to-text";
 import prisma from "../db";
 import { sendEmailJob } from "../lib/send-email";
 import { logAudit } from "../lib/audit";
-import { notifyMentions } from "../lib/mentions";
+import { notifyMentions, extractMentionedEmails } from "../lib/mentions";
 
 const router = Router({ mergeParams: true });
 
@@ -176,8 +176,20 @@ router.post("/", requireAuth, async (req, res) => {
   const emailSubject = replyType === "forward"
     ? `Fwd: ${ticket.subject}`
     : `Re: ${ticket.subject}`;
-  // Reply to sender only: strip CC; forward: include any cc the agent added
-  const emailCc = replyType === "reply_sender" ? undefined : (cc?.length ? cc : undefined);
+
+  // Build CC: start from what the agent explicitly added, then append any
+  // @mentioned agent emails that aren't already in To/CC/BCC.
+  let emailCc: string[] | undefined;
+  if (replyType !== "reply_sender") {
+    const explicitCc = cc ?? [];
+    const mentionedEmails = extractMentionedEmails(htmlBody);
+    const alreadyPresent = new Set(
+      [emailTo, ...explicitCc, ...(bcc ?? [])].map((e) => e.toLowerCase())
+    );
+    const newFromMentions = mentionedEmails.filter((e) => !alreadyPresent.has(e));
+    const merged = [...explicitCc, ...newFromMentions];
+    emailCc = merged.length ? merged : undefined;
+  }
 
   // Append quoted content as an email-standard blockquote so recipients see the trail
   let emailBodyHtml = htmlBody;

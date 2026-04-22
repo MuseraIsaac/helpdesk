@@ -168,6 +168,14 @@ export interface DashboardTemplate {
   id: string;
   name: string;
   description: string;
+  /** Hex accent colour for the gallery card */
+  accentColor?: string;
+  /** Gallery filter category */
+  category?: string;
+  /** Keyword tags displayed as badges */
+  tags?: string[];
+  /** Mini layout preview rows for the gallery card */
+  previewRows?: Array<Array<{ x: number; w: number; label: string; color: string }>>;
   widgets: {
     id: string;
     visible: boolean;

@@ -243,17 +243,19 @@ router.get("/", requireAuth, async (req, res) => {
   const now = new Date();
   const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
-  let where: Prisma.TicketWhereInput = {};
+  let where: Prisma.TicketWhereInput = { deletedAt: null };
 
   if (query.view === "overdue") {
     // Active tickets with at least one blown SLA deadline
     where = {
+      deletedAt: null,
       status: { notIn: ["resolved", "closed", "new", "processing"] },
       slaBreached: true,
     };
   } else if (query.view === "at_risk") {
     // Active tickets whose nearest unmet deadline is within 2 hours (but not yet breached)
     where = {
+      deletedAt: null,
       status: { notIn: ["resolved", "closed", "new", "processing"] },
       slaBreached: false,
       OR: [
@@ -270,6 +272,7 @@ router.get("/", requireAuth, async (req, res) => {
   } else if (query.view === "unassigned_urgent") {
     // Open urgent tickets with no assignee
     where = {
+      deletedAt: null,
       status: { notIn: ["resolved", "closed"] },
       priority: "urgent",
       assignedToId: null,
@@ -361,6 +364,36 @@ router.get("/", requireAuth, async (req, res) => {
   });
 });
 
+// ─── Search (for merge picker) — must be before /:id ──────────────────────
+
+router.get("/search", requireAuth, async (req, res) => {
+  const q = String(req.query.q ?? "").trim();
+  const excludeId = parseId(String(req.query.exclude ?? "")) ?? undefined;
+  if (!q) { res.json({ tickets: [] }); return; }
+
+  const tickets = await prisma.ticket.findMany({
+    where: {
+      AND: [
+        { status: { notIn: ["new", "processing"] } },
+        { mergedIntoId: null },
+        ...(excludeId ? [{ id: { not: excludeId } }] : []),
+        {
+          OR: [
+            { ticketNumber: { contains: q, mode: "insensitive" as const } },
+            { subject:      { contains: q, mode: "insensitive" as const } },
+            { senderEmail:  { contains: q, mode: "insensitive" as const } },
+          ],
+        },
+      ],
+    },
+    select: { id: true, ticketNumber: true, subject: true, status: true, senderName: true },
+    take: 10,
+    orderBy: { updatedAt: "desc" },
+  });
+
+  res.json({ tickets });
+});
+
 // ─── Detail ────────────────────────────────────────────────────────────────
 
 router.get("/:id", requireAuth, async (req, res) => {
@@ -370,8 +403,8 @@ router.get("/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  const ticket = await prisma.ticket.findUnique({
-    where: { id },
+  const ticket = await prisma.ticket.findFirst({
+    where: { id, deletedAt: null },
     include: {
       assignedTo: { select: { id: true, name: true } },
       team: { select: { id: true, name: true, color: true } },
@@ -870,34 +903,93 @@ router.post("/:id/merge", requireAuth, requirePermission("tickets.update"), asyn
   res.json({ ok: true, mergedAt: now });
 });
 
-// ─── Search (for merge picker) ─────────────────────────────────────────────
+// ─── Unmerge ───────────────────────────────────────────────────────────────
+//
+// POST /api/tickets/:id/unmerge
+// Detaches a child ticket from its parent, re-opening it as a standalone ticket.
 
-router.get("/search", requireAuth, async (req, res) => {
-  const q = String(req.query.q ?? "").trim();
-  const excludeId = parseId(String(req.query.exclude ?? "")) ?? undefined;
-  if (!q) { res.json({ tickets: [] }); return; }
+router.post("/:id/unmerge", requireAuth, requirePermission("tickets.update"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid ticket ID" }); return; }
 
-  const tickets = await prisma.ticket.findMany({
-    where: {
-      AND: [
-        { status: { notIn: ["new", "processing"] } },
-        { mergedIntoId: null },
-        ...(excludeId ? [{ id: { not: excludeId } }] : []),
-        {
-          OR: [
-            { ticketNumber: { contains: q, mode: "insensitive" as const } },
-            { subject:      { contains: q, mode: "insensitive" as const } },
-            { senderEmail:  { contains: q, mode: "insensitive" as const } },
-          ],
-        },
-      ],
-    },
-    select: { id: true, ticketNumber: true, subject: true, status: true, senderName: true },
-    take: 10,
-    orderBy: { updatedAt: "desc" },
+  const ticket = await prisma.ticket.findUnique({
+    where:  { id },
+    select: { id: true, mergedIntoId: true, ticketNumber: true },
   });
 
-  res.json({ tickets });
+  if (!ticket)              { res.status(404).json({ error: "Ticket not found" }); return; }
+  if (!ticket.mergedIntoId) { res.status(422).json({ error: "Ticket is not currently merged" }); return; }
+
+  const parentId = ticket.mergedIntoId;
+
+  // Fetch parent number for the audit trail
+  const parent = await prisma.ticket.findUnique({
+    where: { id: parentId },
+    select: { ticketNumber: true },
+  });
+
+  await prisma.ticket.update({
+    where: { id },
+    data:  { mergedIntoId: null, mergedAt: null, status: "open" },
+  });
+
+  await Promise.all([
+    logAudit(id,       req.user.id, "ticket.unmerged",       {
+      previousParentId: parentId,
+      parentNumber:     parent?.ticketNumber ?? null,
+      childNumber:      ticket.ticketNumber,
+    }),
+    logAudit(parentId, req.user.id, "ticket.child_unmerged", {
+      childId:     id,
+      childNumber: ticket.ticketNumber,
+      parentNumber: parent?.ticketNumber ?? null,
+    }),
+  ]);
+
+  res.json({ ok: true });
+});
+
+// ─── Absorb ────────────────────────────────────────────────────────────────
+//
+// POST /api/tickets/:id/absorb  { childId }
+// Pulls another ticket in as a child of this one (inverse of merge — called
+// from the parent's "Add Child Ticket" action).
+
+router.post("/:id/absorb", requireAuth, requirePermission("tickets.update"), async (req, res) => {
+  const parentId = parseId(req.params.id);
+  const childId  = parseId(req.body?.childId);
+  if (!parentId || !childId)   { res.status(400).json({ error: "Invalid ticket IDs" }); return; }
+  if (parentId === childId)    { res.status(422).json({ error: "A ticket cannot absorb itself" }); return; }
+
+  const [parent, child] = await Promise.all([
+    prisma.ticket.findUnique({
+      where:  { id: parentId },
+      select: { id: true, mergedIntoId: true, ticketNumber: true },
+    }),
+    prisma.ticket.findUnique({
+      where:  { id: childId },
+      select: { id: true, mergedIntoId: true, ticketNumber: true, _count: { select: { mergedTickets: true } } },
+    }),
+  ]);
+
+  if (!parent) { res.status(404).json({ error: "Parent ticket not found" }); return; }
+  if (!child)  { res.status(404).json({ error: "Child ticket not found" }); return; }
+  if (parent.mergedIntoId)           { res.status(422).json({ error: "A merged ticket cannot absorb other tickets" }); return; }
+  if (child.mergedIntoId)            { res.status(422).json({ error: "This ticket is already merged into another ticket" }); return; }
+  if (child._count.mergedTickets > 0){ res.status(422).json({ error: "Cannot absorb a ticket that already has merged children" }); return; }
+
+  const now = new Date();
+  await prisma.ticket.update({
+    where: { id: childId },
+    data:  { mergedIntoId: parentId, mergedAt: now, status: "closed" },
+  });
+
+  await Promise.all([
+    logAudit(childId,  req.user.id, "ticket.merged",         { mergedIntoId: parentId, targetNumber: parent.ticketNumber }),
+    logAudit(parentId, req.user.id, "ticket.received_merge", { fromId: childId, fromNumber: child.ticketNumber }),
+  ]);
+
+  res.json({ ok: true, mergedAt: now });
 });
 
 // ─── Bulk ──────────────────────────────────────────────────────────────────
@@ -937,7 +1029,10 @@ router.post("/bulk", requireAuth, requirePermission("tickets.update"), async (re
 
   switch (data.action) {
     case "delete": {
-      const { count } = await prisma.ticket.deleteMany({ where: { id: { in: data.ids } } });
+      const { count } = await prisma.ticket.updateMany({
+        where: { id: { in: data.ids }, deletedAt: null },
+        data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
+      });
       res.json({ affected: count });
       return;
     }

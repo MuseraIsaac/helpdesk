@@ -107,6 +107,7 @@ router.get("/public/articles", async (req, res) => {
 
   const articles = await prisma.kbArticle.findMany({
     where: {
+      deletedAt: null,
       status: "published",
       visibility: "public",
       ...(categoryId ? { categoryId } : {}),
@@ -273,6 +274,7 @@ router.get("/articles", async (req, res) => {
 
   const articles = await prisma.kbArticle.findMany({
     where: {
+      deletedAt: null,
       ...(status       ? { status }       : {}),
       ...(reviewStatus ? { reviewStatus } : {}),
       ...(visibility   ? { visibility }   : {}),
@@ -479,7 +481,11 @@ router.delete("/articles/:id", async (req, res) => {
   if (!id) { res.status(400).json({ error: "Invalid article ID" }); return; }
   const existing = await prisma.kbArticle.findUnique({ where: { id } });
   if (!existing) { res.status(404).json({ error: "Article not found" }); return; }
-  await prisma.kbArticle.delete({ where: { id } });
+  const actor = (req as import("express").Request & { user?: { id: string; name: string } }).user;
+  await prisma.kbArticle.update({
+    where: { id },
+    data:  { deletedAt: new Date(), deletedById: actor?.id ?? null, deletedByName: actor?.name ?? null },
+  });
   res.status(204).send();
 });
 
