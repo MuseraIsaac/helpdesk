@@ -25,6 +25,7 @@ router.get("/", async (_req, res) => {
       name: true,
       description: true,
       color: true,
+      email: true,
       createdAt: true,
       updatedAt: true,
       members: {
@@ -41,6 +42,7 @@ router.get("/", async (_req, res) => {
       name: t.name,
       description: t.description,
       color: t.color,
+      email: t.email,
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
       ticketCount: t._count.tickets,
@@ -83,6 +85,7 @@ router.get("/:id", async (req, res) => {
       name: team.name,
       description: team.description,
       color: team.color,
+      email: team.email,
       createdAt: team.createdAt,
       updatedAt: team.updatedAt,
       ticketCount: team._count.tickets,
@@ -104,13 +107,22 @@ router.post("/", requirePermission("teams.manage"), async (req, res) => {
     return;
   }
 
+  if (data.email) {
+    const emailConflict = await prisma.team.findUnique({ where: { email: data.email } });
+    if (emailConflict) {
+      res.status(409).json({ error: `${data.email} is already assigned to team "${emailConflict.name}"` });
+      return;
+    }
+  }
+
   const team = await prisma.team.create({
     data: {
       name: data.name,
       description: data.description ?? null,
       color: data.color,
+      email: data.email ?? null,
     },
-    select: { id: true, name: true, description: true, color: true, createdAt: true, updatedAt: true },
+    select: { id: true, name: true, description: true, color: true, email: true, createdAt: true, updatedAt: true },
   });
 
   res.status(201).json({ team });
@@ -143,14 +155,24 @@ router.patch("/:id", requirePermission("teams.manage"), async (req, res) => {
     }
   }
 
+  if (data.email && data.email !== team.email) {
+    const emailConflict = await prisma.team.findUnique({ where: { email: data.email } });
+    if (emailConflict) {
+      res.status(409).json({ error: `${data.email} is already assigned to team "${emailConflict.name}"` });
+      return;
+    }
+  }
+
   const updated = await prisma.team.update({
     where: { id },
     data: {
       ...(data.name !== undefined && { name: data.name }),
       ...(data.description !== undefined && { description: data.description }),
       ...(data.color !== undefined && { color: data.color }),
+      // null clears the email; undefined means "leave unchanged"
+      ...(data.email !== undefined && { email: data.email ?? null }),
     },
-    select: { id: true, name: true, description: true, color: true, createdAt: true, updatedAt: true },
+    select: { id: true, name: true, description: true, color: true, email: true, createdAt: true, updatedAt: true },
   });
 
   res.json({ team: updated });
@@ -176,6 +198,21 @@ router.delete("/:id", requirePermission("teams.manage"), async (req, res) => {
   await prisma.team.delete({ where: { id } });
 
   res.status(204).send();
+});
+
+// ── Get team members ─────────────────────────────────────────────────────────
+
+router.get("/:id/members", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid team ID" }); return; }
+
+  const members = await prisma.teamMember.findMany({
+    where: { teamId: id },
+    select: { user: { select: { id: true, name: true, email: true } } },
+    orderBy: { user: { name: "asc" } },
+  });
+
+  res.json({ members: members.map((m) => m.user) });
 });
 
 // ── Set team members (admin only) ────────────────────────────────────────────

@@ -6,6 +6,7 @@
  */
 
 export const approvalSubjectTypes = [
+  "ticket",           // ticket-level approvals (created by automation rules)
   "change_request",
   "service_request",
   "access_request",
@@ -15,10 +16,11 @@ export const approvalSubjectTypes = [
 export type ApprovalSubjectType = (typeof approvalSubjectTypes)[number];
 
 export const approvalSubjectTypeLabel: Record<ApprovalSubjectType, string> = {
-  change_request: "Change Request",
+  ticket:          "Ticket",
+  change_request:  "Change Request",
   service_request: "Service Request",
-  access_request: "Access Request",
-  policy_exception: "Policy Exception",
+  access_request:  "Access Request",
+  policy_exception:"Policy Exception",
 };
 
 // ── Status ─────────────────────────────────────────────────────────────────────

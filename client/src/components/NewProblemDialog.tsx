@@ -59,7 +59,7 @@ export default function NewProblemDialog({
     queryKey: ["agents"],
     queryFn: async () => {
       const { data } = await axios.get<{ agents: Agent[] }>("/api/agents");
-      return data;
+      return data.agents;
     },
     enabled: open,
   });
@@ -68,7 +68,7 @@ export default function NewProblemDialog({
     queryKey: ["teams"],
     queryFn: async () => {
       const { data } = await axios.get<{ teams: Team[] }>("/api/teams");
-      return data;
+      return data.teams;
     },
     enabled: open,
   });
@@ -206,7 +206,7 @@ export default function NewProblemDialog({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Unowned</SelectItem>
-                      {agentsData?.agents.map((a) => (
+                      {agentsData?.map((a) => (
                         <SelectItem key={a.id} value={a.id}>
                           {a.name}
                         </SelectItem>
@@ -231,7 +231,7 @@ export default function NewProblemDialog({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Unassigned</SelectItem>
-                      {agentsData?.agents.map((a) => (
+                      {agentsData?.map((a) => (
                         <SelectItem key={a.id} value={a.id}>
                           {a.name}
                         </SelectItem>
@@ -259,7 +259,7 @@ export default function NewProblemDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No team</SelectItem>
-                    {teamsData?.teams.map((t) => (
+                    {teamsData?.map((t) => (
                       <SelectItem key={t.id} value={String(t.id)}>
                         {t.name}
                       </SelectItem>

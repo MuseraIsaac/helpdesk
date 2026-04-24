@@ -399,10 +399,10 @@ export default function TicketDetailPage() {
   const composing = composeMode !== null;
   const viewers = usePresence(ticketIdNum, presenceEnabled && ticketIdNum > 0, composing);
 
-  // ── Follow state ──────────────────────────────────────────────────────────
+  // ── Watch state ──────────────────────────────────────────────────────────
   const queryClient = useQueryClient();
-  const { data: followStatus, refetch: refetchFollow } = useQuery({
-    queryKey: ["ticket-follow", id],
+  const { data: watchStatus, refetch: refetchWatch } = useQuery({
+    queryKey: ["ticket-watch", id],
     queryFn: async () => {
       const { data } = await axios.get<{ following: boolean }>(
         `/api/tickets/${id}/followers/me`
@@ -411,17 +411,17 @@ export default function TicketDetailPage() {
     },
     enabled: !!id,
   });
-  const following = followStatus?.following ?? false;
+  const watching = watchStatus?.following ?? false;
 
-  const toggleFollow = useMutation({
+  const toggleWatch = useMutation({
     mutationFn: async () => {
-      if (following) {
+      if (watching) {
         await axios.delete(`/api/tickets/${id}/followers`);
       } else {
         await axios.post(`/api/tickets/${id}/followers`);
       }
     },
-    onSuccess: () => refetchFollow(),
+    onSuccess: () => refetchWatch(),
   });
 
   // Unmerge: detach a child ticket from this parent (called from parent view)
@@ -498,30 +498,30 @@ export default function TicketDetailPage() {
                 <PresenceIndicator viewers={viewers} currentUserId={session.user.id} />
               )}
 
-              {/* Follow / Unfollow */}
+              {/* Watch / Unwatch */}
               <Button
                 type="button"
-                variant={following ? "default" : "outline"}
+                variant={watching ? "default" : "outline"}
                 size="sm"
                 className={[
                   "gap-1.5 h-8 transition-all",
-                  following
+                  watching
                     ? "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20 hover:border-primary/50 shadow-none"
                     : "",
                 ].join(" ")}
-                disabled={toggleFollow.isPending}
-                onClick={() => toggleFollow.mutate()}
-                title={following ? "Unfollow this ticket" : "Follow this ticket"}
+                disabled={toggleWatch.isPending}
+                onClick={() => toggleWatch.mutate()}
+                title={watching ? "Unwatch this ticket" : "Watch this ticket"}
               >
-                {following ? (
+                {watching ? (
                   <>
                     <BellOff className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Following</span>
+                    <span className="hidden sm:inline">Watching</span>
                   </>
                 ) : (
                   <>
                     <Bell className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Follow</span>
+                    <span className="hidden sm:inline">Watch</span>
                   </>
                 )}
               </Button>

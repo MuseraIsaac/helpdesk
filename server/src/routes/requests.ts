@@ -24,6 +24,7 @@ import { createApproval } from "../lib/approval-engine";
 import { syncServiceRequestToTicket } from "../lib/ticket-sync";
 import { notifyEntityFollowers } from "../lib/notify-entity-followers";
 import { applyEscalationRules } from "../lib/apply-escalation-rules";
+import { fireRequestEvent } from "../lib/event-bus";
 import prisma from "../db";
 import type { Prisma, TicketPriority } from "../generated/prisma/client";
 
@@ -313,6 +314,9 @@ router.post(
       });
     }
 
+    // Fire request.created event for event_workflow rules
+    fireRequestEvent("request.created", request.id, req.user.id);
+
     res.status(201).json(request);
   }
 );
@@ -458,6 +462,15 @@ router.patch(
         toStatus:     data.status,
         entityUrl:    `/requests/${id}`,
       });
+    }
+
+    // Fire event_workflow events for request state changes
+    if (data.status && data.status !== current.status) {
+      const trigger =
+        data.status === "approved"  ? "request.approved"  :
+        data.status === "rejected"  ? "request.rejected"  :
+        "request.status_changed";
+      fireRequestEvent(trigger as any, id, req.user.id, { status: current.status });
     }
 
     // Back-sync relevant changes to the linked source ticket (fire-and-forget)

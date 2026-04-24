@@ -197,19 +197,94 @@
   opacity: 0.8;
 }
 
-/* Dark mode overrides */
+/* ── Dark mode — @mention chip ───────────────────────────────────────────── */
+/* Applied via both class (.dark) and media query so either theming method works */
+
 @media (prefers-color-scheme: dark) {
   .rte-body .rte-mention,
   .rte-content .ProseMirror .rte-mention {
-    background: hsl(239 84% 67% / 0.18);
-    border-color: hsl(239 84% 67% / 0.35);
+    background: linear-gradient(135deg, hsl(265 75% 16% / 0.92), hsl(242 75% 20% / 0.92));
+    border-color: hsl(263 80% 65% / 0.45);
+    box-shadow:
+      0 0 0 1px hsl(263 80% 65% / 0.15),
+      0 0 12px hsl(263 80% 60% / 0.25),
+      inset 0 1px 0 hsl(263 80% 80% / 0.08);
   }
   .rte-body .rte-mention-name,
   .rte-content .ProseMirror .rte-mention-name {
-    color: hsl(239 84% 75%);
+    color: hsl(265 90% 82%);
+    text-shadow: 0 0 10px hsl(265 90% 72% / 0.55);
   }
   .rte-body .rte-mention-email,
   .rte-content .ProseMirror .rte-mention-email {
-    color: hsl(239 84% 68%);
+    color: hsl(252 65% 72%);
+    opacity: 0.9;
   }
+}
+
+/* Same styles via class-based dark mode (shadcn / next-themes) */
+.dark .rte-body .rte-mention,
+.dark .rte-content .ProseMirror .rte-mention {
+  background: linear-gradient(135deg, hsl(265 75% 16% / 0.92), hsl(242 75% 20% / 0.92));
+  border-color: hsl(263 80% 65% / 0.45);
+  box-shadow:
+    0 0 0 1px hsl(263 80% 65% / 0.15),
+    0 0 12px hsl(263 80% 60% / 0.25),
+    inset 0 1px 0 hsl(263 80% 80% / 0.08);
+}
+.dark .rte-body .rte-mention-name,
+.dark .rte-content .ProseMirror .rte-mention-name {
+  color: hsl(265 90% 82%);
+  text-shadow: 0 0 10px hsl(265 90% 72% / 0.55);
+}
+.dark .rte-body .rte-mention-email,
+.dark .rte-content .ProseMirror .rte-mention-email {
+  color: hsl(252 65% 72%);
+  opacity: 0.9;
+}
+
+/* ── Dark mode — mention suggestion dropdown ─────────────────────────────── */
+
+@media (prefers-color-scheme: dark) {
+  .mention-list-container {
+    background: linear-gradient(160deg, hsl(240 18% 9%), hsl(258 22% 11%));
+    border-color: hsl(263 60% 55% / 0.3) !important;
+    box-shadow:
+      0 8px 32px hsl(263 60% 15% / 0.7),
+      0 0 0 1px hsl(263 60% 55% / 0.18),
+      inset 0 1px 0 hsl(263 80% 70% / 0.06);
+  }
+  .mention-list-container .mention-item-selected {
+    background: linear-gradient(90deg, hsl(263 70% 55% / 0.22), hsl(242 70% 55% / 0.14));
+    box-shadow: inset 3px 0 0 hsl(263 80% 70%);
+  }
+  .mention-list-container .mention-avatar-selected {
+    background: linear-gradient(135deg, hsl(263 80% 55%), hsl(242 80% 60%));
+    box-shadow: 0 0 8px hsl(263 80% 60% / 0.5);
+  }
+  .mention-list-container .mention-avatar-default {
+    background: hsl(263 60% 55% / 0.18);
+    box-shadow: 0 0 0 1px hsl(263 60% 65% / 0.2);
+  }
+}
+
+.dark .mention-list-container {
+  background: linear-gradient(160deg, hsl(240 18% 9%), hsl(258 22% 11%));
+  border-color: hsl(263 60% 55% / 0.3) !important;
+  box-shadow:
+    0 8px 32px hsl(263 60% 15% / 0.7),
+    0 0 0 1px hsl(263 60% 55% / 0.18),
+    inset 0 1px 0 hsl(263 80% 70% / 0.06);
+}
+.dark .mention-list-container .mention-item-selected {
+  background: linear-gradient(90deg, hsl(263 70% 55% / 0.22), hsl(242 70% 55% / 0.14));
+  box-shadow: inset 3px 0 0 hsl(263 80% 70%);
+}
+.dark .mention-list-container .mention-avatar-selected {
+  background: linear-gradient(135deg, hsl(263 80% 55%), hsl(242 80% 60%));
+  box-shadow: 0 0 8px hsl(263 80% 60% / 0.5);
+}
+.dark .mention-list-container .mention-avatar-default {
+  background: hsl(263 60% 55% / 0.18);
+  box-shadow: 0 0 0 1px hsl(263 60% 65% / 0.2);
 }

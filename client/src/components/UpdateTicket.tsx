@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { type Ticket } from "core/constants/ticket.ts";
@@ -13,6 +13,7 @@ import { ticketSeverities, severityLabel } from "core/constants/ticket-severity.
 import { ticketImpacts, impactLabel } from "core/constants/ticket-impact.ts";
 import { ticketUrgencies, urgencyLabel } from "core/constants/ticket-urgency.ts";
 import SearchableSelect from "@/components/SearchableSelect";
+import EscalateDialog from "@/components/EscalateDialog";
 
 // ── Colour maps ───────────────────────────────────────────────────────────────
 
@@ -121,12 +122,13 @@ function AffectedSystemInput({ ticket, onSave }: { ticket: Ticket; onSave: (val:
 
 export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
   const queryClient = useQueryClient();
+  const [escalateDialogOpen, setEscalateDialogOpen] = useState(false);
 
   const { data: agentsData } = useQuery({
     queryKey: ["agents"],
     queryFn: async () => {
       const { data } = await axios.get<{ agents: Agent[] }>("/api/agents");
-      return data;
+      return data.agents;
     },
   });
 
@@ -167,7 +169,7 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
   const availableAgents: Agent[] =
     selectedTeam && selectedTeam.members.length > 0
       ? selectedTeam.members
-      : agentsData?.agents ?? [];
+      : agentsData ?? [];
 
   function handleTeamChange(value: string) {
     const newTeamId = value === "none" ? null : Number(value);
@@ -388,31 +390,67 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
           )}
         </FieldRow>
 
-        <div className="pt-1 border-t border-border/40">
+        <div className="pt-1 border-t border-border/40 space-y-2">
           {ticket.isEscalated ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full gap-1.5 text-muted-foreground"
-              disabled={updateMutation.isPending}
-              onClick={() => updateMutation.mutate({ escalate: false })}
-            >
-              <CheckCircle className="h-3.5 w-3.5" />
-              De-escalate
-            </Button>
+            <>
+              {/* Escalation target summary */}
+              {(ticket.escalatedToTeam || ticket.escalatedToUser) && (
+                <div className="rounded-lg bg-destructive/5 border border-destructive/20 px-3 py-2 text-xs space-y-0.5">
+                  <p className="font-semibold text-destructive text-[10px] uppercase tracking-wider mb-1">Escalated to</p>
+                  {ticket.escalatedToTeam && (
+                    <p className="text-muted-foreground flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: ticket.escalatedToTeam.color }} />
+                      {ticket.escalatedToTeam.name}
+                    </p>
+                  )}
+                  {ticket.escalatedToUser && (
+                    <p className="text-muted-foreground flex items-center gap-1.5">
+                      <span className="h-4 w-4 rounded-full bg-primary/10 text-primary text-[9px] font-bold flex items-center justify-center shrink-0">
+                        {ticket.escalatedToUser.name.charAt(0)}
+                      </span>
+                      {ticket.escalatedToUser.name}
+                    </p>
+                  )}
+                </div>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-1.5 text-muted-foreground"
+                disabled={updateMutation.isPending}
+                onClick={() => updateMutation.mutate({ escalate: false })}
+              >
+                <CheckCircle className="h-3.5 w-3.5" />
+                De-escalate
+              </Button>
+            </>
           ) : (
             <Button
               variant="outline"
               size="sm"
               className="w-full gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/5 hover:text-destructive hover:border-destructive/50"
               disabled={updateMutation.isPending}
-              onClick={() => updateMutation.mutate({ escalate: true })}
+              onClick={() => setEscalateDialogOpen(true)}
             >
               <AlertTriangle className="h-3.5 w-3.5" />
               Escalate
             </Button>
           )}
         </div>
+
+        {/* Escalation dialog */}
+        <EscalateDialog
+          open={escalateDialogOpen}
+          ticketSubject={ticket.subject}
+          onClose={() => setEscalateDialogOpen(false)}
+          isPending={updateMutation.isPending}
+          onConfirm={({ escalateToTeamId, escalateToUserId }) => {
+            updateMutation.mutate(
+              { escalate: true, escalateToTeamId, escalateToUserId } as Parameters<typeof updateMutation.mutate>[0],
+              { onSuccess: () => setEscalateDialogOpen(false) },
+            );
+          }}
+        />
       </SidebarSection>
 
       {/* ── Dates ── */}

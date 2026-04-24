@@ -15,6 +15,7 @@ import {
 } from "../lib/approval-engine";
 import { fireApprovalHook } from "../lib/approval-hooks";
 import { getSection } from "../lib/settings";
+import { fireChangeEvent, fireRequestEvent } from "../lib/event-bus";
 import prisma from "../db";
 import Sentry from "../lib/sentry";
 
@@ -288,12 +289,26 @@ router.post(
       approvalMeta &&
       finalStatuses.includes(result.requestStatus as (typeof finalStatuses)[number])
     ) {
+      const outcome = result.requestStatus as "approved" | "rejected";
+
       void fireApprovalHook(
         approvalMeta.subjectType,
         id,
         approvalMeta.subjectId,
-        result.requestStatus as "approved" | "rejected"
+        outcome,
       );
+
+      // Fire entity-specific event_workflow events on approval outcome
+      if (approvalMeta.subjectType === "change" && approvalMeta.subjectId) {
+        const trigger = outcome === "approved" ? "change.approved" : "change.rejected";
+        fireChangeEvent(trigger as any, Number(approvalMeta.subjectId), req.user.id);
+      } else if (
+        (approvalMeta.subjectType === "service_request" || approvalMeta.subjectType === "request") &&
+        approvalMeta.subjectId
+      ) {
+        const trigger = outcome === "approved" ? "request.approved" : "request.rejected";
+        fireRequestEvent(trigger as any, Number(approvalMeta.subjectId), req.user.id);
+      }
     }
 
     const updated = await prisma.approvalRequest.findUnique({

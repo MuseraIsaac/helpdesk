@@ -193,7 +193,6 @@ function RequestApprovalDialog({ open, onClose, changeId, onSuccess }: RequestAp
       onSuccess();
       onClose();
       setSelectedIds([]);
-      setMode("all");
       setSubmitError(null);
     },
     onError: (err: unknown) => {

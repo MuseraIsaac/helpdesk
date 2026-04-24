@@ -47,7 +47,7 @@ export default function NewRequestDialog() {
     queryKey: ["agents"],
     queryFn: async () => {
       const { data } = await axios.get<{ agents: Agent[] }>("/api/agents");
-      return data;
+      return data.agents;
     },
     enabled: open,
   });
@@ -56,7 +56,7 @@ export default function NewRequestDialog() {
     queryKey: ["teams"],
     queryFn: async () => {
       const { data } = await axios.get<{ teams: Team[] }>("/api/teams");
-      return data;
+      return data.teams;
     },
     enabled: open,
   });
@@ -199,7 +199,7 @@ export default function NewRequestDialog() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Unassigned</SelectItem>
-                      {agentsData?.agents.map((a) => (
+                      {agentsData?.map((a) => (
                         <SelectItem key={a.id} value={a.id}>
                           {a.name}
                         </SelectItem>
@@ -224,7 +224,7 @@ export default function NewRequestDialog() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">No team</SelectItem>
-                      {teamsData?.teams.map((t) => (
+                      {teamsData?.map((t) => (
                         <SelectItem key={t.id} value={String(t.id)}>
                           {t.name}
                         </SelectItem>
@@ -335,7 +335,7 @@ export default function NewRequestDialog() {
                   control={control}
                   render={({ field }) => (
                     <div className="space-y-1">
-                      {agentsData?.agents.map((a) => {
+                      {agentsData?.map((a) => {
                         const selected = field.value?.includes(a.id) ?? false;
                         return (
                           <label

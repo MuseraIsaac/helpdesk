@@ -75,7 +75,7 @@ export default function NewTicketDialog() {
     queryKey: ["agents"],
     queryFn: async () => {
       const { data } = await axios.get<{ agents: Agent[] }>("/api/agents");
-      return data;
+      return data.agents;
     },
     enabled: open,
   });
@@ -298,7 +298,7 @@ export default function NewTicketDialog() {
                     placeholder="Unassigned"
                     options={[
                       { value: "unassigned", label: "Unassigned" },
-                      ...(agentsData?.agents ?? []).map((a) => ({ value: a.id, label: a.name })),
+                      ...(agentsData ?? []).map((a) => ({ value: a.id, label: a.name })),
                     ]}
                   />
                 )}

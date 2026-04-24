@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Toaster } from "sonner";
 import { Navigate, Route, Routes } from "react-router";
 import { useBranding } from "@/lib/useBranding";
+import { useMe } from "@/hooks/useMe";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
 import CustomerRoute from "./components/CustomerRoute";
@@ -34,6 +35,11 @@ import ProblemDetailPage from "./pages/ProblemDetailPage";
 import ProfilePage from "./pages/ProfilePage";
 import SettingsPage from "./pages/SettingsPage";
 import ScenariosPage from "./pages/ScenariosPage";
+import AutomationPlatformPage from "./pages/automations/AutomationPlatformPage";
+import AutomationRuleFormPage from "./pages/automations/AutomationRuleFormPage";
+import AutomationExecutionsPage from "./pages/automations/AutomationExecutionsPage";
+import OutboundWebhooksPage from "./pages/automations/OutboundWebhooksPage";
+import RoutingConfigPage from "./pages/automations/RoutingConfigPage";
 import ChangesPage from "./pages/ChangesPage";
 import ChangeDetailPage from "./pages/ChangeDetailPage";
 import NewChangePage from "./pages/NewChangePage";
@@ -93,6 +99,21 @@ import AssetsReport      from "./pages/reports/AssetsReport";
 import InsightsReport    from "./pages/reports/InsightsReport";
 import DemoDataPage      from "./pages/DemoDataPage";
 import TrashPage         from "./pages/TrashPage";
+import DutyPlanPage      from "./pages/DutyPlanPage";
+import DutyPlanTeamPage  from "./pages/DutyPlanTeamPage";
+import DutyPlanDetailPage from "./pages/DutyPlanDetailPage";
+
+/**
+ * Redirects "/" to the user's preferred landing page.
+ * Falls back to the overview/home if no preference is set or while loading.
+ */
+function DefaultLandingRoute() {
+  const { data, isLoading } = useMe();
+  if (isLoading) return null;
+  const landing = data?.user?.preference?.defaultDashboard;
+  if (landing === "tickets") return <Navigate to="/tickets" replace />;
+  return <HomePage />;
+}
 
 /**
  * Injects the browser favicon from branding settings.
@@ -126,7 +147,7 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
-          <Route path="/" element={<HomePage />} />
+          <Route path="/" element={<DefaultLandingRoute />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/tickets" element={<TicketsPage />} />
           <Route path="/tickets/new" element={<NewTicketPage />} />
@@ -144,6 +165,10 @@ function App() {
           <Route path="/changes/new" element={<NewChangePage />} />
           <Route path="/changes/:id" element={<ChangeDetailPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
+          {/* Duty Plans */}
+          <Route path="/duty-plans" element={<DutyPlanPage />} />
+          <Route path="/duty-plans/:teamId" element={<DutyPlanTeamPage />} />
+          <Route path="/duty-plans/:teamId/:planId" element={<DutyPlanDetailPage />} />
           <Route path="/cmdb" element={<CmdbPage />} />
           <Route path="/cmdb/:id" element={<CmdbDetailPage />} />
           <Route path="/catalog" element={<CatalogPage />} />
@@ -179,7 +204,15 @@ function App() {
             <Route path="/admin/ticket-types" element={<TicketTypesPage />} />
             <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
             <Route path="/admin/trash" element={<TrashPage />} />
-            <Route path="/automations" element={<ScenariosPage />} />
+            {/* Automation Platform */}
+            <Route path="/automations" element={<AutomationPlatformPage />} />
+            <Route path="/automations/rules/new" element={<AutomationRuleFormPage />} />
+            <Route path="/automations/rules/:id" element={<AutomationRuleFormPage />} />
+            <Route path="/automations/executions" element={<AutomationExecutionsPage />} />
+            <Route path="/automations/webhooks" element={<OutboundWebhooksPage />} />
+            <Route path="/automations/routing" element={<RoutingConfigPage />} />
+            {/* Legacy scenarios — kept for backward compatibility */}
+            <Route path="/automations/scenarios" element={<ScenariosPage />} />
             <Route path="/catalog/admin" element={<CatalogAdminPage />} />
             <Route path="/demo-data" element={<DemoDataPage />} />
           </Route>

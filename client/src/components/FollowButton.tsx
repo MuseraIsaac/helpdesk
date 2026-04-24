@@ -1,49 +1,49 @@
 /**
- * FollowButton — reusable follow/unfollow toggle for any ITSM entity.
+ * WatchButton — reusable watch/unwatch toggle for any ITSM entity.
  *
- * Shows a Bell icon when not following and BellOff when following.
- * Passes the entityPath and entityId through to useEntityFollow.
+ * Shows a Bell icon when not watching and BellOff when watching.
+ * Passes the entityPath and entityId through to useEntityWatch.
  */
 
 import { Bell, BellOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useEntityFollow, type FollowableEntity } from "@/hooks/useEntityFollow";
+import { useEntityWatch, type WatchableEntity } from "@/hooks/useEntityFollow";
 
-interface FollowButtonProps {
-  entityPath: FollowableEntity;
+interface WatchButtonProps {
+  entityPath: WatchableEntity;
   entityId:   number;
   /** Optional extra className applied to the Button */
   className?: string;
 }
 
-export default function FollowButton({ entityPath, entityId, className = "" }: FollowButtonProps) {
-  const { following, isPending, toggle } = useEntityFollow(entityPath, entityId);
+export default function WatchButton({ entityPath, entityId, className = "" }: WatchButtonProps) {
+  const { watching, isPending, toggle } = useEntityWatch(entityPath, entityId);
 
   return (
     <Button
       type="button"
-      variant={following ? "default" : "outline"}
+      variant={watching ? "default" : "outline"}
       size="sm"
       className={[
         "gap-1.5 h-8 transition-all",
-        following
+        watching
           ? "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20 hover:border-primary/50 shadow-none"
           : "",
         className,
       ].join(" ")}
       disabled={isPending || entityId === 0}
       onClick={toggle}
-      title={following ? "Unfollow — stop receiving status notifications" : "Follow — get notified on status changes"}
+      title={watching ? "Unwatch — stop receiving status notifications" : "Watch — get notified on status changes"}
     >
-      {following ? (
+      {watching ? (
         <>
           <BellOff className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Following</span>
+          <span className="hidden sm:inline">Watching</span>
         </>
       ) : (
         <>
           <Bell className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Follow</span>
+          <span className="hidden sm:inline">Watch</span>
         </>
       )}
     </Button>

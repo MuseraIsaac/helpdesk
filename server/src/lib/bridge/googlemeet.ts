@@ -58,8 +58,17 @@ export class GoogleMeetBridgeProvider implements BridgeProvider {
     });
 
     if (!res.ok) {
-      const body = await res.text();
-      throw new BridgeError("googlemeet", `Token refresh failed (${res.status}): ${body}`);
+      let body = await res.text();
+      // Parse Google's JSON error response for a friendlier message
+      try {
+        const parsed = JSON.parse(body) as { error?: string; error_description?: string };
+        if (parsed.error) {
+          body = parsed.error_description
+            ? `${parsed.error} — ${parsed.error_description}`
+            : parsed.error;
+        }
+      } catch { /* leave body as-is if not JSON */ }
+      throw new BridgeError("googlemeet", `Token refresh failed (HTTP ${res.status}): ${body}`);
     }
 
     const data = (await res.json()) as GoogleTokenResponse;
@@ -67,12 +76,10 @@ export class GoogleMeetBridgeProvider implements BridgeProvider {
   }
 
   async createMeeting(title: string): Promise<BridgeMeeting> {
-    let token: string;
-    try {
-      token = await this.getToken();
-    } catch (e) {
-      throw new BridgeError("googlemeet", "Failed to refresh Google access token", e);
-    }
+    // Let the BridgeError from getToken() propagate as-is — it already contains
+    // the Google error body (e.g. "invalid_grant", "invalid_client") which is
+    // far more useful to the user than a generic wrapper message.
+    const token = await this.getToken();
 
     const now     = new Date();
     const endTime = new Date(now.getTime() + 8 * 60 * 60 * 1000);

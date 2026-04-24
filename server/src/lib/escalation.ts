@@ -41,9 +41,11 @@ const ACTIVE_CHANNELS: EscalationChannel[] = [];
  *          escalated for this exact reason (idempotent guard).
  */
 export async function escalateTicket(
-  ticketId: number,
-  reason: EscalationReason,
-  actorId: string | null = null
+  ticketId:          number,
+  reason:            EscalationReason,
+  actorId:           string | null = null,
+  escalateToTeamId?: number | null,
+  escalateToUserId?: string | null,
 ): Promise<boolean> {
   // Idempotency check — one event per (ticket, reason)
   const existing = await prisma.escalationEvent.findFirst({
@@ -66,13 +68,24 @@ export async function escalateTicket(
       where: { id: ticketId },
       data: {
         isEscalated: true,
+        status: "escalated",
         // Only stamp the first escalation — history goes in escalationEvents
         ...(isFirstEscalation && { escalatedAt: now, escalationReason: reason }),
+        // Track who this was escalated to (manual escalations only)
+        ...(escalateToTeamId != null && { escalatedToTeamId: escalateToTeamId }),
+        ...(escalateToUserId != null && { escalatedToUserId: escalateToUserId }),
+        // Auto-assign to the escalation target if set
+        ...(escalateToUserId != null && { assignedToId: escalateToUserId }),
+        ...(escalateToTeamId != null && { teamId: escalateToTeamId }),
       },
     }),
   ]);
 
-  void logAudit(ticketId, actorId, "ticket.escalated", { reason });
+  void logAudit(ticketId, actorId, "ticket.escalated", {
+    reason,
+    ...(escalateToTeamId && { escalatedToTeamId: escalateToTeamId }),
+    ...(escalateToUserId && { escalatedToUserId: escalateToUserId }),
+  });
 
   // Fire-and-forget notification channels (errors are logged, not thrown)
   for (const channel of ACTIVE_CHANNELS) {
@@ -97,7 +110,12 @@ export async function escalateTicket(
 export async function deescalateTicket(ticketId: number): Promise<void> {
   await prisma.ticket.update({
     where: { id: ticketId },
-    data: { isEscalated: false },
+    data: {
+      isEscalated:      false,
+      status:           "in_progress",
+      escalatedToTeamId: null,
+      escalatedToUserId: null,
+    },
   });
 }
 

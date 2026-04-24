@@ -50,8 +50,8 @@ export interface SettingsSectionMeta {
 export const settingsSectionMeta: Record<SettingsSection, SettingsSectionMeta> = {
   general: {
     label: "General",
-    description: "Organisation name, support email, default locale and time format",
-    keywords: ["name", "email", "timezone", "language", "locale", "date", "time"],
+    description: "Organisation name, support email, inbound email, and locale defaults",
+    keywords: ["name", "email", "inbound", "support inbox", "timezone", "language", "locale", "date", "time"],
   },
   branding: {
     label: "Branding",
@@ -177,6 +177,11 @@ export const settingsSectionMeta: Record<SettingsSection, SettingsSectionMeta> =
 export const generalSettingsSchema = z.object({
   helpdeskName:   z.string().min(1).max(100).default("Zentra"),
   supportEmail:   z.string().default(""),
+  /**
+   * The inbound support email address customers send tickets to.
+   * Configure this address in SendGrid Inbound Parse to forward to the webhook.
+   */
+  inboundEmail:   z.string().default(""),
   timezone:       z.string().default("UTC"),
   language:       z.string().default("en"),
   dateFormat:     z.string().default("MMM d, yyyy"),
@@ -306,6 +311,24 @@ export const appearanceSettingsSchema = z.object({
   customSidebarDarkColor:  z.string().default(""),
 });
 
+// ── Inbound mailbox ───────────────────────────────────────────────────────────
+
+export const mailboxSchema = z.object({
+  /** Client-generated UUID, stable across edits */
+  id:              z.string().min(1),
+  /** The email address customers send to (e.g. billing@acme.io) */
+  address:         z.string().email("Must be a valid email address").toLowerCase(),
+  /** Friendly display label shown in the UI (e.g. "Billing Support") */
+  label:           z.string().trim().min(1, "Label is required").max(100),
+  /** Auto-assign tickets arriving at this mailbox to this team (DB team id) */
+  teamId:          z.number().int().nullable().default(null),
+  /** Default priority applied to tickets arriving at this mailbox */
+  defaultPriority: z.enum(["low", "medium", "high", "urgent"]).nullable().default(null),
+  isActive:        z.boolean().default(true),
+});
+
+export type Mailbox = z.infer<typeof mailboxSchema>;
+
 export const VIDEO_BRIDGE_PROVIDERS = ["none", "teams", "googlemeet", "zoom", "webex"] as const;
 export type VideoBridgeProvider = (typeof VIDEO_BRIDGE_PROVIDERS)[number];
 
@@ -327,6 +350,9 @@ export const integrationsSettingsSchema = z.object({
   // ── AI / OpenAI ────────────────────────────────────────────────────────────
   openaiApiKey:       z.string().default(""),   // server-only
   openaiModel:        z.string().default("gpt-4o-mini"),
+  // ── Inbound mailboxes ──────────────────────────────────────────────────────
+  /** Additional inbound email addresses that create tickets when emailed. */
+  mailboxes: z.array(mailboxSchema).default([]),
   // ── Video Bridge (Incident Bridge Calls) ───────────────────────────────────
   // The active provider. Only one can be active at a time.
   videoBridgeProvider: z.enum(VIDEO_BRIDGE_PROVIDERS).default("none"),

@@ -45,9 +45,17 @@ export function useUpdateSettings<S extends SettingsSection>(section: S) {
   const queryClient = useQueryClient();
   return useMutation<SectionData<S>, Error, Partial<SectionData<S>>>({
     mutationFn: async (body) => {
-      const { data } = await axios.put<{ data: SectionData<S> }>(
+      // Strip NaN values — number inputs with valueAsNumber produce NaN when cleared.
+      // JSON.stringify converts NaN to null; the replacer here converts NaN to undefined
+      // so those keys are omitted entirely, letting the server merge with stored values.
+      const clean = JSON.parse(
+        JSON.stringify(body, (_key, val) =>
+          typeof val === "number" && isNaN(val) ? undefined : val
+        )
+      );
+      const { data } = await axios.put<{ section: string; data: SectionData<S> }>(
         `/api/settings/${section}`,
-        body
+        clean
       );
       return data.data;
     },

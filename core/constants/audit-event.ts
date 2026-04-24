@@ -25,8 +25,9 @@ export const auditActions = [
   // Collaboration
   "reply.created",
   "note.created",
-  // Automation
+  // Automation / intake routing
   "rule.applied",
+  "ticket.intake_suppressed",
   // Workflow engine
   "workflow.executed",
   "workflow.failed",

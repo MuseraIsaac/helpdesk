@@ -26,6 +26,7 @@ enum TicketStatus {
   processing
   open
   in_progress
+  escalated
   resolved
   closed
 }
@@ -137,6 +138,7 @@ model User {
   uploadedAttachments Attachment[]
   teamMemberships     TeamMember[]
   preference          UserPreference?
+  capacityProfile     AgentCapacityProfile?
   dashboards          DashboardConfig[]
   savedTicketViews    SavedTicketView[]
   savedAssetViews     SavedAssetView[]
@@ -181,6 +183,10 @@ model User {
   // Scenario automations
   scenariosCreated      ScenarioDefinition[] @relation("ScenarioCreatedBy")
   scenarioExecutions    ScenarioExecution[]  @relation("ScenarioInvokedBy")
+  // Enterprise Automation Platform
+  automationRulesCreated  AutomationRule[]   @relation("AutomationRuleCreatedBy")
+  automationRulesUpdated  AutomationRule[]   @relation("AutomationRuleUpdatedBy")
+  outboundWebhooksCreated OutboundWebhook[]  @relation("OutboundWebhookCreatedBy")
   // Change Management relations
   changesAssigned       Change[]             @relation("ChangeAssignee")
   changesCreated        Change[]             @relation("ChangeCreatedBy")
@@ -224,6 +230,12 @@ model User {
   saasSubscriptionsCreated SaaSSubscription[]   @relation("SaaSSubscriptionCreatedBy")
   saasUserAssignments      SaaSUserAssignment[] @relation("SaaSUserAssignmentUser")
   saasUserAssignmentsGiven SaaSUserAssignment[] @relation("SaaSUserAssignmentBy")
+  escalatedTickets         Ticket[]             @relation("EscalatedToUser")
+  // Duty Plan relations
+  dutyPlansCreated         DutyPlan[]           @relation("DutyPlanCreatedBy")
+  dutyAssignments          DutyAssignment[]     @relation("DutyAssignmentAgent")
+  dutyPlanRoles            DutyPlanRole[]       @relation("DutyPlanRoleUser")
+  dutyPlanRolesGranted     DutyPlanRole[]       @relation("DutyPlanRoleGrantedBy")
 
   @@map("user")
 }
@@ -405,6 +417,19 @@ model Ticket {
   // Email threading: Message-ID header from the original inbound email.
   // Used to set In-Reply-To / References when sending agent replies.
   emailMessageId String?
+  // Time-supervisor tracking — stamped at activity points for efficient supervisor scanning
+  lastAgentReplyAt    DateTime? @map("last_agent_reply_at")    // most recent agent reply timestamp
+  lastCustomerReplyAt DateTime? @map("last_customer_reply_at") // most recent customer reply timestamp
+  statusChangedAt     DateTime? @map("status_changed_at")      // when status was last changed
+  // Intake routing — populated from inbound email headers at creation time
+  emailTo        String?  @map("email_to")        // To: header (recipient mailbox address)
+  emailCc        String?  @map("email_cc")         // CC: header (comma-separated raw value)
+  emailReplyTo   String?  @map("email_reply_to")   // Reply-To: header
+  isAutoReply    Boolean  @default(false) @map("is_auto_reply")   // X-Auto-Submitted / Auto-Submitted detection
+  isBounce       Boolean  @default(false) @map("is_bounce")       // delivery failure / NDR detection
+  isSpam         Boolean  @default(false) @map("is_spam")         // marked spam by intake rule
+  isQuarantined  Boolean  @default(false) @map("is_quarantined")  // held for manual review
+  mailboxAlias   String?  @map("mailbox_alias")    // human-readable mailbox alias (e.g. "support", "billing")
   // Channel that created this ticket: "email", "portal", "agent", or null for legacy rows.
   source         String?
   createdAt    DateTime        @default(now())
@@ -431,6 +456,11 @@ model Ticket {
   // First reason that triggered escalation (subsequent reasons go in escalationEvents only)
   escalationReason    EscalationReason?
   escalationEvents    EscalationEvent[]
+  // Manual escalation targets — the team/agent the ticket was escalated to
+  escalatedToTeamId   Int?               @map("escalated_to_team_id")
+  escalatedToTeam     Team?              @relation("EscalatedToTeam", fields: [escalatedToTeamId], references: [id], onDelete: SetNull)
+  escalatedToUserId   String?            @map("escalated_to_user_id")
+  escalatedToUser     User?              @relation("EscalatedToUser", fields: [escalatedToUserId], references: [id], onDelete: SetNull)
 
   notes               Note[]
   auditEvents         AuditEvent[]
@@ -468,6 +498,9 @@ model Ticket {
   deletedByName String?   @map("deleted_by_name")
 
   @@index([deletedAt])
+  @@index([status, updatedAt])
+  @@index([lastAgentReplyAt])
+  @@index([lastCustomerReplyAt])
   @@map("ticket")
 }
 
@@ -1036,6 +1069,7 @@ model Team {
   name        String       @unique
   description String?
   color       String       @default("#6366f1")
+  email       String?      @unique
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   tickets          Ticket[]
@@ -1051,6 +1085,11 @@ model Team {
   scenarioVisibility ScenarioDefinition[] @relation("ScenarioVisibilityTeam")
   savedReports       SavedReport[]        @relation("SavedReportTeam")
   assets             Asset[]
+  escalatedTickets   Ticket[]            @relation("EscalatedToTeam")
+
+  routingConfig    TeamRoutingConfig?
+  dutyPlans        DutyPlan[]
+  dutyPlanRoles    DutyPlanRole[]
 
   @@map("queue")
 }
@@ -1063,6 +1102,94 @@ model TeamMember {
 
   @@id([teamId, userId])
   @@map("queue_member")
+}
+
+// ── Assignment & Capacity Routing ─────────────────────────────────────────────
+
+/**
+ * AgentCapacityProfile — per-agent routing preferences and capacity settings.
+ *
+ * Used by the assignment routing service to filter eligible agents before
+ * applying the team's routing strategy.
+ *
+ * skills / languages: free-form string arrays (e.g. ["billing", "enterprise"]).
+ * shiftDays: ISO weekday numbers — 1=Mon … 7=Sun. Empty = available all days.
+ * weight: used for weighted round-robin (1 = standard, 10 = 10× the share).
+ */
+model AgentCapacityProfile {
+  userId               String   @id @map("user_id")
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isAvailable          Boolean  @default(true)  @map("is_available")
+  maxConcurrentTickets Int      @default(10)    @map("max_concurrent_tickets")
+  skills               String[] @default([])
+  languages            String[] @default([])
+  timezone             String   @default("UTC")
+  shiftStart           String?  @map("shift_start")  // "09:00" (local time in agent timezone)
+  shiftEnd             String?  @map("shift_end")    // "17:00"
+  shiftDays            Int[]    @default([1,2,3,4,5]) @map("shift_days") // 1=Mon…7=Sun
+  weight               Int      @default(1)           // 1–10 for weighted round-robin
+  notes                String?  // admin notes about this agent's routing preferences
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@index([isAvailable])
+  @@map("agent_capacity_profile")
+}
+
+/**
+ * TeamRoutingConfig — declarative routing strategy for each team/inbox.
+ *
+ * strategy values:
+ *   round_robin   — distribute evenly; ignores load (default)
+ *   weighted_rr   — distribute proportionally to agent weight
+ *   least_loaded  — assign to agent with fewest open records
+ *   skill_based   — rank by skill match score; tie-break by load
+ *   manual        — do not auto-assign; only apply team assignment
+ *
+ * skillMatchMode values:
+ *   none          — skip skill filtering entirely
+ *   preferred     — prefer agents with matching skills; don't exclude others
+ *   required      — only assign to agents who have at least one required skill
+ */
+model TeamRoutingConfig {
+  teamId           Int      @id @map("queue_id")
+  team             Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  strategy         String   @default("round_robin") @map("strategy")
+  respectCapacity  Boolean  @default(true)  @map("respect_capacity")  // skip agents at maxConcurrentTickets
+  respectShifts    Boolean  @default(false) @map("respect_shifts")    // skip off-shift agents
+  skillMatchMode   String   @default("none") @map("skill_match_mode") // "none"|"preferred"|"required"
+  fallbackAgentId  String?  @map("fallback_agent_id")  // used when no eligible agent found in team
+  fallbackTeamId   Int?     @map("fallback_team_id")   // overflow to another team (full team transfer)
+  overflowAt       Int?     @map("overflow_at")         // avg open tickets per agent — trigger overflow
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("team_routing_config")
+}
+
+/**
+ * RoutingDecision — immutable audit log of every assignment routing decision.
+ *
+ * Written by the routing service on every `assign_smart`, `assign_by_skill`,
+ * `assign_round_robin`, and `assign_least_loaded` call.
+ */
+model RoutingDecision {
+  id              Int      @id @default(autoincrement())
+  ticketId        Int      @map("ticket_id")
+  teamId          Int      @map("team_id")
+  strategy        String                          // strategy that was applied
+  candidateCount  Int      @map("candidate_count") // agents considered before filtering
+  eligibleCount   Int      @map("eligible_count")  // agents after filtering
+  selectedAgentId String?  @map("selected_agent_id")
+  reason          String                          // human-readable decision rationale
+  skillsRequired  String[] @map("skills_required") // skills requested for this routing call
+  fallbackUsed    Boolean  @default(false) @map("fallback_used")
+  overflowUsed    Boolean  @default(false) @map("overflow_used")
+  durationMs      Int      @default(0) @map("duration_ms")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([ticketId])
+  @@index([teamId, createdAt])
+  @@index([selectedAgentId])
+  @@map("routing_decision")
 }
 
 /**
@@ -1687,6 +1814,166 @@ model ScenarioExecutionStep {
   @@map("scenario_execution_step")
 }
 
+// ── Enterprise Automation Platform ────────────────────────────────────────────
+//
+// AutomationRule is the forward-looking replacement for WorkflowDefinition.
+// It supports all 9 automation categories, richer trigger types, AND/OR
+// condition trees, and a comprehensive action set including capacity routing,
+// approval automation, SLA actions, and outbound webhook integration.
+//
+// WorkflowDefinition and ScenarioDefinition remain in place for backward
+// compatibility; new rules are created here.
+
+enum AutomationCategory {
+  intake_routing
+  event_workflow
+  time_supervisor
+  assignment_routing
+  approval_automation
+  notification_automation
+  field_automation
+  lifecycle
+  integration_webhook
+}
+
+/**
+ * AutomationRule — a named, categorised automation rule.
+ *
+ * triggers:    AutomationTrigger[] — one or more events that can fire this rule.
+ * conditions:  AutomationCondition (leaf or AND/OR group tree).
+ * actions:     AutomationAction[] — ordered list of actions to execute.
+ * runOnce:     if true, the rule fires at most once per entity lifetime.
+ * stopOnMatch: if true, halt evaluation of subsequent rules in same category.
+ * order:       ascending — rules are evaluated lowest-order-first within a category.
+ */
+model AutomationRule {
+  id          Int                @id @default(autoincrement())
+  name        String
+  description String?
+  category    AutomationCategory
+  isEnabled   Boolean            @default(true)   @map("is_enabled")
+  order       Int                @default(0)
+  triggers    Json               // AutomationTrigger[]
+  conditions  Json               @default("{}") // AutomationCondition (leaf | group)
+  actions     Json               // AutomationAction[]
+  runOnce     Boolean            @default(false)  @map("run_once")
+  stopOnMatch Boolean            @default(true)   @map("stop_on_match")
+  version     Int                @default(1)
+  createdAt   DateTime           @default(now())  @map("created_at")
+  updatedAt   DateTime           @updatedAt       @map("updated_at")
+  createdById String?            @map("created_by_id")
+  createdBy   User?              @relation("AutomationRuleCreatedBy", fields: [createdById], references: [id])
+  updatedById String?            @map("updated_by_id")
+  updatedBy   User?              @relation("AutomationRuleUpdatedBy", fields: [updatedById], references: [id])
+
+  executions AutomationExecution[]
+
+  @@index([category, isEnabled])
+  @@index([isEnabled, order])
+  @@map("automation_rule")
+}
+
+/**
+ * AutomationExecution — one record per rule evaluation against an entity.
+ * entityType: "ticket" | "incident" | "change" | "request"
+ */
+model AutomationExecution {
+  id          Int                       @id @default(autoincrement())
+  ruleId      Int                       @map("rule_id")
+  rule        AutomationRule            @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  entityType  String                    @map("entity_type") // "ticket" | "incident" | etc.
+  entityId    Int                       @map("entity_id")
+  trigger     String
+  status      WorkflowExecutionStatus   @default(running)
+  startedAt   DateTime                  @default(now())  @map("started_at")
+  completedAt DateTime?                 @map("completed_at")
+  /// Execution context: previousValues snapshot, actor id, and other trigger-time metadata
+  meta        Json                      @default("{}")   @map("meta")
+
+  steps AutomationExecutionStep[]
+
+  @@index([ruleId, entityType, entityId])
+  @@index([entityType, entityId])
+  @@map("automation_execution")
+}
+
+/**
+ * AutomationExecutionStep — one record per action within an execution.
+ * meta: arbitrary JSON for action-specific output (e.g. assigned agent id).
+ */
+model AutomationExecutionStep {
+  id            Int                 @id @default(autoincrement())
+  executionId   Int                 @map("execution_id")
+  execution     AutomationExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  actionType    String              @map("action_type")
+  applied       Boolean             @default(false)
+  skippedReason String?             @map("skipped_reason")
+  errorMessage  String?             @map("error_message")
+  meta          Json                @default("{}")
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  @@index([executionId])
+  @@map("automation_execution_step")
+}
+
+/**
+ * OutboundWebhook — a registered endpoint that receives event payloads.
+ *
+ * events:        string[] of AutomationTriggerType values to subscribe to.
+ * headers:       custom request headers (e.g. { "Authorization": "Bearer ..." }).
+ * signingSecret: HMAC-SHA256 signing key; written to X-Webhook-Signature header.
+ * filters:       optional AutomationCondition JSON to filter which events are sent.
+ */
+model OutboundWebhook {
+  id            Int      @id @default(autoincrement())
+  name          String
+  description   String?
+  isEnabled     Boolean  @default(true)   @map("is_enabled")
+  url           String
+  method        String   @default("POST")
+  headers       Json     @default("{}")
+  signingSecret String?  @map("signing_secret")
+  events        String[] // AutomationTriggerType[]
+  filters       Json     @default("{}")   // AutomationCondition | null
+  retryLimit    Int      @default(3)      @map("retry_limit")
+  timeoutMs     Int      @default(10000)  @map("timeout_ms")
+  createdAt     DateTime @default(now())  @map("created_at")
+  updatedAt     DateTime @updatedAt       @map("updated_at")
+  createdById   String?  @map("created_by_id")
+  createdBy     User?    @relation("OutboundWebhookCreatedBy", fields: [createdById], references: [id])
+
+  deliveries WebhookDelivery[]
+
+  @@index([isEnabled])
+  @@map("outbound_webhook")
+}
+
+/**
+ * WebhookDelivery — delivery log entry for each outbound webhook attempt.
+ * status: "pending" | "delivered" | "failed"
+ */
+model WebhookDelivery {
+  id           Int             @id @default(autoincrement())
+  webhookId    Int             @map("webhook_id")
+  webhook      OutboundWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event        String
+  entityType   String          @map("entity_type")
+  entityId     String          @map("entity_id")
+  status       String          @default("pending") // "pending" | "delivered" | "failed"
+  requestBody  Json            @map("request_body")
+  responseCode Int?            @map("response_code")
+  responseBody String?         @map("response_body")
+  durationMs   Int?            @map("duration_ms")
+  attempts     Int             @default(1)
+  deliveredAt  DateTime?       @map("delivered_at")
+  failedAt     DateTime?       @map("failed_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  @@index([webhookId, status])
+  @@index([entityType, entityId])
+  @@map("webhook_delivery")
+}
+
 // ── Service Request Management ─────────────────────────────────────────────────
 
 /**
@@ -1964,6 +2251,12 @@ model Problem {
   rootCause     String? @map("root_cause")
   /// Documented workaround for impacted services and linked incidents (Markdown)
   workaround    String?
+
+  /// Post-Implementation Review (PIR) fields — completed after the problem is resolved
+  pirSummary      String?   @map("pir_summary")
+  pirOutcome      String?   @map("pir_outcome")
+  pirActionItems  String?   @map("pir_action_items")
+  pirCompletedAt  DateTime? @map("pir_completed_at")
 
   /// Affected service or CI name. Free-text; FK to CMDB ServiceCI in a future phase.
   affectedService String? @map("affected_service")
@@ -4002,4 +4295,96 @@ model DemoBatch {
 
   @@index([status])
   @@map("demo_batch")
+}
+
+// ── Duty Plan (Shift Scheduling) ──────────────────────────────────────────────
+
+enum DutyPlanStatus {
+  draft
+  published
+  archived
+}
+
+enum DutyPlanRoleType {
+  manager    // Granted by admin for a specific team
+  mandated   // Granted by manager to another team member
+}
+
+/// A monthly (or custom-period) shift schedule for a team.
+model DutyPlan {
+  id          Int            @id @default(autoincrement())
+  teamId      Int            @map("team_id")
+  team        Team           @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  title       String         // "April 2026 Schedule"
+  periodStart DateTime       @map("period_start") // inclusive start date
+  periodEnd   DateTime       @map("period_end")   // inclusive end date
+  is24x7      Boolean        @default(false) @map("is_24x7")
+  status      DutyPlanStatus @default(draft)
+  notes       String?
+
+  createdById String  @map("created_by_id")
+  createdBy   User    @relation("DutyPlanCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  shifts      DutyShift[]
+  assignments DutyAssignment[]
+
+  @@index([teamId, periodStart])
+  @@index([teamId, status])
+  @@map("duty_plan")
+}
+
+/// A named shift within a duty plan (e.g. Morning 06:00-14:00).
+model DutyShift {
+  id        Int      @id @default(autoincrement())
+  planId    Int      @map("plan_id")
+  plan      DutyPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  name      String   // "Morning", "Afternoon", "Night"
+  startTime String   @map("start_time") // "06:00"
+  endTime   String   @map("end_time")   // "14:00"
+  color     String   @default("#3B82F6")
+  order     Int      @default(0)
+
+  assignments DutyAssignment[]
+
+  @@index([planId])
+  @@map("duty_shift")
+}
+
+/// One agent assigned to one shift on one specific date.
+model DutyAssignment {
+  id            Int       @id @default(autoincrement())
+  planId        Int       @map("plan_id")
+  plan          DutyPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  shiftId       Int       @map("shift_id")
+  shift         DutyShift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  agentId       String    @map("agent_id")
+  agent         User      @relation("DutyAssignmentAgent", fields: [agentId], references: [id])
+  date          DateTime  @map("date")
+  isShiftLeader Boolean   @default(false) @map("is_shift_leader")
+  notes         String?
+
+  @@unique([shiftId, agentId, date])
+  @@index([planId, date])
+  @@index([agentId])
+  @@map("duty_assignment")
+}
+
+/// Who has management or mandate rights for a team's duty plans.
+model DutyPlanRole {
+  id          Int              @id @default(autoincrement())
+  teamId      Int              @map("team_id")
+  team        Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId      String           @map("user_id")
+  user        User             @relation("DutyPlanRoleUser", fields: [userId], references: [id])
+  roleType    DutyPlanRoleType @map("role_type")
+  grantedById String?          @map("granted_by_id")
+  grantedBy   User?            @relation("DutyPlanRoleGrantedBy", fields: [grantedById], references: [id])
+  createdAt   DateTime         @default(now())
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+  @@map("duty_plan_role")
 }

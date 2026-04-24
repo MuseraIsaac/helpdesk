@@ -57,7 +57,7 @@ const MentionList = forwardRef<MentionListHandle, MentionListProps>(
 
     if (items.length === 0) {
       return (
-        <div className="z-50 overflow-hidden rounded-lg border bg-popover shadow-lg p-2 min-w-[220px]">
+        <div className="mention-list-container z-50 overflow-hidden rounded-lg border bg-popover shadow-lg p-2 min-w-[220px]">
           <p className="text-xs text-muted-foreground px-2 py-1.5">
             No agents matching "{query}"
           </p>
@@ -66,13 +66,12 @@ const MentionList = forwardRef<MentionListHandle, MentionListProps>(
     }
 
     return (
-      <div className="z-50 overflow-hidden rounded-lg border bg-popover shadow-lg py-1 min-w-[240px] max-h-64 overflow-y-auto">
+      <div className="mention-list-container z-50 overflow-hidden rounded-lg border bg-popover shadow-lg py-1 min-w-[240px] max-h-64 overflow-y-auto">
         <p className="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
           Mention someone
         </p>
         {items.map((item, index) => {
           const isSelected = index === selectedIndex;
-          // Highlight matching part
           const q = (query ?? "").toLowerCase();
           const nameIdx = item.name.toLowerCase().indexOf(q);
           const emailIdx = item.email.toLowerCase().indexOf(q);
@@ -82,9 +81,9 @@ const MentionList = forwardRef<MentionListHandle, MentionListProps>(
               key={item.id}
               type="button"
               className={[
-                "flex items-center gap-3 w-full px-3 py-2 text-left transition-colors",
+                "flex items-center gap-3 w-full px-3 py-2 text-left transition-all duration-100",
                 isSelected
-                  ? "bg-primary/10 text-primary"
+                  ? "mention-item-selected bg-primary/10 text-primary"
                   : "hover:bg-muted/60 text-foreground",
               ].join(" ")}
               onClick={() => selectItem(index)}
@@ -93,10 +92,10 @@ const MentionList = forwardRef<MentionListHandle, MentionListProps>(
               {/* Avatar letter */}
               <span
                 className={[
-                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold",
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold transition-all duration-100",
                   isSelected
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-primary/15 text-primary",
+                    ? "mention-avatar-selected bg-primary text-primary-foreground"
+                    : "mention-avatar-default bg-primary/15 text-primary",
                 ].join(" ")}
               >
                 {item.name.charAt(0).toUpperCase()}

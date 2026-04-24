@@ -231,11 +231,14 @@ function PreferencesTab() {
       onSuccess: () => {
         // Sync theme immediately
         if (data.theme) setTheme(data.theme);
-        // Sync sidebar collapsed default to localStorage
+        // Sync sidebar preference immediately — update localStorage AND notify Layout
         if (data.sidebarCollapsed !== undefined) {
           try {
             localStorage.setItem("sidebar-collapsed", String(data.sidebarCollapsed));
           } catch {}
+          window.dispatchEvent(
+            new CustomEvent("sidebar-pref-changed", { detail: { collapsed: data.sidebarCollapsed } })
+          );
         }
       },
     });

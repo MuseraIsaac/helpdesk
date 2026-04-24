@@ -10,6 +10,7 @@ import prisma from "../db";
 import { sendEmailJob } from "../lib/send-email";
 import { logAudit } from "../lib/audit";
 import { notifyMentions, extractMentionedEmails } from "../lib/mentions";
+import { fireTicketEvent } from "../lib/event-bus";
 
 const router = Router({ mergeParams: true });
 
@@ -62,6 +63,7 @@ router.post("/", requireAuth, async (req, res) => {
         select: { emailMessageId: true },
         orderBy: { createdAt: "asc" },
       },
+      team: { select: { email: true } },
     },
   });
   if (!ticket) {
@@ -129,19 +131,18 @@ router.post("/", requireAuth, async (req, res) => {
     });
   }
 
-  // Stamp firstRespondedAt on the first agent reply
-  if (!ticket.firstRespondedAt) {
-    const now = reply.createdAt;
-    const breachedFirstResponse =
-      ticket.firstResponseDueAt != null && now > ticket.firstResponseDueAt;
-    await prisma.ticket.update({
-      where: { id: ticketId },
-      data: {
-        firstRespondedAt: now,
-        ...(breachedFirstResponse && { slaBreached: true }),
-      },
-    });
-  }
+  // Stamp firstRespondedAt on the first agent reply + always update lastAgentReplyAt
+  await prisma.ticket.update({
+    where: { id: ticketId },
+    data: {
+      lastAgentReplyAt: reply.createdAt,
+      ...(!ticket.firstRespondedAt && {
+        firstRespondedAt: reply.createdAt,
+        ...(ticket.firstResponseDueAt != null &&
+          reply.createdAt > ticket.firstResponseDueAt && { slaBreached: true }),
+      }),
+    },
+  });
 
   await logAudit(ticketId, req.user.id, "reply.created", {
     replyId: reply.id,
@@ -208,6 +209,11 @@ router.post("/", requireAuth, async (req, res) => {
     emailBodyText = plainBody + quoteHeader + quotedBody.split("\n").map(l => `> ${l}`).join("\n");
   }
 
+  // Use the team's email address (if set) so the reply appears to come from
+  // the team inbox rather than the generic system from-address.
+  // Produces: "Isaac Musera <support@acme.io>"
+  const teamEmail = ticket.team?.email ?? null;
+
   await sendEmailJob({
     to: emailTo,
     subject: emailSubject,
@@ -218,7 +224,11 @@ router.post("/", requireAuth, async (req, res) => {
     ...(replyType !== "forward" && inReplyTo && { inReplyTo }),
     ...(replyType !== "forward" && references && { references }),
     ...(data.attachmentIds?.length && { attachmentIds: data.attachmentIds }),
+    ...(teamEmail && { from: { email: teamEmail, name: req.user.name } }),
   });
+
+  // Fire ticket.reply_sent for event_workflow rules
+  fireTicketEvent("ticket.reply_sent", ticketId, req.user.id);
 
   res.status(201).json(reply);
 });

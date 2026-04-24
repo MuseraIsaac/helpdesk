@@ -1,27 +1,30 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 
-export type FollowableEntity = "incidents" | "changes" | "requests" | "problems";
+export type WatchableEntity = "incidents" | "changes" | "requests" | "problems";
 
-interface FollowStatus {
+/** @deprecated Use WatchableEntity */
+export type FollowableEntity = WatchableEntity;
+
+interface WatchStatus {
   following: boolean;
   followedAt: string | null;
 }
 
 /**
- * Manages follow state for any ITSM entity (incident, change, request, problem).
+ * Manages watch state for any ITSM entity (incident, change, request, problem).
  *
  * @param entityPath  The plural URL path: "incidents" | "changes" | "requests" | "problems"
  * @param entityId    The numeric entity ID. Pass 0 when not yet loaded.
  */
-export function useEntityFollow(entityPath: FollowableEntity, entityId: number) {
+export function useEntityWatch(entityPath: WatchableEntity, entityId: number) {
   const queryClient = useQueryClient();
-  const queryKey = ["follow", entityPath, entityId];
+  const queryKey = ["watch", entityPath, entityId];
 
-  const { data, isLoading } = useQuery<FollowStatus>({
+  const { data, isLoading } = useQuery<WatchStatus>({
     queryKey,
     queryFn: async () => {
-      const { data } = await axios.get<FollowStatus>(
+      const { data } = await axios.get<WatchStatus>(
         `/api/${entityPath}/${entityId}/followers/me`
       );
       return data;
@@ -44,9 +47,12 @@ export function useEntityFollow(entityPath: FollowableEntity, entityId: number) 
   });
 
   return {
-    following:  data?.following ?? false,
+    watching:  data?.following ?? false,
     isLoading,
-    isPending:  toggle.isPending,
-    toggle:     () => toggle.mutate(),
+    isPending: toggle.isPending,
+    toggle:    () => toggle.mutate(),
   };
 }
+
+/** @deprecated Use useEntityWatch */
+export const useEntityFollow = useEntityWatch;

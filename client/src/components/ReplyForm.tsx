@@ -231,6 +231,16 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
     setStagedFiles((prev) => prev.filter((f) => f.id !== id));
   }
 
+  function handleMentionSelect(email: string) {
+    if (!email) return;
+    setShowCcBcc(true);
+    setCc((prev) => {
+      const existing = prev.split(/[,;\s]+/).map((e) => e.trim().toLowerCase()).filter(Boolean);
+      if (existing.includes(email.toLowerCase())) return prev;
+      return prev.trim() ? `${prev.trim()}, ${email}` : email;
+    });
+  }
+
   function handleMacroInsert(resolvedBody: string) {
     const html = resolvedBody
       .split("\n\n")
@@ -323,6 +333,7 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
             minHeight="180px"
             disabled={isBusy}
             enableMentions
+            onMentionSelect={handleMentionSelect}
             className="border-0 shadow-none rounded-none"
           />
         </div>

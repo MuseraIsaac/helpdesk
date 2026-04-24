@@ -40,6 +40,7 @@ import {
   Radar,
   FlaskConical,
   Trash2,
+  CalendarDays,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { can, type Permission } from "core/constants/permission.ts";
@@ -197,6 +198,12 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Approvals",
         icon: CheckSquare,
         permission: "approvals.view",
+      },
+      {
+        id: "duty-plans",
+        to: "/duty-plans",
+        label: "Duty Plans",
+        icon: CalendarDays,
       },
     ],
   },
@@ -381,6 +388,7 @@ export function resolveModuleBreadcrumb(pathname: string, role: string): string 
       if (matched) return `${section.label}  ·  ${item.label}`;
     }
   }
+  if (pathname.startsWith("/duty-plans"))    return "ITSM  ·  Duty Plans";
   if (pathname.startsWith("/settings"))      return "Administration  ·  Settings";
   if (pathname.startsWith("/profile"))       return "Account  ·  Profile";
   if (pathname.startsWith("/customers"))     return "Contacts  ·  Customers";

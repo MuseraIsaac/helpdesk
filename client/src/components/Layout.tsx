@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
@@ -24,6 +24,17 @@ function useSidebarCollapsed() {
     try { return localStorage.getItem("sidebar-collapsed") === "true"; }
     catch { return false; }
   });
+
+  // Listen for preference saves from ProfilePage so the sidebar updates immediately
+  // without requiring a page reload.
+  useEffect(() => {
+    function onPrefChange(e: CustomEvent<{ collapsed: boolean }>) {
+      setCollapsed(e.detail.collapsed);
+    }
+    window.addEventListener("sidebar-pref-changed", onPrefChange as EventListener);
+    return () => window.removeEventListener("sidebar-pref-changed", onPrefChange as EventListener);
+  }, []);
+
   const toggle = () =>
     setCollapsed((prev) => {
       const next = !prev;

@@ -44,7 +44,7 @@ import { ProblemStatusBadge, ProblemPriorityBadge } from "./ProblemsPage";
 import CiLinksPanel from "@/components/CiLinksPanel";
 import AssetLinksPanel from "@/components/AssetLinksPanel";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
-import FollowButton from "@/components/FollowButton";
+import WatchButton from "@/components/FollowButton";
 import {
   BookMarked,
   Plus,
@@ -67,6 +67,7 @@ import {
   User,
   Users,
   Server,
+  ClipboardCheck,
 } from "lucide-react";
 
 // ── Palette helpers ───────────────────────────────────────────────────────────
@@ -112,6 +113,7 @@ const EVENT_LABELS: Record<string, (meta: Record<string, unknown>) => string> = 
   "problem.assigned":           (m) => m.to ? "Analyst assigned" : "Analyst removed",
   "problem.root_cause_updated": () => "Root cause analysis updated",
   "problem.workaround_updated": () => "Workaround updated",
+  "problem.pir_completed":      () => "Post-Implementation Review completed",
   "problem.incident_linked":    (m) => `Incident ${m.incidentNumber} linked`,
   "problem.incident_unlinked":  (m) => `Incident #${m.incidentId} unlinked`,
   "problem.incidents_linked":   (m) => `${Array.isArray(m.incidentIds) ? m.incidentIds.length : 1} incident(s) linked`,
@@ -561,6 +563,135 @@ function ClusterHintBanner({ hint }: { hint: Problem["clusterHint"] }) {
   );
 }
 
+// ── Post-Implementation Review panel ─────────────────────────────────────────
+
+const PIR_OUTCOME_OPTIONS = [
+  { value: "successful",          label: "Successful — objectives fully met" },
+  { value: "partially_successful",label: "Partially Successful — some issues remain" },
+  { value: "unsuccessful",        label: "Unsuccessful — further action required" },
+] as const;
+
+type PirOutcome = "successful" | "partially_successful" | "unsuccessful";
+
+function PirPanel({
+  problem, isTerminal, onSave,
+}: {
+  problem: Problem;
+  isTerminal: boolean;
+  onSave: (patch: Record<string, unknown>) => void;
+}) {
+  const [summary,     setSummary]     = useState(problem.pirSummary     ?? "");
+  const [outcome,     setOutcome]     = useState<PirOutcome | "">(problem.pirOutcome ?? "");
+  const [actionItems, setActionItems] = useState(problem.pirActionItems ?? "");
+  const [saving,      setSaving]      = useState(false);
+
+  const isDone = !!problem.pirCompletedAt;
+
+  async function handleSave() {
+    setSaving(true);
+    onSave({
+      pirSummary:    summary     || null,
+      pirOutcome:    outcome     || null,
+      pirActionItems:actionItems || null,
+    });
+    setSaving(false);
+  }
+
+  async function handleMarkComplete() {
+    setSaving(true);
+    onSave({
+      pirSummary:    summary     || null,
+      pirOutcome:    outcome     || null,
+      pirActionItems:actionItems || null,
+      pirCompletedAt: new Date().toISOString(),
+    });
+    setSaving(false);
+  }
+
+  return (
+    <div className="space-y-5">
+      {isDone ? (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-500/[0.06] px-4 py-2.5">
+          <ClipboardCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+            PIR completed · {formatDatetime(problem.pirCompletedAt)}
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-500/[0.04] px-4 py-2.5">
+          <ClipboardCheck className="h-4 w-4 text-amber-600 shrink-0" />
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            Post-Implementation Review is not yet completed for this problem.
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Outcome</label>
+        <div className="flex flex-wrap gap-2">
+          {PIR_OUTCOME_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              disabled={isDone && isTerminal}
+              onClick={() => setOutcome(opt.value)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                outcome === opt.value
+                  ? opt.value === "successful"
+                    ? "border-emerald-400 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                    : opt.value === "partially_successful"
+                    ? "border-amber-400 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                    : "border-red-400 bg-red-500/10 text-red-700 dark:text-red-400"
+                  : "border-border text-muted-foreground hover:border-foreground/40"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Review Summary</label>
+        <textarea
+          rows={5}
+          placeholder="Summarise what happened, the effectiveness of the resolution, and lessons learned."
+          value={summary}
+          onChange={(e) => setSummary(e.target.value)}
+          disabled={isDone && isTerminal}
+          className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y disabled:opacity-60"
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Action Items</label>
+        <textarea
+          rows={4}
+          placeholder="List follow-up actions, owners, and due dates. One item per line."
+          value={actionItems}
+          onChange={(e) => setActionItems(e.target.value)}
+          disabled={isDone && isTerminal}
+          className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y disabled:opacity-60"
+        />
+      </div>
+
+      {(!isDone || !isTerminal) && (
+        <div className="flex items-center gap-2 justify-end border-t border-border/50 pt-4">
+          <Button type="button" variant="outline" size="sm" onClick={handleSave} disabled={saving}>
+            Save Draft
+          </Button>
+          {!isDone && (
+            <Button type="button" size="sm" onClick={handleMarkComplete} disabled={saving || !outcome}>
+              <ClipboardCheck className="h-3.5 w-3.5 mr-1.5" />
+              Mark PIR Complete
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ProblemDetailPage ─────────────────────────────────────────────────────────
 
 const PRIORITY_OPTIONS = [
@@ -662,7 +793,7 @@ export default function ProblemDetailPage() {
 
             {/* Action buttons */}
             <div className="flex items-center gap-2 flex-wrap justify-end shrink-0">
-              <FollowButton entityPath="problems" entityId={problem.id} />
+              <WatchButton entityPath="problems" entityId={problem.id} />
               <Button type="button" variant="outline" size="sm" className="gap-1.5 h-8"
                 onClick={() => setTemplateDialog(true)}>
                 <BookmarkPlus className="h-3.5 w-3.5" />
@@ -737,18 +868,19 @@ export default function ProblemDetailPage() {
                 <div className="border-b px-4 bg-muted/20">
                   <TabsList className="h-auto bg-transparent p-0 gap-0 rounded-none">
                     {[
-                      { value: "notes",    icon: FileText,    label: "Investigation Notes" },
-                      { value: "rca",      icon: Lightbulb,   label: "RCA & Workaround" },
-                      { value: "incidents",icon: Link2,       label: "Incidents",   badge: problem.linkedIncidents?.length ?? 0 },
-                      { value: "tickets",  icon: Ticket,      label: "Tickets",     badge: problem.linkedTickets?.length ?? 0 },
-                      { value: "history",  icon: Activity,    label: "Audit Trail" },
-                    ].map(({ value, icon: Icon, label, badge }) => (
+                      { value: "notes",    icon: FileText,        label: "Investigation Notes" },
+                      { value: "rca",      icon: Lightbulb,       label: "RCA & Workaround" },
+                      { value: "pir",      icon: ClipboardCheck,  label: "PIR", badge: problem.pirCompletedAt ? 1 : 0, badgeLabel: "Done" },
+                      { value: "incidents",icon: Link2,           label: "Incidents",   badge: problem.linkedIncidents?.length ?? 0 },
+                      { value: "tickets",  icon: Ticket,          label: "Tickets",     badge: problem.linkedTickets?.length ?? 0 },
+                      { value: "history",  icon: Activity,        label: "Audit Trail" },
+                    ].map(({ value, icon: Icon, label, badge, badgeLabel }) => (
                       <TabsTrigger key={value} value={value}
                         className="flex items-center gap-1.5 px-3 py-3 text-[12px] font-medium rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary data-[state=active]:bg-transparent data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:text-foreground transition-colors">
                         <Icon className="h-3 w-3" />
                         {label}
                         {badge !== undefined && badge > 0 && (
-                          <span className="ml-0.5 rounded-full bg-primary/10 text-primary px-1.5 text-[10px] font-semibold">{badge}</span>
+                          <span className="ml-0.5 rounded-full bg-primary/10 text-primary px-1.5 text-[10px] font-semibold">{badgeLabel ?? badge}</span>
                         )}
                       </TabsTrigger>
                     ))}
@@ -782,6 +914,10 @@ export default function ProblemDetailPage() {
                       <p className="text-sm font-mono text-muted-foreground">{problem.linkedChangeRef}</p>
                     </div>
                   )}
+                </TabsContent>
+
+                <TabsContent value="pir" className="p-4 mt-0">
+                  <PirPanel problem={problem} isTerminal={isTerminal} onSave={(patch) => patchMutation.mutate(patch)} />
                 </TabsContent>
 
                 <TabsContent value="incidents" className="p-4 mt-0">

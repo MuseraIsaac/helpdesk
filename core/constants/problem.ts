@@ -69,6 +69,12 @@ export interface Problem {
   /** Affected service or CI name (free-text for now; FK to CMDB later). */
   affectedService: string | null;
 
+  // PIR (Post-Implementation Review)
+  pirSummary: string | null;
+  pirOutcome: "successful" | "partially_successful" | "unsuccessful" | null;
+  pirActionItems: string | null;
+  pirCompletedAt: string | null;
+
   /**
    * Link to a Change Request that will permanently fix this problem.
    * Stored as a string so it can reference a change request number or URL

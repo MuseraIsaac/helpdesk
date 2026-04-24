@@ -25,7 +25,10 @@ export type NotificationEvent =
   | "incident.escalated"
   | "request.approved"
   | "request.rejected"
-  | "change.awaiting_approval";
+  | "change.awaiting_approval"
+  | "approval.overdue"
+  | "approval.reminder"
+  | "automation.notification"; // generic automation-triggered notification
 
 export const NOTIFICATION_EVENTS: NotificationEvent[] = [
   "ticket.created",
@@ -48,6 +51,9 @@ export const NOTIFICATION_EVENTS: NotificationEvent[] = [
   "request.approved",
   "request.rejected",
   "change.awaiting_approval",
+  "approval.overdue",
+  "approval.reminder",
+  "automation.notification",
 ];
 
 export const NOTIFICATION_EVENT_LABEL: Record<NotificationEvent, string> = {
@@ -55,11 +61,11 @@ export const NOTIFICATION_EVENT_LABEL: Record<NotificationEvent, string> = {
   "ticket.created":                   "Ticket submitted (auto-response to customer)",
   "ticket.assigned":                  "Ticket assigned to agent/team",
   "ticket.escalated":                 "Ticket escalated to agent/team",
-  "ticket.followed_status_changed":    "Followed ticket status changed",
-  "incident.followed_status_changed":  "Followed incident status changed",
-  "change.followed_status_changed":    "Followed change status changed",
-  "request.followed_status_changed":   "Followed service request status changed",
-  "problem.followed_status_changed":   "Followed problem status changed",
+  "ticket.followed_status_changed":    "Watched ticket status changed",
+  "incident.followed_status_changed":  "Watched incident status changed",
+  "change.followed_status_changed":    "Watched change status changed",
+  "request.followed_status_changed":   "Watched service request status changed",
+  "problem.followed_status_changed":   "Watched problem status changed",
   "sla.first_response_warning":       "SLA first response warning",
   "sla.resolution_warning":           "SLA resolution warning",
   "sla.breached":                     "SLA breached",
@@ -71,6 +77,9 @@ export const NOTIFICATION_EVENT_LABEL: Record<NotificationEvent, string> = {
   "request.approved":                 "Request approved",
   "request.rejected":                 "Request rejected",
   "change.awaiting_approval":         "Change awaiting approval",
+  "approval.overdue":                 "Approval overdue",
+  "approval.reminder":                "Approval reminder",
+  "automation.notification":          "Automation-triggered notification",
 };
 
 /** Events that send to external recipients (customers), not internal agents */

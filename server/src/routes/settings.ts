@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod/v4";
 import { requireAuth } from "../middleware/require-auth";
 import { requireAdmin } from "../middleware/require-admin";
 import {
@@ -61,7 +62,7 @@ router.get("/sections", requireAuth, requireAdmin, (_req, res) => {
  * colours, SLA config, etc. without needing admin privileges.
  */
 router.get("/:section", requireAuth, async (req, res) => {
-  const { section } = req.params;
+  const section = req.params.section as string;
   if (!isSettingsSection(section)) {
     res.status(404).json({ error: `Unknown settings section: ${section}` });
     return;
@@ -83,7 +84,7 @@ router.get("/:section", requireAuth, async (req, res) => {
  * placeholder) are stripped before merging so they don't overwrite real values.
  */
 router.put("/:section", requireAuth, requireAdmin, async (req, res) => {
-  const { section } = req.params;
+  const section = req.params.section as string;
   if (!isSettingsSection(section)) {
     res.status(404).json({ error: `Unknown settings section: ${section}` });
     return;
@@ -107,8 +108,26 @@ router.put("/:section", requireAuth, requireAdmin, async (req, res) => {
     if (incoming.webexBotToken      === REDACTED) delete incoming.webexBotToken;
   }
 
-  // Validate incoming data against the section schema
   const schema = sectionSchemas[section];
+
+  // For each field that arrives as null, test whether the schema field actually accepts null.
+  // If it doesn't (e.g. a number field), remove it so the stored value is preserved via merge.
+  // This guards against cleared number inputs that serialize as JSON null.
+  const schemaShape = schema.shape as Record<string, z.ZodTypeAny>;
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(incoming as Record<string, unknown>)) {
+    if (value === null && key in schemaShape) {
+      const fieldSchema = schemaShape[key];
+      if (fieldSchema) {
+        const accepts = fieldSchema.safeParse(null);
+        if (!accepts.success) continue; // drop — stored value will be used in merge
+      }
+    }
+    sanitized[key] = value;
+  }
+  incoming = sanitized;
+
+  // Validate incoming data against the section schema
   const result = schema.partial().safeParse(incoming);
   if (!result.success) {
     res.status(400).json({ error: result.error.issues[0]?.message ?? "Validation failed" });

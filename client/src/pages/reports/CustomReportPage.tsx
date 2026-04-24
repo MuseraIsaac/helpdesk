@@ -140,8 +140,8 @@ export default function CustomReportPage() {
     if (!reportData || initialized.current) return;
     initialized.current = true;
     setReportName(reportData.name);
-    setWidgets(reportData.config.widgets);
-    const p = (reportData.config.dateRange as { preset?: string }).preset ?? "last_30_days";
+    setWidgets(Array.isArray(reportData.config?.widgets) ? reportData.config.widgets : []);
+    const p = (reportData.config?.dateRange as { preset?: string } | undefined)?.preset ?? "last_30_days";
     setPreset(p);
     setEditMode(false);
     setIsDirty(false);

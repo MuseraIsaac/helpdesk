@@ -8,6 +8,7 @@ import { can } from "core/constants/permission.ts";
 import prisma from "../db";
 import { logAudit } from "../lib/audit";
 import { notifyMentions } from "../lib/mentions";
+import { fireTicketEvent } from "../lib/event-bus";
 
 const router = Router({ mergeParams: true });
 
@@ -74,6 +75,9 @@ router.post("/", requireAuth, async (req, res) => {
   });
 
   await logAudit(ticketId, req.user.id, "note.created", { noteId: note.id });
+
+  // Fire ticket.note_added event for event_workflow rules
+  fireTicketEvent("ticket.note_added", ticketId, req.user.id);
 
   // Notify @mentioned users from the HTML content (fire-and-forget)
   void notifyMentions(data.bodyHtml, {

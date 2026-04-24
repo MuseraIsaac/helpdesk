@@ -45,7 +45,7 @@ import AssetLinksPanel from "@/components/AssetLinksPanel";
 import ChangeTimeline from "@/components/ChangeTimeline";
 import ChangeAttachmentsPanel from "@/components/ChangeAttachmentsPanel";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
-import FollowButton from "@/components/FollowButton";
+import WatchButton from "@/components/FollowButton";
 import {
   GitMerge,
   User,
@@ -779,7 +779,7 @@ export default function ChangeDetailPage() {
 
               {/* Action buttons */}
               <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-                <FollowButton entityPath="changes" entityId={change.id} />
+                <WatchButton entityPath="changes" entityId={change.id} />
                 <Button type="button" variant="outline" size="sm" className="gap-1.5 h-8"
                   onClick={() => setTemplateDialog(true)}>
                   <BookmarkPlus className="h-3.5 w-3.5" />

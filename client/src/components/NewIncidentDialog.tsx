@@ -43,7 +43,7 @@ export default function NewIncidentDialog() {
     queryKey: ["agents"],
     queryFn: async () => {
       const { data } = await axios.get<{ agents: Agent[] }>("/api/agents");
-      return data;
+      return data.agents;
     },
     enabled: open,
   });
@@ -194,7 +194,7 @@ export default function NewIncidentDialog() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Unassigned</SelectItem>
-                    {agentsData?.agents.map((a) => (
+                    {agentsData?.map((a) => (
                       <SelectItem key={a.id} value={a.id}>
                         {a.name}
                       </SelectItem>

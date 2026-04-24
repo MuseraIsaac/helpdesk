@@ -59,6 +59,10 @@ const DETAIL_SELECT = {
   ...LIST_SELECT,
   rootCause: true,
   workaround: true,
+  pirSummary: true,
+  pirOutcome: true,
+  pirActionItems: true,
+  pirCompletedAt: true,
   linkedIncidents: {
     orderBy: { linkedAt: "asc" as const },
     select: {
@@ -426,6 +430,10 @@ router.patch(
     if (data.description !== undefined)     updateData.description = data.description;
     if (data.rootCause !== undefined)       updateData.rootCause = data.rootCause;
     if (data.workaround !== undefined)      updateData.workaround = data.workaround;
+    if (data.pirSummary !== undefined)      updateData.pirSummary = data.pirSummary;
+    if (data.pirOutcome !== undefined)      updateData.pirOutcome = data.pirOutcome;
+    if (data.pirActionItems !== undefined)  updateData.pirActionItems = data.pirActionItems;
+    if (data.pirCompletedAt !== undefined)  updateData.pirCompletedAt = data.pirCompletedAt ? new Date(data.pirCompletedAt) : null;
     if (data.affectedService !== undefined) updateData.affectedService = data.affectedService;
     if (data.linkedChangeRef !== undefined) updateData.linkedChangeRef = data.linkedChangeRef;
     if (data.priority !== undefined)        updateData.priority = data.priority as TicketPriority;
@@ -516,6 +524,11 @@ router.patch(
     if (data.workaround !== undefined && data.workaround !== null) {
       auditTasks.push(
         logProblemEvent(id, req.user.id, "problem.workaround_updated", {})
+      );
+    }
+    if (data.pirCompletedAt !== undefined && data.pirCompletedAt !== null) {
+      auditTasks.push(
+        logProblemEvent(id, req.user.id, "problem.pir_completed", {})
       );
     }
 

@@ -9,13 +9,45 @@
  */
 // Grid layout base CSS — provides drag placeholder and resize handle styles
 import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, Component, type ReactNode } from "react";
 import GridLayout, { type Layout } from "react-grid-layout";
 import { useMetricQuery } from "@/hooks/useMetricQuery";
 import { WidgetShell } from "./WidgetShell";
 import { WidgetRenderer, EmptyWidget } from "./WidgetRenderer";
 import type { WidgetLayout } from "@/lib/reports/analytics-api";
+
+// ── Per-widget error boundary ─────────────────────────────────────────────────
+// Prevents a single widget crash from taking down the entire report canvas.
+
+class WidgetErrorBoundary extends Component<
+  { children: ReactNode; label: string },
+  { crashed: boolean; message: string }
+> {
+  constructor(props: { children: ReactNode; label: string }) {
+    super(props);
+    this.state = { crashed: false, message: "" };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { crashed: true, message: error.message };
+  }
+  render() {
+    if (this.state.crashed) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-6 bg-card border border-border/70 rounded-lg">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+            {this.props.label}
+          </p>
+          <p className="text-[10px] text-destructive/70 max-w-[180px] leading-relaxed">
+            Widget failed to render. Try refreshing.
+          </p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 
@@ -58,14 +90,16 @@ function ConnectedWidget({
 
   const contentH = cellHeight - 40 - 12; // subtract HEADER_H + PADDING
 
-  const hasData = data && !error;
-  const isEmpty =
-    hasData &&
-    ((data.result.type === "grouped_count" && data.result.items.length === 0) ||
-     (data.result.type === "distribution"   && data.result.buckets.length === 0) ||
-     (data.result.type === "leaderboard"    && data.result.entries.length === 0) ||
-     (data.result.type === "table"          && data.result.rows.length === 0) ||
-     (data.result.type === "time_series"    && data.result.points.length === 0));
+  const hasData = !!(data && !error && data.result);
+  const isEmpty = hasData && (() => {
+    const r = data!.result;
+    if (r.type === "grouped_count") return r.items.length === 0;
+    if (r.type === "distribution")  return r.buckets.length === 0;
+    if (r.type === "leaderboard")   return r.entries.length === 0;
+    if (r.type === "table")         return r.rows.length === 0;
+    if (r.type === "time_series")   return r.points.length === 0;
+    return false;
+  })();
 
   return (
     <WidgetShell
@@ -162,15 +196,17 @@ export function ReportCanvas({
         const cellHeight = widget.h * ROW_H + (widget.h - 1) * MARGIN_Y;
         return (
           <div key={widget.id}>
-            <ConnectedWidget
-              widget={widget}
-              canvasDateRange={dateRange}
-              cellHeight={cellHeight}
-              editMode={editMode}
-              onEdit={() => onEditWidget(widget.id)}
-              onDuplicate={() => onDuplicateWidget(widget.id)}
-              onRemove={() => onRemoveWidget(widget.id)}
-            />
+            <WidgetErrorBoundary label={widget.title ?? widget.metricId}>
+              <ConnectedWidget
+                widget={widget}
+                canvasDateRange={dateRange}
+                cellHeight={cellHeight}
+                editMode={editMode}
+                onEdit={() => onEditWidget(widget.id)}
+                onDuplicate={() => onDuplicateWidget(widget.id)}
+                onRemove={() => onRemoveWidget(widget.id)}
+              />
+            </WidgetErrorBoundary>
           </div>
         );
       })}

@@ -38,7 +38,7 @@ import CiLinksPanel from "@/components/CiLinksPanel";
 import AssetLinksPanel from "@/components/AssetLinksPanel";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
 import IncidentPresenceIndicator from "@/components/IncidentPresenceIndicator";
-import FollowButton from "@/components/FollowButton";
+import WatchButton from "@/components/FollowButton";
 import BridgeCallButton from "@/components/BridgeCallButton";
 import { useIncidentPresence } from "@/hooks/useIncidentPresence";
 import { useSession } from "@/lib/auth-client";
@@ -705,7 +705,7 @@ export default function IncidentDetailPage() {
                   currentUserId={session.user.id}
                 />
               )}
-              <FollowButton entityPath="incidents" entityId={incident.id} />
+              <WatchButton entityPath="incidents" entityId={incident.id} />
               <BridgeCallButton
                 incidentId={incident.id}
                 bridgeCallUrl={incident.bridgeCallUrl ?? null}

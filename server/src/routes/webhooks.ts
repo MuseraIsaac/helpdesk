@@ -20,6 +20,13 @@ import {
   ALLOWED_MIME_TYPES,
   MAX_FILE_SIZE,
 } from "../lib/storage";
+import {
+  runIntakeRouting,
+  detectAutoReply,
+  detectBounce,
+  extractHeader,
+} from "../lib/intake-routing";
+import { fireTicketEvent } from "../lib/event-bus";
 
 // Accept up to 20 MB total for inbound emails (attachments can be several files)
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -141,15 +148,46 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
       },
     });
     await saveInboundAttachments(files, existingTicket.id, reply.id);
+    // Stamp lastCustomerReplyAt for time-supervisor scanning
+    void prisma.ticket.update({
+      where: { id: existingTicket.id },
+      data: { lastCustomerReplyAt: reply.createdAt },
+    });
+    // Fire ticket.reply_received for event_workflow rules
+    fireTicketEvent("ticket.reply_received", existingTicket.id, null);
     res.status(200).json({ ticket: existingTicket });
     return;
   }
 
   const now = new Date();
-  const slaDeadlines = computeSlaDeadlines(null, now);
   const customerId = await upsertCustomer(data.from, data.fromName);
   // Inbound emails have no ticket type at creation time — classified later by AI
   const ticketNumber = await generateTicketNumber(null, now);
+
+  // ── Extract intake metadata from email headers ──────────────────────────
+  const rawHeaders = typeof req.body.headers === "string" ? req.body.headers : "";
+  const emailTo        = typeof req.body.to === "string" ? req.body.to : (parsed.to ?? null);
+  const emailCc        = typeof req.body.cc === "string" ? req.body.cc : null;
+  const emailReplyTo   = extractHeader(rawHeaders, "Reply-To");
+  const autoReply      = detectAutoReply(rawHeaders);
+  const bounce         = detectBounce(rawHeaders, normalizedSubject);
+  const spamScore      = parseFloat(req.body.spam_score ?? "0") || 0;
+  const mailboxAlias   = extractHeader(rawHeaders, "X-Mailbox-Alias");
+
+  // ── Mailbox routing ────────────────────────────────────────────────────────
+  // Check if the inbound "To" address matches a configured mailbox.
+  // If so, inherit its team and default priority for auto-routing.
+  const integrationsCfg = await getSection("integrations");
+  const { email: normalizedEmailTo } = parseFromField(emailTo ?? "");
+  const matchedMailbox = (integrationsCfg.mailboxes ?? []).find(
+    (mb) => mb.isActive && mb.address.toLowerCase() === normalizedEmailTo.toLowerCase()
+  );
+  const mailboxTeamId      = matchedMailbox?.teamId    ?? null;
+  const mailboxPriority    = matchedMailbox?.defaultPriority ?? null;
+  const resolvedMailboxAlias =
+    mailboxAlias ?? (matchedMailbox ? matchedMailbox.label : null);
+
+  const slaDeadlines = computeSlaDeadlines(mailboxPriority, now);
 
   const ticket = await prisma.ticket.create({
     data: {
@@ -162,55 +200,92 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
       customerId,
       assignedToId: AI_AGENT_ID,
       source: "email",
+      priority: mailboxPriority ?? null,
+      teamId: mailboxTeamId ?? null,
       firstResponseDueAt: slaDeadlines.firstResponseDueAt,
       resolutionDueAt: slaDeadlines.resolutionDueAt,
       emailMessageId,
+      // Persist intake fields so rule conditions can reference them
+      emailTo:      emailTo ?? null,
+      emailCc:      emailCc ?? null,
+      emailReplyTo: emailReplyTo ?? null,
+      isAutoReply:  autoReply,
+      isBounce:     bounce,
+      mailboxAlias: resolvedMailboxAlias ?? null,
     },
   });
 
+  // ── Run intake routing rules (synchronous, before jobs are enqueued) ──────
+  const intakeResult = await runIntakeRouting(ticket.id, {
+    emailTo:      emailTo ?? null,
+    emailCc:      emailCc ?? null,
+    emailReplyTo: emailReplyTo ?? null,
+    isAutoReply:  autoReply,
+    isBounce:     bounce,
+    mailboxAlias: mailboxAlias ?? null,
+    spamScore,
+  });
+
+  // Respond to SendGrid — always 201 so it doesn't retry
   res.status(201).json({ ticket });
+
+  // ── Conditional post-creation processing ──────────────────────────────────
+  if (intakeResult.suppressed || intakeResult.spam) {
+    // Ticket was discarded or spammed by an intake rule — no further processing
+    void logAudit(ticket.id, null, "ticket.intake_suppressed", {
+      via: "email",
+      spam: intakeResult.spam,
+      suppressed: intakeResult.suppressed,
+    });
+    return;
+  }
 
   void logAudit(ticket.id, null, "ticket.created", { via: "email" });
   void saveInboundAttachments(files, ticket.id);
+  // Fire ticket.created through the event_workflow engine
+  fireTicketEvent("ticket.created", ticket.id, null);
 
-  // Auto-response email to the customer who submitted the ticket
-  void (async () => {
-    try {
-      const integrations = await getSection("integrations");
-      const apiKey   = integrations.sendgridApiKey  || process.env.SENDGRID_API_KEY  || "";
-      const fromAddr = integrations.fromEmail        || process.env.SENDGRID_FROM_EMAIL || "";
-      if (!apiKey || !fromAddr) return;
+  // ── Auto-response email (skip if an intake rule already sent one) ─────────
+  if (!intakeResult.autoReplySent) {
+    void (async () => {
+      try {
+        const integrations = await getSection("integrations");
+        const apiKey   = integrations.sendgridApiKey  || process.env.SENDGRID_API_KEY  || "";
+        const fromAddr = integrations.fromEmail        || process.env.SENDGRID_FROM_EMAIL || "";
+        if (!apiKey || !fromAddr) return;
 
-      const rendered = await renderNotificationEmail("ticket.created", {
-        entityNumber:  ticket.ticketNumber,
-        entityTitle:   ticket.subject,
-        entityUrl:     `/tickets/${ticket.id}`,
-        senderName:    ticket.senderName,
-        senderEmail:   ticket.senderEmail,
-        recipientName: ticket.senderName,
-      });
-      if (!rendered) return; // no active auto-response template configured
+        const rendered = await renderNotificationEmail("ticket.created", {
+          entityNumber:  ticket.ticketNumber,
+          entityTitle:   ticket.subject,
+          entityUrl:     `/tickets/${ticket.id}`,
+          senderName:    ticket.senderName,
+          senderEmail:   ticket.senderEmail,
+          recipientName: ticket.senderName,
+        });
+        if (!rendered) return;
 
-      await sendEmailJob({
-        to:       ticket.senderEmail,
-        subject:  rendered.subject,
-        body:     rendered.bodyText,
-        bodyHtml: rendered.bodyHtml,
-        // Thread replies back to the original email
-        ...(ticket.emailMessageId && { inReplyTo: ticket.emailMessageId, references: ticket.emailMessageId }),
-      });
-    } catch (err) {
-      console.error(`[auto-response] Failed for ticket ${ticket.id}:`, err);
-    }
-  })();
+        await sendEmailJob({
+          to:       ticket.senderEmail,
+          subject:  rendered.subject,
+          body:     rendered.bodyText,
+          bodyHtml: rendered.bodyHtml,
+          ...(ticket.emailMessageId && { inReplyTo: ticket.emailMessageId, references: ticket.emailMessageId }),
+        });
+      } catch (err) {
+        console.error(`[auto-response] Failed for ticket ${ticket.id}:`, err);
+      }
+    })();
+  }
 
-  sendClassifyJob(ticket).catch((error) =>
-    console.error(`Failed to enqueue classify job for ticket ${ticket.id}:`, error)
-  );
-
-  sendAutoResolveJob(ticket).catch((error) =>
-    console.error(`Failed to enqueue auto-resolve job for ticket ${ticket.id}:`, error)
-  );
+  // Skip AI processing for auto-replies, bounces, and quarantined tickets
+  if (!autoReply && !bounce && !intakeResult.quarantined) {
+    sendClassifyJob(ticket).catch((error) =>
+      console.error(`Failed to enqueue classify job for ticket ${ticket.id}:`, error)
+    );
+    sendAutoResolveJob(ticket).catch((error) =>
+      console.error(`Failed to enqueue auto-resolve job for ticket ${ticket.id}:`, error)
+    );
+  }
 });
 
 export default router;

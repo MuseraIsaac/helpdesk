@@ -23,6 +23,8 @@ import {
   syncTicketToIncident,
   syncTicketToServiceRequest,
 } from "../lib/ticket-sync";
+import { runIntakeRouting } from "../lib/intake-routing";
+import { fireTicketEvent } from "../lib/event-bus";
 
 interface TicketStatsRow {
   totalTickets: bigint;
@@ -69,6 +71,18 @@ const LIST_SELECT = {
   customTicketType: { select: { id: true, name: true, slug: true, color: true } },
   slaPausedAt: true,
   slaPausedMinutes: true,
+  // Last reply preview for hover card
+  replies: {
+    select: { body: true, senderType: true, user: { select: { name: true } }, createdAt: true },
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+  },
+  // Last internal note preview for hover card
+  notes: {
+    select: { body: true, author: { select: { name: true } }, createdAt: true },
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+  },
 } as const;
 
 const router = Router();
@@ -215,11 +229,15 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
     { trigger: "ticket.created" }
   );
 
-  // Re-fetch to pick up any rule-applied field changes before running escalation checks
-  const afterRules = await prisma.ticket.findUnique({ where: { id: ticket.id } });
+  // Run intake routing rules (no email meta for agent-created tickets)
+  void runIntakeRouting(ticket.id, null);
 
-  // Auto-escalate if urgent or sev1 (now sees rule-applied priority)
-  await checkAndEscalate(afterRules!);
+  // Fire ticket.created through the event_workflow engine
+  fireTicketEvent("ticket.created", ticket.id, req.user.id);
+
+  // Re-fetch to pick up any rule-applied field changes
+  const afterRules = await prisma.ticket.findUnique({ where: { id: ticket.id } });
+  void afterRules; // escalation is now manual-only — no auto-escalation on creation
 
   // Final re-fetch with full includes
   const fresh = await prisma.ticket.findUnique({
@@ -353,11 +371,33 @@ router.get("/", requireAuth, async (req, res) => {
   ]);
 
   res.json({
-    tickets: tickets.map(t => ({
-      ...withSlaInfo(t),
-      organization: t.customer?.organization?.name ?? null,
-      customer: undefined,
-    })),
+    tickets: tickets.map(t => {
+      const raw = t as typeof t & {
+        replies?: { body: string; senderType: string; user: { name: string } | null; createdAt: Date }[];
+        notes?:   { body: string; author: { name: string } | null; createdAt: Date }[];
+      };
+      const lastReplyRow = raw.replies?.[0] ?? null;
+      const lastNoteRow  = raw.notes?.[0]   ?? null;
+
+      return {
+        ...withSlaInfo(t),
+        organization: t.customer?.organization?.name ?? null,
+        customer:     undefined,
+        replies:      undefined,
+        notes:        undefined,
+        lastReply: lastReplyRow ? {
+          body:       lastReplyRow.body,
+          senderType: lastReplyRow.senderType as "agent" | "customer",
+          authorName: lastReplyRow.user?.name ?? null,
+          createdAt:  lastReplyRow.createdAt.toISOString(),
+        } : null,
+        lastNote: lastNoteRow ? {
+          body:       lastNoteRow.body,
+          authorName: lastNoteRow.author?.name ?? null,
+          createdAt:  lastNoteRow.createdAt.toISOString(),
+        } : null,
+      };
+    }),
     total,
     page: query.page,
     pageSize: query.pageSize,
@@ -409,6 +449,8 @@ router.get("/:id", requireAuth, async (req, res) => {
       assignedTo: { select: { id: true, name: true } },
       team: { select: { id: true, name: true, color: true } },
       escalationEvents: { orderBy: { createdAt: "asc" } },
+      escalatedToTeam: { select: { id: true, name: true, color: true } },
+      escalatedToUser: { select: { id: true, name: true } },
       auditEvents: {
         orderBy: { createdAt: "asc" },
         include: { actor: { select: { id: true, name: true } } },
@@ -658,6 +700,11 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
     }
   }
 
+  // Stamp statusChangedAt when status changes (used by time-supervisor for hoursInCurrentStatus)
+  if ("status" in data && data.status !== ticket.status) {
+    updateData.statusChangedAt = new Date() as any;
+  }
+
   // Stamp resolvedAt when moving to a terminal status
   if ("status" in data && (data.status === "resolved" || data.status === "closed")) {
     const now = new Date();
@@ -667,27 +714,31 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
     }
   }
 
-  // Handle manual de-escalation inline (escalation is handled after the update)
+  // Handle de-escalation inline
   if (data.escalate === false) {
-    updateData.isEscalated = false;
+    updateData.isEscalated      = false;
+    updateData.status           = "in_progress";
+    (updateData as Record<string, unknown>).escalatedToTeamId = null;
+    (updateData as Record<string, unknown>).escalatedToUserId = null;
   }
 
   const updated = await prisma.ticket.update({
     where: { id },
     data: updateData,
     include: {
-      assignedTo: { select: { id: true, name: true } },
-      team: { select: { id: true, name: true, color: true } },
-      escalationEvents: { orderBy: { createdAt: "asc" } },
+      assignedTo:      { select: { id: true, name: true } },
+      team:            { select: { id: true, name: true, color: true } },
+      escalationEvents:{ orderBy: { createdAt: "asc" } },
+      escalatedToTeam: { select: { id: true, name: true, color: true } },
+      escalatedToUser: { select: { id: true, name: true } },
     },
   });
 
-  // Post-update: run auto-escalation checks based on new state
+  // Manual escalation with optional team/agent target
   if (data.escalate === true) {
-    await escalateTicket(id, "manual", req.user.id);
-  } else if (data.escalate !== false) {
-    // Check auto-conditions (priority/severity changes may trigger escalation)
-    await checkAndEscalate(updated);
+    const teamId = (data as Record<string, unknown>).escalateToTeamId as number | undefined;
+    const userId = (data as Record<string, unknown>).escalateToUserId as string | undefined;
+    await escalateTicket(id, "manual", req.user.id, teamId ?? null, userId ?? null);
   }
   if (data.escalate === false) {
     await logAudit(id, req.user.id, "ticket.deescalated");
@@ -703,7 +754,7 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
       })
     );
 
-    // Notify followers of the status change (fire-and-forget)
+    // Notify watchers of the status change (fire-and-forget)
     void (async () => {
       const settings = await getSection("notifications");
       if (settings?.notifyOnFollowedTicketStatusChanged === false) return;
@@ -777,6 +828,41 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
     }
   }
   await Promise.all(auditLogs);
+
+  // ── Fire event_workflow events for each field that changed ────────────────
+  // previousValues are captured before the DB update; each specific trigger
+  // lets workflow rules react precisely to the type of change.
+  const prev: Record<string, unknown> = {};
+  if ("status" in data && data.status !== ticket.status) {
+    prev.status = ticket.status;
+    fireTicketEvent("ticket.status_changed", id, req.user.id, prev);
+  }
+  if ("priority" in data && data.priority !== ticket.priority) {
+    const priorityPrev: Record<string, unknown> = { priority: ticket.priority };
+    fireTicketEvent("ticket.priority_changed", id, req.user.id, priorityPrev);
+  }
+  if ("category" in data && data.category !== ticket.category) {
+    const categoryPrev: Record<string, unknown> = { category: ticket.category };
+    fireTicketEvent("ticket.category_changed", id, req.user.id, categoryPrev);
+  }
+  if ("assignedToId" in data && data.assignedToId !== ticket.assignedToId) {
+    const assignPrev: Record<string, unknown> = { assignedToId: ticket.assignedToId };
+    fireTicketEvent(
+      data.assignedToId ? "ticket.assigned" : "ticket.unassigned",
+      id, req.user.id, assignPrev,
+    );
+  }
+  // Generic ticket.updated always fires on any change
+  fireTicketEvent("ticket.updated", id, req.user.id, {
+    status:      ticket.status,
+    priority:    ticket.priority,
+    category:    ticket.category,
+    assignedToId: ticket.assignedToId,
+    teamId:      ticket.teamId,
+    severity:    ticket.severity,
+    impact:      ticket.impact,
+    urgency:     ticket.urgency,
+  });
 
   // Run automation rules against the post-update ticket state
   await runRules(

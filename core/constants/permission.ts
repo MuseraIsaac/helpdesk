@@ -99,6 +99,11 @@
  * │ workflows.manage             │   ✓   │            │       │          │
  * │ scenarios.run                │   ✓   │     ✓      │   ✓   │          │
  * │ scenarios.manage             │   ✓   │     ✓      │       │          │
+ * │ automations.view             │   ✓   │     ✓      │       │    ✓     │
+ * │ automations.manage           │   ✓   │            │       │          │
+ * │ automations.test             │   ✓   │     ✓      │       │          │
+ * │ webhooks.view                │   ✓   │            │       │          │
+ * │ webhooks.manage              │   ✓   │            │       │          │
  * │ ── Platform Administration ────────────────────────────────────────── │
  * │ users.manage                 │   ✓   │            │       │          │
  * │ teams.manage                 │   ✓   │            │       │          │
@@ -210,6 +215,13 @@ export type Permission =
   | "scenarios.run"
   | "scenarios.manage"
 
+  // ── Automation Platform ────────────────────────────────────────────────────
+  | "automations.view"    // Read automation rules, categories, and execution history
+  | "automations.manage"  // Create, edit, delete, reorder, enable/disable rules
+  | "automations.test"    // Manually trigger a rule against a specific entity
+  | "webhooks.view"       // View outbound webhook configs and delivery logs
+  | "webhooks.manage"     // Create, edit, delete, enable/disable outbound webhooks
+
   // ── Platform Administration ────────────────────────────────────────────────
   | "users.manage"
   | "teams.manage"
@@ -299,6 +311,12 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "workflows.manage",
   "scenarios.run",
   "scenarios.manage",
+  // Automation Platform
+  "automations.view",
+  "automations.manage",
+  "automations.test",
+  "webhooks.view",
+  "webhooks.manage",
   // Platform Administration
   "users.manage",
   "teams.manage",
@@ -388,6 +406,9 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "workflows.view",    // Read-only workflow visibility; cannot edit definitions
   "scenarios.run",
   "scenarios.manage",
+  // Automation Platform — supervisor can view and test but not manage
+  "automations.view",
+  "automations.test",
   // Platform Administration
   "kb.manage",
   "audit.view",
@@ -489,6 +510,8 @@ const READONLY_PERMISSIONS: Permission[] = [
   "catalog.view",
   "approvals.view",
   "workflows.view",
+  // Automation Platform — readonly can see rules but not manage or test
+  "automations.view",
   // Platform Administration
   "audit.view",
   "reports.view",

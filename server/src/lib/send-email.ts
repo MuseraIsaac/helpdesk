@@ -22,6 +22,13 @@ interface SendEmailJobData {
    * payload stays small regardless of file size.
    */
   attachmentIds?: number[];
+  /**
+   * Override the system-default from address for this message.
+   * Used for team-branded replies: { email: "support@acme.io", name: "Isaac Musera" }
+   * produces the From header: "Isaac Musera <support@acme.io>"
+   * If omitted, falls back to the integrations.fromEmail setting / SENDGRID_FROM_EMAIL env var.
+   */
+  from?: { email: string; name?: string };
 }
 
 export async function registerSendEmailWorker(boss: PgBoss): Promise<void> {
@@ -32,19 +39,27 @@ export async function registerSendEmailWorker(boss: PgBoss): Promise<void> {
   });
 
   await boss.work<SendEmailJobData>(QUEUE_NAME, async (jobs) => {
-    const { to, subject, body, bodyHtml, cc, bcc, inReplyTo, references, attachmentIds } =
+    const { to, subject, body, bodyHtml, cc, bcc, inReplyTo, references, attachmentIds, from } =
       jobs[0]!.data;
 
     try {
       // Read credentials from settings DB at send time; fall back to env vars
       const integrations = await getSection("integrations");
-      const apiKey  = integrations.sendgridApiKey  || process.env.SENDGRID_API_KEY  || "";
-      const fromAddr = integrations.fromEmail       || process.env.SENDGRID_FROM_EMAIL || "";
+      const apiKey   = integrations.sendgridApiKey  || process.env.SENDGRID_API_KEY  || "";
+      const fromAddr = integrations.fromEmail        || process.env.SENDGRID_FROM_EMAIL || "";
 
       if (!apiKey)  throw new Error("SendGrid API key not configured");
-      if (!fromAddr) throw new Error("From email address not configured");
+      if (!fromAddr && !from) throw new Error("From email address not configured");
 
       sgMail.setApiKey(apiKey);
+
+      // Resolve the from field: use the per-message override when provided,
+      // otherwise fall back to the system-wide fromEmail setting.
+      const resolvedFrom: string | { email: string; name: string } = from
+        ? from.name
+          ? { email: from.email, name: from.name }
+          : from.email
+        : fromAddr;
 
       // Resolve attachment files from disk just before sending
       type SgAttachment = {
@@ -90,7 +105,7 @@ export async function registerSendEmailWorker(boss: PgBoss): Promise<void> {
 
       await sgMail.send({
         to,
-        from: fromAddr,
+        from: resolvedFrom,
         subject,
         text: body,
         ...(cc?.length && { cc }),

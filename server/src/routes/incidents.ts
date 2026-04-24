@@ -23,6 +23,7 @@ import { syncIncidentToTicket } from "../lib/ticket-sync";
 import { applyEscalationRules, sendEscalationNotifications } from "../lib/apply-escalation-rules";
 import { notifyMentions } from "../lib/mentions";
 import { notifyEntityFollowers } from "../lib/notify-entity-followers";
+import { fireIncidentEvent } from "../lib/event-bus";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -302,6 +303,9 @@ router.post(
       });
     })();
 
+    // Fire incident.created event for event_workflow rules
+    fireIncidentEvent("incident.created", incident.id, req.user.id);
+
     res.status(201).json(withIncidentSlaInfo(incident));
   }
 );
@@ -502,6 +506,17 @@ router.patch(
         toStatus:     data.status,
         entityUrl:    `/incidents/${id}`,
       });
+    }
+
+    // Fire event_workflow events for incident state changes
+    if (data.status && data.status !== current.status) {
+      fireIncidentEvent("incident.status_changed", id, req.user.id, { status: current.status });
+    }
+    if (data.priority && data.priority !== current.priority) {
+      fireIncidentEvent("incident.severity_changed", id, req.user.id, { priority: current.priority });
+    }
+    if ("assignedToId" in data && data.assignedToId !== current.assignedToId) {
+      fireIncidentEvent("incident.assigned", id, req.user.id, { assignedToId: current.assignedToId });
     }
 
     // Back-sync relevant changes to the linked source ticket (fire-and-forget)

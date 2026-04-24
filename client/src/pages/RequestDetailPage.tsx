@@ -57,7 +57,7 @@ import {
   Server,
 } from "lucide-react";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
-import FollowButton from "@/components/FollowButton";
+import WatchButton from "@/components/FollowButton";
 import AssetLinksPanel from "@/components/AssetLinksPanel";
 
 // ── Event label map ───────────────────────────────────────────────────────────
@@ -601,7 +601,7 @@ export default function RequestDetailPage() {
 
           {/* Follow + Save as Template + status transitions */}
           <div className="flex items-center gap-2 flex-wrap">
-            <FollowButton entityPath="requests" entityId={request.id} />
+            <WatchButton entityPath="requests" entityId={request.id} />
             <Button
               type="button"
               variant="outline"

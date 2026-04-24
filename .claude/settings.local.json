@@ -113,7 +113,14 @@
       "Bash(bunx shadcn@latest add tooltip --yes)",
       "Bash(bunx shadcn@latest add tooltip)",
       "Bash(bun check-users.ts)",
-      "PowerShell(Get-NetTCPConnection *)"
+      "PowerShell(Get-NetTCPConnection *)",
+      "Bash(echo \"CLIENT:$?\")",
+      "Bash(echo \"SERVER:$?\")",
+      "Bash(git -C \"C:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk\" status --short)",
+      "Bash(bun _check_auth.ts)",
+      "Bash(bun _fix_auth.ts)",
+      "Bash(grep -E \"\\\\.tsx$\")",
+      "Bash(grep -r \"on-duty\\\\|onDuty\" \"C:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk\" -path \"*/node_modules\" -prune -o --include=\"*.ts\" --include=\"*.tsx\" -print)"
     ]
   }
 }

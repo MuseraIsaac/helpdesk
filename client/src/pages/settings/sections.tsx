@@ -136,7 +136,7 @@ export function GeneralSection() {
   const update = useUpdateSettings("general");
 
   const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
-    useForm<GeneralSettings>({ resolver: zodResolver(generalSettingsSchema) });
+    useForm<GeneralSettings>({ resolver: zodResolver(generalSettingsSchema), defaultValues: generalSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -157,8 +157,15 @@ export function GeneralSection() {
           <Input id="helpdeskName" {...register("helpdeskName")} />
           {errors.helpdeskName && <p className="text-xs text-destructive mt-1">{errors.helpdeskName.message}</p>}
         </SettingsField>
-        <SettingsField label="Support email" description="Reply-to address for outbound emails." htmlFor="supportEmail">
+        <SettingsField label="Support email" description="Default reply-to / from address for outbound agent emails." htmlFor="supportEmail">
           <Input id="supportEmail" type="email" placeholder="support@example.com" {...register("supportEmail")} />
+        </SettingsField>
+        <SettingsField
+          label="Inbound support email"
+          description="The email address customers send tickets to. Configure this address in SendGrid Inbound Parse to forward inbound mail to your webhook."
+          htmlFor="inboundEmail"
+        >
+          <Input id="inboundEmail" type="email" placeholder="support@yourdomain.com" {...register("inboundEmail")} />
         </SettingsField>
       </SettingsGroup>
 
@@ -286,7 +293,7 @@ export function BrandingSection() {
   const update = useUpdateSettings("branding");
 
   const { register, handleSubmit, reset, watch, setValue, formState: { isDirty } } =
-    useForm<BrandingSettings>({ resolver: zodResolver(brandingSettingsSchema) });
+    useForm<BrandingSettings>({ resolver: zodResolver(brandingSettingsSchema), defaultValues: brandingSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -428,7 +435,7 @@ export function TicketsSection() {
   const update = useUpdateSettings("tickets");
 
   const { handleSubmit, reset, control, register, watch, formState: { isDirty, errors } } =
-    useForm<TicketsSettings>({ resolver: zodResolver(ticketsSettingsSchema) });
+    useForm<TicketsSettings>({ resolver: zodResolver(ticketsSettingsSchema), defaultValues: ticketsSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -786,7 +793,7 @@ export function SlaSection() {
   const update = useUpdateSettings("sla");
 
   const { register, handleSubmit, reset, control, watch, setValue, formState: { isDirty, errors } } =
-    useForm<SlaSettings>({ resolver: zodResolver(slaSettingsSchema) });
+    useForm<SlaSettings>({ resolver: zodResolver(slaSettingsSchema), defaultValues: slaSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -911,7 +918,7 @@ export function KnowledgeBaseSection() {
   const update = useUpdateSettings("knowledge_base");
 
   const { handleSubmit, reset, control, register, formState: { isDirty, errors } } =
-    useForm<KnowledgeBaseSettings>({ resolver: zodResolver(knowledgeBaseSettingsSchema) });
+    useForm<KnowledgeBaseSettings>({ resolver: zodResolver(knowledgeBaseSettingsSchema), defaultValues: knowledgeBaseSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -974,7 +981,7 @@ export function TemplatesSection() {
   const update = useUpdateSettings("templates");
 
   const { handleSubmit, reset, control, formState: { isDirty } } =
-    useForm<TemplatesSettings>({ resolver: zodResolver(templatesSettingsSchema) });
+    useForm<TemplatesSettings>({ resolver: zodResolver(templatesSettingsSchema), defaultValues: templatesSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -1019,7 +1026,7 @@ export function AutomationsSection() {
   const update = useUpdateSettings("automations");
 
   const { handleSubmit, reset, control, register, formState: { isDirty, errors } } =
-    useForm<AutomationsSettings>({ resolver: zodResolver(automationsSettingsSchema) });
+    useForm<AutomationsSettings>({ resolver: zodResolver(automationsSettingsSchema), defaultValues: automationsSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -1070,7 +1077,7 @@ export function UsersRolesSection() {
   const update = useUpdateSettings("users_roles");
 
   const { handleSubmit, reset, control, formState: { isDirty } } =
-    useForm<UsersRolesSettings>({ resolver: zodResolver(usersRolesSettingsSchema) });
+    useForm<UsersRolesSettings>({ resolver: zodResolver(usersRolesSettingsSchema), defaultValues: usersRolesSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -1177,7 +1184,7 @@ export function AppearanceSection() {
   const update = useUpdateSettings("appearance");
 
   const { handleSubmit, reset, control, watch, formState: { isDirty } } =
-    useForm<AppearanceSettings>({ resolver: zodResolver(appearanceSettingsSchema) });
+    useForm<AppearanceSettings>({ resolver: zodResolver(appearanceSettingsSchema), defaultValues: appearanceSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -1473,9 +1480,19 @@ function VideoBridgeGroup({
             label="Refresh Token"
             description={
               <span>
-                Obtain via <strong>Google OAuth Playground</strong> (oauth2.googleapis.com/tokeninfo) using scope{" "}
-                <code className="text-[11px] bg-muted px-1 rounded">https://www.googleapis.com/auth/calendar.events</code>.
-                Paste the refresh token here — it does not expire unless revoked.
+                Obtain via{" "}
+                <a
+                  href="https://developers.google.com/oauthplayground/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-medium"
+                >
+                  Google OAuth Playground
+                </a>{" "}
+                (developers.google.com/oauthplayground). In Step 1 select scope{" "}
+                <code className="text-[11px] bg-muted px-1 rounded">https://www.googleapis.com/auth/calendar.events</code>,
+                then in Step 2 click <em>Exchange authorization code for tokens</em> and copy the{" "}
+                <strong>Refresh token</strong>. Make sure to tick <em>Use your own OAuth credentials</em> and enter your Client ID + Secret first.
               </span>
             }
           >
@@ -1557,12 +1574,359 @@ function VideoBridgeGroup({
   );
 }
 
+// ── Inbound Mailboxes Manager ─────────────────────────────────────────────────
+
+import { mailboxSchema, type Mailbox } from "core/schemas/settings.ts";
+import { ticketPriorities, priorityLabel } from "core/constants/ticket-priority.ts";
+import { Mail, MailPlus, CheckCircle2, XCircle, Pencil } from "lucide-react";
+
+interface MailboxTeam { id: number; name: string; color: string }
+
+function MailboxDialog({
+  mailbox,
+  onSave,
+  onClose,
+}: {
+  mailbox?: Mailbox | null;
+  onSave: (m: Mailbox) => void;
+  onClose: () => void;
+}) {
+  const isEdit = Boolean(mailbox);
+  const { data: teamsData } = useQuery<MailboxTeam[]>({
+    queryKey: ["teams"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ teams: MailboxTeam[] }>("/api/teams");
+      return data.teams;
+    },
+  });
+
+  const { register, handleSubmit, control, formState: { errors } } = useForm<Mailbox>({
+    resolver: zodResolver(mailboxSchema),
+    defaultValues: {
+      id:              mailbox?.id              ?? crypto.randomUUID(),
+      address:         mailbox?.address         ?? "",
+      label:           mailbox?.label           ?? "",
+      teamId:          mailbox?.teamId          ?? null,
+      defaultPriority: mailbox?.defaultPriority ?? null,
+      isActive:        mailbox?.isActive        ?? true,
+    },
+  });
+
+  return (
+    <DialogContent className="max-w-md">
+      <DialogHeader>
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/20 bg-primary/10">
+            <MailPlus className="h-4 w-4 text-primary" />
+          </div>
+          <DialogTitle>{isEdit ? "Edit Mailbox" : "Add Inbound Mailbox"}</DialogTitle>
+        </div>
+      </DialogHeader>
+
+      <form onSubmit={handleSubmit(onSave)} className="space-y-4 mt-1">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">
+            Email Address <span className="text-destructive">*</span>
+          </label>
+          <div className="relative">
+            <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              type="email"
+              {...register("address")}
+              placeholder="billing@yourcompany.com"
+              className="h-9 pl-8 text-sm font-mono"
+            />
+          </div>
+          {errors.address && <ErrorMessage message={errors.address.message} />}
+          <p className="text-[11px] text-muted-foreground">
+            Configure this address in your email provider (e.g. SendGrid Inbound Parse)
+            to forward mail to the webhook.
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">
+            Display Label <span className="text-destructive">*</span>
+          </label>
+          <Input
+            {...register("label")}
+            placeholder="e.g. Billing Support"
+            className="h-9 text-sm"
+          />
+          {errors.label && <ErrorMessage message={errors.label.message} />}
+          <p className="text-[11px] text-muted-foreground">
+            Used as the mailbox alias on created tickets.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Default Team</label>
+            <Controller
+              name="teamId"
+              control={control}
+              render={({ field }) => (
+                <select
+                  value={field.value ?? ""}
+                  onChange={(e) => field.onChange(e.target.value ? Number(e.target.value) : null)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="">None</option>
+                  {(teamsData ?? []).map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              )}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Default Priority</label>
+            <Controller
+              name="defaultPriority"
+              control={control}
+              render={({ field }) => (
+                <select
+                  value={field.value ?? ""}
+                  onChange={(e) => field.onChange(e.target.value || null)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="">None</option>
+                  {ticketPriorities.map((p) => (
+                    <option key={p} value={p}>{priorityLabel[p]}</option>
+                  ))}
+                </select>
+              )}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+          <div>
+            <p className="text-sm font-medium">Active</p>
+            <p className="text-[11px] text-muted-foreground">Inactive mailboxes are ignored on inbound email</p>
+          </div>
+          <Controller
+            name="isActive"
+            control={control}
+            render={({ field }) => (
+              <Switch checked={field.value} onCheckedChange={field.onChange} />
+            )}
+          />
+        </div>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button type="submit" size="sm">
+            {isEdit ? "Save Changes" : "Add Mailbox"}
+          </Button>
+        </div>
+      </form>
+    </DialogContent>
+  );
+}
+
+const PRIORITY_COLORS: Record<string, string> = {
+  low:    "text-blue-500 bg-blue-500/10",
+  medium: "text-yellow-600 bg-yellow-500/10",
+  high:   "text-orange-500 bg-orange-500/10",
+  urgent: "text-red-500 bg-red-500/10",
+};
+
+function InboundMailboxesManager() {
+  const queryClient = useQueryClient();
+  const { data: settings } = useSettings("integrations");
+  const update = useUpdateSettings("integrations");
+  const [editMailbox, setEditMailbox] = useState<Mailbox | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+
+  const { data: teamsData } = useQuery<MailboxTeam[]>({
+    queryKey: ["teams"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ teams: MailboxTeam[] }>("/api/teams");
+      return data.teams;
+    },
+  });
+  const teamsById = Object.fromEntries((teamsData ?? []).map((t) => [t.id, t]));
+
+  const mailboxes: Mailbox[] = settings?.mailboxes ?? [];
+
+  function save(updated: Mailbox[]) {
+    update.mutate({ mailboxes: updated } as any);
+  }
+
+  function handleSaveMailbox(mb: Mailbox) {
+    const exists = mailboxes.some((m) => m.id === mb.id);
+    const next = exists
+      ? mailboxes.map((m) => (m.id === mb.id ? mb : m))
+      : [...mailboxes, mb];
+    save(next);
+    setAddOpen(false);
+    setEditMailbox(null);
+  }
+
+  function handleDelete(id: string) {
+    if (!confirm("Remove this mailbox?")) return;
+    save(mailboxes.filter((m) => m.id !== id));
+  }
+
+  function handleToggleActive(mb: Mailbox) {
+    save(mailboxes.map((m) => (m.id === mb.id ? { ...m, isActive: !m.isActive } : m)));
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4 mt-8">
+      {/* Section header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">Inbound Mailboxes</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Additional email addresses that create tickets when emailed. Configure each
+            in SendGrid (or your provider's) Inbound Parse to forward to your webhook.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5 shrink-0"
+          onClick={() => setAddOpen(true)}
+        >
+          <MailPlus className="h-3.5 w-3.5" />
+          Add Mailbox
+        </Button>
+      </div>
+
+      {/* Mailbox list */}
+      {mailboxes.length === 0 ? (
+        <div className="rounded-xl border border-dashed bg-muted/20 px-5 py-8 flex flex-col items-center gap-2 text-center">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+            <Mail className="h-5 w-5 text-muted-foreground/60" />
+          </div>
+          <p className="text-sm font-medium">No additional mailboxes</p>
+          <p className="text-xs text-muted-foreground max-w-xs">
+            Add inbound email addresses to receive tickets from multiple support inboxes.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {mailboxes.map((mb) => {
+            const team = mb.teamId ? teamsById[mb.teamId] : null;
+            return (
+              <div
+                key={mb.id}
+                className={[
+                  "flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors",
+                  mb.isActive ? "bg-card" : "bg-muted/30 opacity-70",
+                ].join(" ")}
+              >
+                {/* Icon */}
+                <div className={[
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+                  mb.isActive ? "bg-primary/10 border border-primary/20" : "bg-muted border border-border",
+                ].join(" ")}>
+                  <Mail className={`h-3.5 w-3.5 ${mb.isActive ? "text-primary" : "text-muted-foreground"}`} />
+                </div>
+
+                {/* Details */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-mono font-medium truncate">{mb.address}</span>
+                    {mb.isActive ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle2 className="h-3 w-3" /> Active
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                        <XCircle className="h-3 w-3" /> Inactive
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                    <span className="text-[11px] text-muted-foreground">{mb.label}</span>
+                    {team && (
+                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: team.color }} />
+                        {team.name}
+                      </span>
+                    )}
+                    {mb.defaultPriority && (
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${PRIORITY_COLORS[mb.defaultPriority] ?? ""}`}>
+                        {priorityLabel[mb.defaultPriority]}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    title={mb.isActive ? "Deactivate" : "Activate"}
+                    onClick={() => handleToggleActive(mb)}
+                  >
+                    {mb.isActive
+                      ? <XCircle className="h-3.5 w-3.5" />
+                      : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    title="Edit mailbox"
+                    onClick={() => setEditMailbox(mb)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    title="Remove mailbox"
+                    onClick={() => handleDelete(mb.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Add dialog */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        {addOpen && (
+          <MailboxDialog onSave={handleSaveMailbox} onClose={() => setAddOpen(false)} />
+        )}
+      </Dialog>
+
+      {/* Edit dialog */}
+      <Dialog open={editMailbox !== null} onOpenChange={(o) => !o && setEditMailbox(null)}>
+        {editMailbox && (
+          <MailboxDialog
+            mailbox={editMailbox}
+            onSave={handleSaveMailbox}
+            onClose={() => setEditMailbox(null)}
+          />
+        )}
+      </Dialog>
+    </div>
+  );
+}
+
+// ── Integrations Section ──────────────────────────────────────────────────────
+
 export function IntegrationsSection() {
   const { data, isLoading } = useSettings("integrations");
   const update = useUpdateSettings("integrations");
 
   const { handleSubmit, reset, control, register, watch, formState: { isDirty, errors } } =
-    useForm<IntegrationsSettings>({ resolver: zodResolver(integrationsSettingsSchema) });
+    useForm<IntegrationsSettings>({ resolver: zodResolver(integrationsSettingsSchema), defaultValues: integrationsSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -1573,6 +1937,7 @@ export function IntegrationsSection() {
   if (isLoading) return <SectionLoading />;
 
   return (
+    <>
     <SettingsFormShell
       title="Integrations"
       description="Connect email providers, Slack, and third-party services. API keys are stored encrypted and never echoed back."
@@ -1679,7 +2044,34 @@ export function IntegrationsSection() {
       </SettingsGroup>
 
       <VideoBridgeGroup control={control} register={register} watch={watch} />
+
+      <SettingsGroup title="Live Channels">
+        <p className="text-sm text-muted-foreground -mt-1 mb-3">
+          Two-way live support channels. Configure your provider credentials below to enable each channel.
+        </p>
+        {([
+          { key: "chat",        label: "Live Chat Widget",    desc: "Embed a chat widget on your website or portal for real-time support." },
+          { key: "whatsapp",    label: "WhatsApp Business",   desc: "Receive and reply to WhatsApp messages via the WhatsApp Business API." },
+          { key: "slack_teams", label: "Slack / MS Teams",    desc: "Create tickets from Slack messages or MS Teams channels and reply in-thread." },
+          { key: "voice",       label: "Voice (VoIP)",        desc: "Log inbound phone calls and manage call recordings alongside tickets." },
+          { key: "social",      label: "Social Media",        desc: "Monitor Twitter/X, Facebook, and Instagram mentions and convert them to tickets." },
+        ] as const).map(({ key, label, desc }) => (
+          <div key={key} className="flex items-start gap-3 rounded-lg border border-dashed border-border/60 bg-muted/20 px-4 py-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium">{label}</p>
+                <Badge variant="secondary" className="text-[10px] h-4 px-1.5">Coming Soon</Badge>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+            </div>
+          </div>
+        ))}
+      </SettingsGroup>
     </SettingsFormShell>
+
+    {/* Inbound mailboxes are managed with their own CRUD UX — outside the main form */}
+    <InboundMailboxesManager />
+    </>
   );
 }
 
@@ -1690,7 +2082,7 @@ export function AdvancedSection() {
   const update = useUpdateSettings("advanced");
 
   const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
-    useForm<AdvancedSettings>({ resolver: zodResolver(advancedSettingsSchema) });
+    useForm<AdvancedSettings>({ resolver: zodResolver(advancedSettingsSchema), defaultValues: advancedSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -1774,7 +2166,7 @@ export function IncidentsSection() {
   const { data, isLoading } = useSettings("incidents");
   const update = useUpdateSettings("incidents");
   const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
-    useForm<IncidentsSettings>({ resolver: zodResolver(incidentsSettingsSchema) });
+    useForm<IncidentsSettings>({ resolver: zodResolver(incidentsSettingsSchema), defaultValues: incidentsSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
   return (
@@ -1902,7 +2294,7 @@ export function RequestsSection() {
   const { data, isLoading } = useSettings("requests");
   const update = useUpdateSettings("requests");
   const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
-    useForm<RequestsSettings>({ resolver: zodResolver(requestsSettingsSchema) });
+    useForm<RequestsSettings>({ resolver: zodResolver(requestsSettingsSchema), defaultValues: requestsSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
   return (
@@ -1992,7 +2384,7 @@ export function ProblemsSection() {
   const { data, isLoading } = useSettings("problems");
   const update = useUpdateSettings("problems");
   const { register, handleSubmit, reset, control, formState: { isDirty } } =
-    useForm<ProblemsSettings>({ resolver: zodResolver(problemsSettingsSchema) });
+    useForm<ProblemsSettings>({ resolver: zodResolver(problemsSettingsSchema), defaultValues: problemsSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
   return (
@@ -2059,7 +2451,7 @@ export function ChangesSection() {
   const { data, isLoading } = useSettings("changes");
   const update = useUpdateSettings("changes");
   const { register, handleSubmit, reset, control, formState: { isDirty } } =
-    useForm<ChangesSettings>({ resolver: zodResolver(changesSettingsSchema) });
+    useForm<ChangesSettings>({ resolver: zodResolver(changesSettingsSchema), defaultValues: changesSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
   const freezeEnabled = useWatch({ control, name: "freezeWindowEnabled" });
   const pirEnabled    = useWatch({ control, name: "postImplementationReviewEnabled" });
@@ -2218,7 +2610,7 @@ export function ChangesSection() {
           htmlFor="maxApprovalResends"
         >
           <div className="flex items-center gap-2">
-            <Input id="maxApprovalResends" type="number" min={1} className="w-20"
+            <Input id="maxApprovalResends" type="number" min={0} className="w-20"
               {...register("maxApprovalResends", { valueAsNumber: true })} />
             <span className="text-xs text-muted-foreground">sends</span>
           </div>
@@ -2349,7 +2741,7 @@ export function ApprovalsSection() {
   const { data, isLoading } = useSettings("approvals");
   const update = useUpdateSettings("approvals");
   const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
-    useForm<ApprovalsSettings>({ resolver: zodResolver(approvalsSettingsSchema) });
+    useForm<ApprovalsSettings>({ resolver: zodResolver(approvalsSettingsSchema), defaultValues: approvalsSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
   return (
@@ -2427,7 +2819,7 @@ export function CmdbSection() {
   const { data, isLoading } = useSettings("cmdb");
   const update = useUpdateSettings("cmdb");
   const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
-    useForm<CmdbSettings>({ resolver: zodResolver(cmdbSettingsSchema) });
+    useForm<CmdbSettings>({ resolver: zodResolver(cmdbSettingsSchema), defaultValues: cmdbSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
   return (
@@ -2493,6 +2885,33 @@ export function CmdbSection() {
           </div>
           {errors.dependencyTreeDepth && <p className="text-xs text-destructive mt-1">{errors.dependencyTreeDepth.message}</p>}
         </SettingsField>
+      </SettingsGroup>
+
+      <SettingsGroup title="Discovery Connectors">
+        <p className="text-sm text-muted-foreground -mt-1 mb-3">
+          Discovery connectors automatically populate your CMDB by scanning your environment. Configure connectors in{" "}
+          <Link to="/admin/discovery" className="text-primary underline underline-offset-2">Administration → Discovery</Link>.
+        </p>
+        {([
+          { key: "agent",   label: "Agent-based Discovery",           desc: "Lightweight agent installed on endpoints to report hardware and software inventory." },
+          { key: "network", label: "Network Scan (SNMP / SSH)",       desc: "Scan subnets via SNMP or SSH to enumerate network devices and servers." },
+          { key: "cloud",   label: "Cloud Provider (AWS / Azure / GCP)", desc: "Sync cloud resources (VMs, databases, functions) directly from provider APIs." },
+          { key: "mdm",     label: "MDM Integration",                 desc: "Pull device inventory from Jamf, Intune, or another MDM solution." },
+          { key: "ad",      label: "Active Directory / LDAP",         desc: "Import workstations, servers, and users from AD/LDAP automatically." },
+        ] as const).map(({ key, label, desc }) => (
+          <div key={key} className="flex items-start justify-between gap-3 rounded-lg border border-dashed border-border/60 bg-muted/20 px-4 py-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium">{label}</p>
+                <Badge variant="secondary" className="text-[10px] h-4 px-1.5">Configure in Discovery</Badge>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+            </div>
+            <Link to="/admin/discovery">
+              <Button type="button" variant="outline" size="sm" className="text-xs h-7 shrink-0">Configure</Button>
+            </Link>
+          </div>
+        ))}
       </SettingsGroup>
     </SettingsFormShell>
   );
@@ -2672,7 +3091,7 @@ export function NotificationsSection() {
   const { data, isLoading } = useSettings("notifications");
   const update = useUpdateSettings("notifications");
   const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
-    useForm<NotificationsSettings>({ resolver: zodResolver(notificationsSettingsSchema) });
+    useForm<NotificationsSettings>({ resolver: zodResolver(notificationsSettingsSchema), defaultValues: notificationsSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
   const digestEnabled = useWatch({ control, name: "digestModeEnabled" });
 
@@ -2758,42 +3177,42 @@ export function NotificationsSection() {
         </SettingsSwitchRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Following">
+      <SettingsGroup title="Watching">
         <SettingsSwitchRow
-          label="Followed ticket status changes"
-          description="Notify agents when a ticket they follow changes status."
+          label="Watched ticket status changes"
+          description="Notify agents when a ticket they are watching changes status."
         >
           <Controller name="notifyOnFollowedTicketStatusChanged" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
         <SettingsSwitchRow
-          label="Followed incident status changes"
-          description="Notify agents when an incident they follow changes status."
+          label="Watched incident status changes"
+          description="Notify agents when an incident they are watching changes status."
         >
           <Controller name="notifyOnFollowedIncidentStatusChanged" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
         <SettingsSwitchRow
-          label="Followed change status changes"
-          description="Notify agents when a change they follow transitions state."
+          label="Watched change status changes"
+          description="Notify agents when a change they are watching transitions state."
         >
           <Controller name="notifyOnFollowedChangeStatusChanged" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
         <SettingsSwitchRow
-          label="Followed service request status changes"
-          description="Notify agents when a service request they follow changes status."
+          label="Watched service request status changes"
+          description="Notify agents when a service request they are watching changes status."
         >
           <Controller name="notifyOnFollowedRequestStatusChanged" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
         <SettingsSwitchRow
-          label="Followed problem status changes"
-          description="Notify agents when a problem they follow changes status."
+          label="Watched problem status changes"
+          description="Notify agents when a problem they are watching changes status."
         >
           <Controller name="notifyOnFollowedProblemStatusChanged" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
@@ -2814,7 +3233,7 @@ export function SecuritySection() {
   const { data, isLoading } = useSettings("security");
   const update = useUpdateSettings("security");
   const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
-    useForm<SecuritySettings>({ resolver: zodResolver(securitySettingsSchema) });
+    useForm<SecuritySettings>({ resolver: zodResolver(securitySettingsSchema), defaultValues: securitySettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
   const lockoutEnabled = useWatch({ control, name: "failedLoginLockoutEnabled" });
   const ipAllowlistEnabled = useWatch({ control, name: "ipAllowlistEnabled" });
@@ -2908,8 +3327,15 @@ export function SecuritySection() {
           )} />
         </SettingsSwitchRow>
         {ipAllowlistEnabled && (
-          <SettingsField label="Allowed IPs / CIDRs" description="Comma-separated list of IP addresses or CIDR ranges (e.g. 10.0.0.0/8, 192.168.1.1)." htmlFor="ipAllowlist">
-            <Input id="ipAllowlist" placeholder="10.0.0.0/8, 203.0.113.0" {...register("ipAllowlist")} />
+          <SettingsField label="Allowed IPs / CIDRs" description="One IP address or CIDR range per line (e.g. 10.0.0.0/8). Agents signing in from unlisted addresses will be blocked." htmlFor="ipAllowlist">
+            <Textarea
+              id="ipAllowlist"
+              placeholder={"10.0.0.0/8\n192.168.1.0/24\n203.0.113.42"}
+              rows={4}
+              className="font-mono text-xs resize-y"
+              {...register("ipAllowlist")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-1">Applies only to agent sign-ins. Customer portal is unaffected.</p>
           </SettingsField>
         )}
       </SettingsGroup>
@@ -2922,9 +3348,33 @@ export function SecuritySection() {
 export function AuditSection() {
   const { data, isLoading } = useSettings("audit");
   const update = useUpdateSettings("audit");
-  const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
-    useForm<AuditSettings>({ resolver: zodResolver(auditSettingsSchema) });
+  const { register, handleSubmit, reset, control, watch, formState: { isDirty, errors } } =
+    useForm<AuditSettings>({ resolver: zodResolver(auditSettingsSchema), defaultValues: auditSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
+
+  const exportEnabled = watch("exportEnabled");
+  const exportFormat  = watch("exportFormat");
+
+  const [exporting, setExporting] = useState(false);
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const resp = await axios.get(`/api/audit-log/export?format=${exportFormat ?? "json"}`, {
+        responseType: "blob",
+      });
+      const suffix = new Date().toISOString().slice(0, 10);
+      const ext    = exportFormat === "csv" ? "csv" : "json";
+      const url    = URL.createObjectURL(resp.data);
+      const a      = document.createElement("a");
+      a.href = url;
+      a.download = `audit-log-${suffix}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <SettingsFormShell
@@ -2995,6 +3445,13 @@ export function AuditSection() {
             </Select>
           )} />
         </SettingsField>
+        {exportEnabled && (
+          <SettingsField label="Export now" description={`Download the full audit log as a ${exportFormat?.toUpperCase() ?? "JSON"} file.`}>
+            <Button type="button" variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
+              {exporting ? "Exporting…" : `Download ${exportFormat?.toUpperCase() ?? "JSON"}`}
+            </Button>
+          </SettingsField>
+        )}
       </SettingsGroup>
     </SettingsFormShell>
   );
@@ -3008,7 +3465,7 @@ export function BusinessHoursSection() {
   const { data, isLoading } = useSettings("business_hours");
   const update = useUpdateSettings("business_hours");
   const { register, handleSubmit, reset, control, watch, setValue, formState: { isDirty } } =
-    useForm<BusinessHoursSettings>({ resolver: zodResolver(businessHoursSettingsSchema) });
+    useForm<BusinessHoursSettings>({ resolver: zodResolver(businessHoursSettingsSchema), defaultValues: businessHoursSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
   const workDays = watch("workDays") ?? [1, 2, 3, 4, 5];
@@ -3033,8 +3490,16 @@ export function BusinessHoursSection() {
         <SettingsField label="Calendar name" description="Displayed to agents and in the portal." htmlFor="defaultCalendarName">
           <Input id="defaultCalendarName" {...register("defaultCalendarName")} placeholder="Default" />
         </SettingsField>
-        <SettingsField label="Timezone" description="Overrides the general timezone for this calendar (leave blank to inherit)." htmlFor="calendarTimezone">
-          <Input id="calendarTimezone" {...register("calendarTimezone")} placeholder="UTC" />
+        <SettingsField label="Timezone" description="Overrides the general timezone for this calendar. Leave blank to inherit from General settings." htmlFor="calendarTimezone">
+          <Controller name="calendarTimezone" control={control} render={({ field }) => (
+            <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v)}>
+              <SelectTrigger><SelectValue placeholder="Inherit from General" /></SelectTrigger>
+              <SelectContent className="max-h-64">
+                <SelectItem value="">Inherit from General</SelectItem>
+                {timezones.map((tz) => <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )} />
         </SettingsField>
         <SettingsSwitchRow label="Show hours in portal" description="Display business hours information on the customer help center.">
           <Controller name="showHoursInPortal" control={control} render={({ field }) => (
@@ -3094,6 +3559,7 @@ export function DemoDataSection() {
     formState: { isDirty },
   } = useForm<DemoDataSettings>({
     resolver: zodResolver(demoDataSettingsSchema),
+    defaultValues: demoDataSettingsSchema.parse({}),
   });
 
   useEffect(() => {
@@ -3162,6 +3628,7 @@ export function TrashSection() {
     formState: { isDirty, errors },
   } = useForm<TrashSettings>({
     resolver: zodResolver(trashSettingsSchema),
+    defaultValues: trashSettingsSchema.parse({}),
   });
 
   useEffect(() => {

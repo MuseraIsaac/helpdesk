@@ -53,6 +53,8 @@ export interface RichTextEditorProps {
   editorClassName?: string;
   /** Enable @mention autocomplete. Fetches agents from /api/agents. */
   enableMentions?: boolean;
+  /** Called with the selected agent's email each time an @mention is committed. */
+  onMentionSelect?: (email: string) => void;
 }
 
 // ── Toolbar button ────────────────────────────────────────────────────────────
@@ -93,6 +95,23 @@ function ToolbarButton({
 
 function Divider() {
   return <div className="mx-0.5 h-4 w-px bg-border" />;
+}
+
+// ── Mention email extraction ──────────────────────────────────────────────────
+
+/** Extract unique, lowercase emails from all @mention spans in TipTap HTML. */
+function parseMentionEmails(html: string): Set<string> {
+  const result = new Set<string>();
+  const tagRe   = /<span\s[^>]*>/gi;
+  const typeRe  = /data-type="mention"/i;
+  const emailRe = /data-email="([^"]+)"/i;
+  let m: RegExpExecArray | null;
+  while ((m = tagRe.exec(html)) !== null) {
+    if (!typeRe.test(m[0])) continue;
+    const em = emailRe.exec(m[0]);
+    if (em?.[1]?.trim()) result.add(em[1].trim().toLowerCase());
+  }
+  return result;
 }
 
 // ── @mention — extended node with email attribute ────────────────────────────
@@ -151,21 +170,22 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
   className = "",
   editorClassName = "",
   enableMentions = false,
+  onMentionSelect,
 }, ref) {
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
 
   // Fetch agents for @mention suggestions (only when mentions are enabled)
-  const { data: agentsData } = useQuery<{ agents: AgentOption[] }>({
+  const { data: agentsData } = useQuery<AgentOption[]>({
     queryKey: ["agents"],
     queryFn: async () => {
-      const { data } = await axios.get("/api/agents");
-      return data;
+      const { data } = await axios.get<{ agents: AgentOption[] }>("/api/agents");
+      return data.agents;
     },
     enabled: enableMentions,
     staleTime: 60_000,
   });
-  const agents = agentsData?.agents ?? [];
+  const agents = agentsData ?? [];
 
   // Always-current ref — the suggestion closure reads this instead of the
   // stale `agents` value captured at extension-creation time. Without this,
@@ -173,6 +193,14 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
   // see an empty list because the closure captured agents = [] at init.
   const agentsRef = useRef<AgentOption[]>([]);
   agentsRef.current = agents;
+
+  // Stable ref so the editor onUpdate closure always sees the latest callback
+  const mentionSelectRef = useRef<((email: string) => void) | undefined>(undefined);
+  mentionSelectRef.current = onMentionSelect;
+
+  // Track which mention emails are already in the editor so we only fire
+  // onMentionSelect for *newly added* ones (not on every keystroke).
+  const prevMentionEmailsRef = useRef<Set<string>>(new Set());
 
   // Build the Mention extension only when mentions are enabled.
   // Created once (useMemo deps: [enableMentions]) so the editor is stable,
@@ -255,10 +283,22 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
     content,
     editable: !disabled,
     onUpdate({ editor }) {
-      if (!onChange) return;
       const html = editor.isEmpty ? "" : editor.getHTML();
       const text = editor.getText();
-      onChange(html, text);
+      onChange?.(html, text);
+
+      // Detect newly inserted @mention emails and fire the callback once per addition.
+      // Works by diffing the current set against the previous set — robust against
+      // any insertion path (keyboard, click, paste) without relying on TipTap internals.
+      if (mentionSelectRef.current) {
+        const currentEmails = parseMentionEmails(html);
+        for (const email of currentEmails) {
+          if (!prevMentionEmailsRef.current.has(email)) {
+            mentionSelectRef.current(email);
+          }
+        }
+        prevMentionEmailsRef.current = currentEmails;
+      }
     },
   });
 

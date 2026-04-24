@@ -35,6 +35,7 @@ import {
 import { detectChangeConflicts } from "../lib/change-conflicts";
 import { notify } from "../lib/notify";
 import { notifyEntityFollowers } from "../lib/notify-entity-followers";
+import { fireChangeEvent } from "../lib/event-bus";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -297,6 +298,9 @@ router.post(
         meta:     { changeNumber, title: change.title },
       },
     });
+
+    // Fire change.created event for event_workflow rules
+    fireChangeEvent("change.created", change.id, req.user.id);
 
     res.status(201).json(change);
   }
@@ -602,6 +606,18 @@ router.patch(
           },
         },
       });
+    }
+
+    // Fire event_workflow events for change state transitions
+    if (data.state && data.state !== existing.state) {
+      const stateTriggerMap: Record<string, string> = {
+        submitted:  "change.submitted_for_approval",
+        authorized: "change.approved",
+        cancelled:  "change.rejected",
+        implemented:"change.implemented",
+      };
+      const trigger = stateTriggerMap[data.state] as any;
+      if (trigger) fireChangeEvent(trigger, id, req.user.id, { state: existing.state });
     }
 
     // Notify followers on state change (fire-and-forget)

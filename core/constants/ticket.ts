@@ -97,6 +97,24 @@ export interface Ticket {
   } | null;
   /** Number of agents following this ticket — present in GET /api/tickets/:id responses */
   followerCount?: number;
+  /** Team this ticket was manually escalated to */
+  escalatedToTeam?: { id: number; name: string; color: string } | null;
+  /** Agent this ticket was manually escalated to */
+  escalatedToUser?: { id: string; name: string } | null;
+
+  /** Last reply on this ticket — present in list responses for conversation preview */
+  lastReply?: {
+    body:        string;
+    senderType:  "agent" | "customer";
+    authorName:  string | null;
+    createdAt:   string;
+  } | null;
+  /** Last internal note on this ticket — present in list responses for conversation preview */
+  lastNote?: {
+    body:       string;
+    authorName: string | null;
+    createdAt:  string;
+  } | null;
   // Merge — set when this ticket has been merged into another
   mergedIntoId?: number | null;
   mergedAt?: string | null;

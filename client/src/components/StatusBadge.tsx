@@ -5,6 +5,7 @@ const statusStyles: Record<TicketStatus, string> = {
   processing: "bg-amber-500/15 text-amber-400",
   open: "bg-pink-400/15 text-pink-400",
   in_progress: "bg-violet-500/15 text-violet-500",
+  escalated: "bg-red-500/15 text-red-500 ring-1 ring-red-500/30",
   resolved: "bg-muted text-muted-foreground",
   closed: "bg-muted text-muted-foreground",
 };

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
+import { useMe } from "@/hooks/useMe";
 import {
   type ColumnDef,
   type SortingState,
@@ -21,6 +22,7 @@ import {
   type SavedViewConfig,
 } from "core/schemas/ticket-view.ts";
 import ErrorAlert from "@/components/ErrorAlert";
+import TicketConversationPreview from "@/components/TicketConversationPreview";
 import StatusBadge from "@/components/StatusBadge";
 import TicketTypeBadge from "@/components/TicketTypeBadge";
 import { PriorityBadge, SeverityBadge } from "@/components/TriageBadge";
@@ -79,20 +81,25 @@ const ALL_COLUMN_DEFS: Record<ColumnId, ColumnDef<Ticket>> = {
     header: "Subject",
     enableSorting: true,
     cell: ({ row }) => (
-      <div className="flex items-center gap-1.5">
-        <Link to={`/tickets/${row.original.id}`} className="link font-medium">
-          {row.original.subject}
-        </Link>
-        {row.original.isEscalated && (
-          <EscalationIcon
-            title={
-              row.original.escalationReason
-                ? escalationReasonLabel[row.original.escalationReason]
-                : "Escalated"
-            }
-          />
-        )}
-      </div>
+      <TicketConversationPreview
+        lastReply={row.original.lastReply}
+        lastNote={row.original.lastNote}
+      >
+        <div className="flex items-center gap-1.5">
+          <Link to={`/tickets/${row.original.id}`} className="link font-medium">
+            {row.original.subject}
+          </Link>
+          {row.original.isEscalated && (
+            <EscalationIcon
+              title={
+                row.original.escalationReason
+                  ? escalationReasonLabel[row.original.escalationReason]
+                  : "Escalated"
+              }
+            />
+          )}
+        </div>
+      </TicketConversationPreview>
     ),
   },
   requester: {
@@ -239,6 +246,9 @@ interface TicketsTableProps {
 }
 
 export default function TicketsTable({ filters, viewConfig, onSelectionChange, selectionResetKey }: TicketsTableProps) {
+  const { data: meData } = useMe();
+  const density = meData?.user?.preference?.ticketListDensity ?? "comfortable";
+
   const defaultSort = viewConfig?.sort;
 
   const [sorting, setSorting] = useState<SortingState>([
@@ -413,7 +423,7 @@ export default function TicketsTable({ filters, viewConfig, onSelectionChange, s
                 </TableRow>
               ))
             : table.getRowModel().rows.map(row => (
-                <TableRow key={row.id}>
+                <TableRow key={row.id} className={density === "compact" ? "[&>td]:py-1.5" : "[&>td]:py-3"}>
                   {row.getVisibleCells().map(cell => (
                     <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
