@@ -82,6 +82,7 @@ import trashRouter    from "./routes/trash";
 import auditLogRouter from "./routes/audit-log";
 import { startQueue, stopQueue } from "./lib/queue";
 import { bootstrapMaterializedViews } from "./lib/materialized-views";
+import { getSection } from "./lib/settings";
 import { registerApprovalHook } from "./lib/approval-hooks";
 import { onChangeApprovalResolved } from "./lib/change-approval";
 import { registerChannelAdapter } from "./lib/intake/types";
@@ -152,7 +153,35 @@ app.all("/api/auth/{*any}", authLimiter, (req, res, next) => {
   toNodeHandler(auth)(req, res).catch(next);
 });
 
-app.use(express.json());
+// Dynamic JSON body-size limit — reads maxAttachmentSizeMb from Advanced settings.
+// Base64-encoded images embedded in reply HTML inflate raw file size by ~1.37×,
+// so we allow 2× the configured attachment ceiling to be safe.
+// The cache avoids a DB round-trip on every request while still picking up
+// setting changes within 30 seconds.
+let _bodyLimitCache: { bytes: number; expiresAt: number } | null = null;
+
+async function getJsonBodyLimit(): Promise<number> {
+  const now = Date.now();
+  if (_bodyLimitCache && now < _bodyLimitCache.expiresAt) {
+    return _bodyLimitCache.bytes;
+  }
+  try {
+    const advanced = await getSection("advanced");
+    const mb = advanced.maxAttachmentSizeMb ?? 10;
+    const bytes = mb * 2 * 1024 * 1024;
+    _bodyLimitCache = { bytes, expiresAt: now + 30_000 };
+    return bytes;
+  } catch {
+    // DB unavailable at startup — fall back to a generous 50 MB
+    return 50 * 1024 * 1024;
+  }
+}
+
+app.use((req, res, next) => {
+  getJsonBodyLimit()
+    .then((limit) => express.json({ limit })(req, res, next))
+    .catch(next);
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });

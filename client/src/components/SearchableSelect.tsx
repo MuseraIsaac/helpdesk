@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ChevronsUpDown, Search, Check } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export interface SelectOption {
   value: string;
@@ -13,7 +14,9 @@ interface SearchableSelectProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  searchPlaceholder?: string;
   disabled?: boolean;
+  /** Extra classes applied to the trigger button. Use to set height (e.g. "h-7") or width. */
   className?: string;
 }
 
@@ -22,8 +25,9 @@ export default function SearchableSelect({
   value,
   onChange,
   placeholder = "Select…",
+  searchPlaceholder = "Search…",
   disabled = false,
-  className = "",
+  className,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -52,16 +56,16 @@ export default function SearchableSelect({
         <button
           type="button"
           disabled={disabled}
-          className={[
+          className={cn(
             "flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs",
             "ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
             "disabled:cursor-not-allowed disabled:opacity-50 transition-colors hover:border-ring/50",
-            className,
-          ].join(" ")}
+            className
+          )}
         >
           <span className="flex items-center gap-2 min-w-0">
             {current?.prefix && <span className="shrink-0">{current.prefix}</span>}
-            <span className={`truncate ${current ? "" : "text-muted-foreground"}`}>
+            <span className={cn("truncate", !current && "text-muted-foreground")}>
               {current?.label ?? placeholder}
             </span>
           </span>
@@ -71,7 +75,7 @@ export default function SearchableSelect({
       <PopoverContent
         align="start"
         sideOffset={4}
-        className="p-0 w-[var(--radix-popover-trigger-width)] shadow-lg"
+        className="p-0 w-[var(--radix-popover-trigger-width)] min-w-[180px] shadow-lg"
       >
         <div className="flex items-center border-b px-2.5 py-1">
           <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground mr-2" />
@@ -79,8 +83,12 @@ export default function SearchableSelect({
             ref={inputRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search…"
+            placeholder={searchPlaceholder}
             className="flex h-8 w-full bg-transparent py-1 text-sm outline-none placeholder:text-muted-foreground/60"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setOpen(false);
+              if (e.key === "Enter" && filtered.length === 1) handleSelect(filtered[0]!.value);
+            }}
           />
         </div>
         <div className="max-h-56 overflow-y-auto p-1">
@@ -92,11 +100,11 @@ export default function SearchableSelect({
                 key={o.value}
                 type="button"
                 onClick={() => handleSelect(o.value)}
-                className={[
+                className={cn(
                   "flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm cursor-pointer transition-colors",
                   "hover:bg-accent hover:text-accent-foreground",
-                  o.value === value ? "bg-accent/60 font-medium" : "",
-                ].join(" ")}
+                  o.value === value && "bg-accent/60 font-medium"
+                )}
               >
                 {o.prefix && <span className="shrink-0">{o.prefix}</span>}
                 <span className="flex-1 text-left">{o.label}</span>

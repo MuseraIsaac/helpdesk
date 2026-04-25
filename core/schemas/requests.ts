@@ -50,6 +50,7 @@ export const createRequestSchema = z.object({
     )
     .default([]),
   customFields: z.record(z.string(), z.unknown()).optional().default({}),
+  organizationId: z.number().int().positive().nullable().optional(),
 });
 
 export type CreateRequestInput = z.infer<typeof createRequestSchema>;
@@ -120,6 +121,14 @@ export const updateFulfillmentTaskSchema = z
   .partial();
 
 export type UpdateFulfillmentTaskInput = z.infer<typeof updateFulfillmentTaskSchema>;
+
+// ── Create Fulfillment Task Note ──────────────────────────────────────────────
+
+export const createTaskNoteSchema = z.object({
+  content: z.string().min(1).max(5000),
+});
+
+export type CreateTaskNoteInput = z.infer<typeof createTaskNoteSchema>;
 
 // ── Portal: Create Request ────────────────────────────────────────────────────
 

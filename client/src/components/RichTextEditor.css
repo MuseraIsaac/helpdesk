@@ -1,13 +1,21 @@
 /* ── Shared rich-text body styles ────────────────────────────────────────────
-   Applied to both the Tiptap editor (.rte-content .ProseMirror)
+   Applied to both the TipTap editor (.rte-content .ProseMirror)
    and the read-only renderer (.rte-body).
-   Tailwind v4 preflight resets browser defaults for strong/em/lists/etc.,
-   so we restore them explicitly here.
-──────────────────────────────────────────────────────────────────────────── */
+
+   IMPORTANT: This project uses class-based dark mode (.dark on <html>).
+   Do NOT use @media (prefers-color-scheme: dark) here — it will fire
+   whenever the OS is dark, even if the user has chosen the light theme.
+   All dark-mode overrides must use .dark selectors.
+
+   CSS variables (--primary, --muted, --foreground, etc.) are full oklch()
+   values that already switch between light and dark via the .dark class,
+   so most rules need no dark-mode override at all.
+────────────────────────────────────────────────────────────────────────── */
+
+/* ── Spacing ─────────────────────────────────────────────────────────────── */
 
 .rte-body,
 .rte-content .ProseMirror {
-  /* paragraph / element spacing */
   line-height: 1.625;
 }
 
@@ -16,102 +24,126 @@
   margin-top: 0.5em;
 }
 
-/* inline marks — restored because Tailwind preflight strips browser defaults */
+/* ── Inline marks ────────────────────────────────────────────────────────── */
+/* Tailwind v4 preflight strips browser defaults, so we restore them. */
+
 .rte-body strong,
 .rte-body b,
 .rte-content .ProseMirror strong,
-.rte-content .ProseMirror b {
-  font-weight: 700;
-}
+.rte-content .ProseMirror b { font-weight: 700; }
 
 .rte-body em,
 .rte-body i,
 .rte-content .ProseMirror em,
-.rte-content .ProseMirror i {
-  font-style: italic;
-}
+.rte-content .ProseMirror i { font-style: italic; }
 
 .rte-body u,
-.rte-content .ProseMirror u {
-  text-decoration: underline;
-}
+.rte-content .ProseMirror u { text-decoration: underline; }
 
 .rte-body s,
 .rte-body del,
 .rte-content .ProseMirror s,
-.rte-content .ProseMirror del {
-  text-decoration: line-through;
-}
+.rte-content .ProseMirror del { text-decoration: line-through; }
 
-/* headings */
+.rte-body sub,
+.rte-content .ProseMirror sub { vertical-align: sub;   font-size: 0.75em; }
+
+.rte-body sup,
+.rte-content .ProseMirror sup { vertical-align: super; font-size: 0.75em; }
+
+/* ── Headings ────────────────────────────────────────────────────────────── */
+
 .rte-body h1,
-.rte-content .ProseMirror h1 {
-  font-size: 1.5em;
-  font-weight: 700;
-  line-height: 1.2;
-}
+.rte-content .ProseMirror h1 { font-size: 1.5em;  font-weight: 700; line-height: 1.2; }
 
 .rte-body h2,
-.rte-content .ProseMirror h2 {
-  font-size: 1.25em;
-  font-weight: 600;
-  line-height: 1.3;
-}
+.rte-content .ProseMirror h2 { font-size: 1.25em; font-weight: 600; line-height: 1.3; }
 
 .rte-body h3,
-.rte-content .ProseMirror h3 {
-  font-size: 1.1em;
-  font-weight: 600;
-  line-height: 1.4;
-}
+.rte-content .ProseMirror h3 { font-size: 1.1em;  font-weight: 600; line-height: 1.4; }
 
-/* lists */
+/* ── Lists ───────────────────────────────────────────────────────────────── */
+
 .rte-body ul,
-.rte-content .ProseMirror ul {
-  list-style-type: disc;
-  padding-left: 1.5em;
-}
+.rte-content .ProseMirror ul { list-style-type: disc;    padding-left: 1.5em; }
 
 .rte-body ol,
-.rte-content .ProseMirror ol {
-  list-style-type: decimal;
-  padding-left: 1.5em;
-}
+.rte-content .ProseMirror ol { list-style-type: decimal; padding-left: 1.5em; }
 
 .rte-body li > p,
-.rte-content .ProseMirror li > p {
-  margin: 0;
-}
+.rte-content .ProseMirror li > p { margin: 0; }
 
 .rte-body li + li,
-.rte-content .ProseMirror li + li {
-  margin-top: 0.25em;
+.rte-content .ProseMirror li + li { margin-top: 0.25em; }
+
+/* ── Task list ───────────────────────────────────────────────────────────── */
+
+.rte-body ul[data-type="taskList"],
+.rte-content .ProseMirror ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0.25em;
 }
 
-/* blockquote */
+.rte-body ul[data-type="taskList"] li,
+.rte-content .ProseMirror ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  margin-top: 0.3em;
+}
+
+.rte-body ul[data-type="taskList"] li > label,
+.rte-content .ProseMirror ul[data-type="taskList"] li > label {
+  flex-shrink: 0;
+  margin-top: 0.15em;
+  cursor: pointer;
+}
+
+.rte-body ul[data-type="taskList"] li > label input[type="checkbox"],
+.rte-content .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.rte-body ul[data-type="taskList"] li > div,
+.rte-content .ProseMirror ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
+
+.rte-body ul[data-type="taskList"] li[data-checked="true"] > div,
+.rte-content .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+/* ── Blockquote ──────────────────────────────────────────────────────────── */
+
 .rte-body blockquote,
 .rte-content .ProseMirror blockquote {
-  border-left: 3px solid var(--border, #e5e7eb);
+  border-left: 3px solid var(--border);
   padding-left: 0.75em;
-  color: var(--muted-foreground, #6b7280);
+  color: var(--muted-foreground);
   font-style: italic;
   margin: 0.5em 0;
 }
 
-/* inline code */
+/* ── Inline code ─────────────────────────────────────────────────────────── */
+
 .rte-body code,
 .rte-content .ProseMirror code {
-  background: var(--muted, #f3f4f6);
+  background: var(--muted);
+  color: var(--foreground);
   border-radius: 3px;
   padding: 0.1em 0.3em;
   font-size: 0.875em;
   font-family: ui-monospace, monospace;
 }
 
-/* code block */
+/* ── Code block ──────────────────────────────────────────────────────────── */
+
 .rte-body pre,
 .rte-content .ProseMirror pre {
-  background: var(--muted, #f3f4f6);
+  background: var(--muted);
   border-radius: 6px;
   padding: 0.75em 1em;
   overflow-x: auto;
@@ -120,29 +152,95 @@
 .rte-body pre code,
 .rte-content .ProseMirror pre code {
   background: transparent;
+  color: inherit;
   padding: 0;
   font-size: 0.8125em;
 }
 
-/* hr */
+/* ── HR ──────────────────────────────────────────────────────────────────── */
+
 .rte-body hr,
 .rte-content .ProseMirror hr {
   border: none;
-  border-top: 1px solid var(--border, #e5e7eb);
+  border-top: 1px solid var(--border);
   margin: 0.75em 0;
 }
 
-/* links */
+/* ── Links ───────────────────────────────────────────────────────────────── */
+
 .rte-body a,
 .rte-content .ProseMirror a {
-  color: var(--primary, #2563eb);
+  color: var(--primary);
   text-decoration: underline;
   cursor: pointer;
 }
 
 .rte-body a:hover,
-.rte-content .ProseMirror a:hover {
-  opacity: 0.8;
+.rte-content .ProseMirror a:hover { opacity: 0.8; }
+
+/* ── Highlight mark ──────────────────────────────────────────────────────── */
+
+.rte-body mark,
+.rte-content .ProseMirror mark {
+  border-radius: 2px;
+  padding: 0.05em 0.2em;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+
+.rte-body table,
+.rte-content .ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75em 0;
+  font-size: 0.875em;
+  table-layout: fixed;
+}
+
+.rte-body table td,
+.rte-body table th,
+.rte-content .ProseMirror td,
+.rte-content .ProseMirror th {
+  border: 1px solid var(--border);
+  padding: 0.45em 0.65em;
+  min-width: 60px;
+  position: relative;
+  vertical-align: top;
+  word-break: break-word;
+  /* Explicit foreground so it never inherits an invisible value */
+  color: var(--foreground);
+  background: var(--background);
+}
+
+.rte-body table th,
+.rte-content .ProseMirror th {
+  /* Muted surface for header — var(--muted) auto-switches light/dark */
+  background: var(--muted);
+  color: var(--foreground);
+  font-weight: 600;
+  text-align: left;
+}
+
+/* Selected cell highlight */
+.rte-content .ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--primary);
+  opacity: 0.1;
+  pointer-events: none;
+}
+
+/* Column resize cursor */
+.rte-content .ProseMirror .column-resize-handle {
+  background-color: var(--primary);
+  bottom: -2px;
+  pointer-events: none;
+  position: absolute;
+  right: -2px;
+  top: 0;
+  width: 4px;
+  opacity: 0.5;
 }
 
 /* ── Editor-only styles ──────────────────────────────────────────────────── */
@@ -152,30 +250,121 @@
   min-height: inherit;
 }
 
-/* Placeholder */
 .rte-content .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
-  color: var(--muted-foreground, #6b7280);
+  color: var(--muted-foreground);
   pointer-events: none;
   float: left;
   height: 0;
 }
 
-/* Selected text / link active state */
 .rte-content .ProseMirror .is-active {
-  background: var(--accent, #f3f4f6);
+  background: var(--accent);
 }
 
-/* ── @mention chip ──────────────────────────────────────────────────────────── */
+/* Drop cursor uses primary accent */
+.rte-content .ProseMirror .ProseMirror-dropcursor {
+  border-color: var(--primary) !important;
+}
+
+/* ── Resizable image ─────────────────────────────────────────────────────── */
+
+/* NodeViewWrapper produces a block span; make it act like a block paragraph */
+.rte-image-wrapper {
+  display: block;
+  line-height: 0;
+}
+
+.rte-image-container {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+  margin: 0.75em 0;
+  border-radius: 6px;
+  cursor: default;
+  user-select: none;
+}
+
+.rte-image-container img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+/* Selection ring */
+.rte-image-container.rte-image-selected {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Side resize handles */
+.rte-resize-handle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 40px;
+  background: var(--primary);
+  border-radius: 4px;
+  cursor: col-resize;
+  box-shadow: 0 2px 8px oklch(0 0 0 / 0.35);
+  transition: transform 0.1s, opacity 0.15s;
+  z-index: 10;
+  opacity: 0.9;
+}
+
+.rte-resize-handle:hover {
+  transform: translateY(-50%) scaleX(1.25);
+  opacity: 1;
+}
+
+.rte-resize-left  { left:  -4px; }
+.rte-resize-right { right: -4px; }
+
+/* Pixel-width label shown when selected */
+.rte-image-size-label {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: oklch(0.12 0 0 / 0.75);
+  color: oklch(1 0 0);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  padding: 2px 8px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
+}
+
+/* Read-only renderer: plain non-resizable images */
+.rte-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+  margin: 0.75em 0;
+}
+
+/* ── @mention chip ───────────────────────────────────────────────────────── */
+/*
+  Uses color-mix() against var(--primary) so the chip automatically matches
+  the active theme color in both light and dark mode without any override.
+*/
+
 .rte-body .rte-mention,
 .rte-content .ProseMirror .rte-mention {
   display: inline-flex;
   align-items: baseline;
   gap: 5px;
   padding: 1px 8px 1px 6px;
-  border-radius: 999px;           /* pill shape */
-  background: hsl(239 84% 67% / 0.12);
-  border: 1px solid hsl(239 84% 67% / 0.25);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--primary) 28%, transparent);
   vertical-align: baseline;
   white-space: nowrap;
   cursor: default;
@@ -184,107 +373,93 @@
 
 .rte-body .rte-mention-name,
 .rte-content .ProseMirror .rte-mention-name {
-  color: hsl(239 84% 55%);        /* indigo-600 equivalent */
+  color: var(--primary);
   font-weight: 600;
   font-size: 0.875em;
 }
 
 .rte-body .rte-mention-email,
 .rte-content .ProseMirror .rte-mention-email {
-  color: hsl(239 84% 45%);        /* slightly deeper for contrast */
+  color: var(--muted-foreground);
   font-size: 0.78em;
   font-weight: 400;
-  opacity: 0.8;
 }
 
-/* ── Dark mode — @mention chip ───────────────────────────────────────────── */
-/* Applied via both class (.dark) and media query so either theming method works */
-
-@media (prefers-color-scheme: dark) {
-  .rte-body .rte-mention,
-  .rte-content .ProseMirror .rte-mention {
-    background: linear-gradient(135deg, hsl(265 75% 16% / 0.92), hsl(242 75% 20% / 0.92));
-    border-color: hsl(263 80% 65% / 0.45);
-    box-shadow:
-      0 0 0 1px hsl(263 80% 65% / 0.15),
-      0 0 12px hsl(263 80% 60% / 0.25),
-      inset 0 1px 0 hsl(263 80% 80% / 0.08);
-  }
-  .rte-body .rte-mention-name,
-  .rte-content .ProseMirror .rte-mention-name {
-    color: hsl(265 90% 82%);
-    text-shadow: 0 0 10px hsl(265 90% 72% / 0.55);
-  }
-  .rte-body .rte-mention-email,
-  .rte-content .ProseMirror .rte-mention-email {
-    color: hsl(252 65% 72%);
-    opacity: 0.9;
-  }
-}
-
-/* Same styles via class-based dark mode (shadcn / next-themes) */
+/* Dark-mode extra: add a soft glow so the chip pops on dark backgrounds */
 .dark .rte-body .rte-mention,
 .dark .rte-content .ProseMirror .rte-mention {
-  background: linear-gradient(135deg, hsl(265 75% 16% / 0.92), hsl(242 75% 20% / 0.92));
-  border-color: hsl(263 80% 65% / 0.45);
+  background: color-mix(in oklch, var(--primary) 18%, transparent);
+  border-color: color-mix(in oklch, var(--primary) 40%, transparent);
   box-shadow:
-    0 0 0 1px hsl(263 80% 65% / 0.15),
-    0 0 12px hsl(263 80% 60% / 0.25),
-    inset 0 1px 0 hsl(263 80% 80% / 0.08);
+    0 0 0 1px color-mix(in oklch, var(--primary) 15%, transparent),
+    0 0 10px color-mix(in oklch, var(--primary) 22%, transparent);
 }
+
 .dark .rte-body .rte-mention-name,
 .dark .rte-content .ProseMirror .rte-mention-name {
-  color: hsl(265 90% 82%);
-  text-shadow: 0 0 10px hsl(265 90% 72% / 0.55);
-}
-.dark .rte-body .rte-mention-email,
-.dark .rte-content .ProseMirror .rte-mention-email {
-  color: hsl(252 65% 72%);
-  opacity: 0.9;
+  /* Slightly lighter primary for better contrast on dark backgrounds */
+  color: color-mix(in oklch, var(--primary) 80%, white);
+  text-shadow: 0 0 10px color-mix(in oklch, var(--primary) 45%, transparent);
 }
 
-/* ── Dark mode — mention suggestion dropdown ─────────────────────────────── */
+/* ── Tippy "mention" theme — strip the default dark box ─────────────────── */
+/*
+  Tippy normally wraps content in a .tippy-box with background:#333 and its
+  own padding/shadow. Assigning theme="mention" makes it use
+  [data-theme="mention"] selectors so we can zero out all of that and let
+  the MentionList component's own classes (bg-popover, border, shadow-lg)
+  take full control. This means the dropdown automatically inherits the
+  active app theme (light / dark / any custom theme).
+*/
 
-@media (prefers-color-scheme: dark) {
-  .mention-list-container {
-    background: linear-gradient(160deg, hsl(240 18% 9%), hsl(258 22% 11%));
-    border-color: hsl(263 60% 55% / 0.3) !important;
-    box-shadow:
-      0 8px 32px hsl(263 60% 15% / 0.7),
-      0 0 0 1px hsl(263 60% 55% / 0.18),
-      inset 0 1px 0 hsl(263 80% 70% / 0.06);
-  }
-  .mention-list-container .mention-item-selected {
-    background: linear-gradient(90deg, hsl(263 70% 55% / 0.22), hsl(242 70% 55% / 0.14));
-    box-shadow: inset 3px 0 0 hsl(263 80% 70%);
-  }
-  .mention-list-container .mention-avatar-selected {
-    background: linear-gradient(135deg, hsl(263 80% 55%), hsl(242 80% 60%));
-    box-shadow: 0 0 8px hsl(263 80% 60% / 0.5);
-  }
-  .mention-list-container .mention-avatar-default {
-    background: hsl(263 60% 55% / 0.18);
-    box-shadow: 0 0 0 1px hsl(263 60% 65% / 0.2);
-  }
+.tippy-box[data-theme="mention"] {
+  background: transparent !important;
+  border:     none        !important;
+  box-shadow: none        !important;
+  padding:    0           !important;
+  border-radius: 0        !important;
 }
 
+.tippy-box[data-theme="mention"] > .tippy-content {
+  padding:    0           !important;
+  background: transparent !important;
+}
+
+/* ── @mention suggestion dropdown ───────────────────────────────────────── */
+
+/* Light-mode: clean selected-item accent strip */
+.mention-list-container .mention-item-selected {
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.mention-list-container .mention-avatar-selected {
+  background: var(--primary);
+}
+
+.mention-list-container .mention-avatar-default {
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+}
+
+/* Dark-mode: elevate the popup so it reads clearly on dark surfaces */
 .dark .mention-list-container {
-  background: linear-gradient(160deg, hsl(240 18% 9%), hsl(258 22% 11%));
-  border-color: hsl(263 60% 55% / 0.3) !important;
+  border-color: color-mix(in oklch, var(--primary) 30%, var(--border)) !important;
   box-shadow:
-    0 8px 32px hsl(263 60% 15% / 0.7),
-    0 0 0 1px hsl(263 60% 55% / 0.18),
-    inset 0 1px 0 hsl(263 80% 70% / 0.06);
+    0 8px 30px oklch(0 0 0 / 0.5),
+    0 0 0 1px color-mix(in oklch, var(--primary) 18%, transparent),
+    inset 0 1px 0 color-mix(in oklch, var(--primary) 8%, transparent);
 }
+
 .dark .mention-list-container .mention-item-selected {
-  background: linear-gradient(90deg, hsl(263 70% 55% / 0.22), hsl(242 70% 55% / 0.14));
-  box-shadow: inset 3px 0 0 hsl(263 80% 70%);
+  background: color-mix(in oklch, var(--primary) 18%, transparent);
+  box-shadow: inset 3px 0 0 var(--primary);
 }
+
 .dark .mention-list-container .mention-avatar-selected {
-  background: linear-gradient(135deg, hsl(263 80% 55%), hsl(242 80% 60%));
-  box-shadow: 0 0 8px hsl(263 80% 60% / 0.5);
+  background: var(--primary);
+  box-shadow: 0 0 8px color-mix(in oklch, var(--primary) 50%, transparent);
 }
+
 .dark .mention-list-container .mention-avatar-default {
-  background: hsl(263 60% 55% / 0.18);
-  box-shadow: 0 0 0 1px hsl(263 60% 65% / 0.2);
+  background: color-mix(in oklch, var(--primary) 15%, transparent);
 }

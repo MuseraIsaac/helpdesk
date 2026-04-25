@@ -9,6 +9,7 @@ import {
   listRequestsQuerySchema,
   createFulfillmentTaskSchema,
   updateFulfillmentTaskSchema,
+  createTaskNoteSchema,
 } from "core/schemas/requests.ts";
 import {
   requestStatusTransitions,
@@ -16,6 +17,7 @@ import {
 } from "core/constants/request-status.ts";
 import {
   fulfillmentTaskStatusTransitions,
+  fulfillmentTaskDoneStatuses,
 } from "core/constants/fulfillment-task-status.ts";
 import { computeRequestSlaDueAt } from "../lib/request-sla";
 import { logRequestEvent } from "../lib/request-events";
@@ -88,6 +90,16 @@ const TASK_SELECT = {
   createdBy: { select: { id: true, name: true } },
   createdAt: true,
   updatedAt: true,
+  notes: {
+    orderBy: { createdAt: "asc" as const },
+    select: {
+      id: true,
+      content: true,
+      author: { select: { id: true, name: true } },
+      createdAt: true,
+      updatedAt: true,
+    },
+  },
 } as const;
 
 const EVENT_SELECT = {
@@ -239,6 +251,7 @@ router.post(
         catalogItemName: data.catalogItemName ?? null,
         formData: data.formData as Prisma.InputJsonValue,
         customFields: (data.customFields ?? {}) as Prisma.InputJsonValue,
+        organizationId: data.organizationId ?? null,
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
         slaDueAt,
         createdById: req.user.id,
@@ -608,7 +621,7 @@ router.patch(
     if (data.status && data.status !== task.status) {
       updateData.status = data.status;
       if (data.status === "completed") updateData.completedAt = now;
-      if (data.status === "in_progress" || data.status === "pending") {
+      if (!fulfillmentTaskDoneStatuses.includes(data.status as any)) {
         updateData.completedAt = null;
       }
     }
@@ -652,7 +665,7 @@ router.patch(
           select: { status: true },
         });
         const allDone = allTasks.every(
-          (t) => t.status === "completed" || t.status === "cancelled"
+          (t) => fulfillmentTaskDoneStatuses.includes(t.status as any)
         );
         if (allDone) {
           const parent = await prisma.serviceRequest.findUnique({
@@ -704,6 +717,74 @@ router.delete(
 
     await prisma.fulfillmentTask.delete({ where: { id: taskId } });
     await logRequestEvent(id, req.user.id, "request.task_deleted", { taskId });
+    res.json({ ok: true });
+  }
+);
+
+// ── POST /api/requests/:id/tasks/:taskId/notes ────────────────────────────────
+
+router.post(
+  "/:id/tasks/:taskId/notes",
+  requireAuth,
+  requirePermission("requests.manage"),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    const taskId = parseId(req.params.taskId);
+    if (id === null || taskId === null) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+
+    const data = validate(createTaskNoteSchema, req.body, res);
+    if (!data) return;
+
+    const task = await prisma.fulfillmentTask.findFirst({
+      where: { id: taskId, requestId: id },
+      select: { id: true },
+    });
+    if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+
+    const note = await prisma.fulfillmentTaskNote.create({
+      data: {
+        taskId,
+        content: data.content,
+        authorId: req.user.id,
+      },
+      select: {
+        id: true,
+        content: true,
+        author: { select: { id: true, name: true } },
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    res.status(201).json({ note });
+  }
+);
+
+// ── DELETE /api/requests/:id/tasks/:taskId/notes/:noteId ─────────────────────
+
+router.delete(
+  "/:id/tasks/:taskId/notes/:noteId",
+  requireAuth,
+  requirePermission("requests.manage"),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    const taskId = parseId(req.params.taskId);
+    const noteId = parseId(req.params.noteId);
+    if (id === null || taskId === null || noteId === null) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+
+    const note = await prisma.fulfillmentTaskNote.findFirst({
+      where: { id: noteId, taskId, task: { requestId: id } },
+      select: { id: true, authorId: true },
+    });
+    if (!note) { res.status(404).json({ error: "Note not found" }); return; }
+
+    await prisma.fulfillmentTaskNote.delete({ where: { id: noteId } });
     res.json({ ok: true });
   }
 );

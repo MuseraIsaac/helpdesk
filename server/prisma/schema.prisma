@@ -160,8 +160,9 @@ model User {
   requestsSubmitted     ServiceRequest[]    @relation("RequestSubmittedBy")
   requestsAssigned      ServiceRequest[]    @relation("RequestAssignee")
   requestsCreated       ServiceRequest[]    @relation("RequestCreatedBy")
-  fulfillmentTasksAssigned FulfillmentTask[] @relation("FulfillmentTaskAssignee")
-  fulfillmentTasksCreated  FulfillmentTask[] @relation("FulfillmentTaskCreatedBy")
+  fulfillmentTasksAssigned FulfillmentTask[]     @relation("FulfillmentTaskAssignee")
+  fulfillmentTasksCreated  FulfillmentTask[]     @relation("FulfillmentTaskCreatedBy")
+  fulfillmentTaskNotes     FulfillmentTaskNote[] @relation("FulfillmentTaskNoteAuthor")
   requestEvents         RequestEvent[]      @relation("RequestEventActor")
   // Problem management relations
   problemsOwned         Problem[]           @relation("ProblemOwner")
@@ -315,8 +316,12 @@ model Organization {
   // ─────────────────────────────────────────────────────────────────────────
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
-  customers  Customer[]
+  customers    Customer[]
   entitlements ServiceEntitlement[]
+  tickets      Ticket[]
+  requests     ServiceRequest[]
+  changes      Change[]
+  problems     Problem[]
 
   @@index([supportTier])
   @@index([isActive])
@@ -406,8 +411,11 @@ model Ticket {
   senderEmail  String
   // Customer entity — resolved from senderEmail at ticket-creation time.
   // Kept nullable so that legacy tickets (pre-migration) are not broken.
-  customerId   Int?
-  customer     Customer?       @relation(fields: [customerId], references: [id])
+  customerId     Int?
+  customer       Customer?      @relation(fields: [customerId], references: [id])
+  // Organization — optionally links this ticket to a contact organisation.
+  organizationId Int?           @map("organization_id")
+  organization   Organization?  @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   assignedToId String?
   assignedTo   User?           @relation(fields: [assignedToId], references: [id])
   // Team — which support team/inbox this ticket belongs to. Null = default inbox.
@@ -687,6 +695,7 @@ model Macro {
 
 enum FormEntityType {
   ticket
+  incident
   request
   change
   problem
@@ -2006,9 +2015,15 @@ enum RequestStatus {
  */
 enum FulfillmentTaskStatus {
   pending
+  assigned
   in_progress
+  on_hold
+  waiting_on_user
+  waiting_on_vendor
   completed
+  done
   cancelled
+  skipped
 }
 
 /**
@@ -2041,13 +2056,16 @@ model ServiceRequest {
   approvalRequestId Int?      @map("approval_request_id")
 
   // Requester — exactly one of these is set (agent or customer)
-  requesterId         String?   @map("requester_id")
-  requester           User?     @relation("RequestSubmittedBy", fields: [requesterId], references: [id])
-  requesterCustomerId Int?      @map("requester_customer_id")
-  requesterCustomer   Customer? @relation(fields: [requesterCustomerId], references: [id])
+  requesterId         String?       @map("requester_id")
+  requester           User?         @relation("RequestSubmittedBy", fields: [requesterId], references: [id])
+  requesterCustomerId Int?          @map("requester_customer_id")
+  requesterCustomer   Customer?     @relation(fields: [requesterCustomerId], references: [id])
   /// Denormalized for fast list rendering — always set at creation.
-  requesterName  String        @map("requester_name")
-  requesterEmail String        @map("requester_email")
+  requesterName  String             @map("requester_name")
+  requesterEmail String             @map("requester_email")
+  // Organisation link
+  organizationId Int?               @map("organization_id")
+  organization   Organization?      @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
   // Fulfillment assignment
   assignedToId String? @map("assigned_to_id")
@@ -2156,9 +2174,28 @@ model FulfillmentTask {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  notes FulfillmentTaskNote[]
+
   @@index([requestId, position])
   @@index([assignedToId, status])
   @@map("fulfillment_task")
+}
+
+/**
+ * FulfillmentTaskNote — an internal note scoped to a FulfillmentTask.
+ */
+model FulfillmentTaskNote {
+  id       Int             @id @default(autoincrement())
+  taskId   Int             @map("task_id")
+  task     FulfillmentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  content  String
+  authorId String?         @map("author_id")
+  author   User?           @relation("FulfillmentTaskNoteAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([taskId])
+  @@map("fulfillment_task_note")
 }
 
 /**
@@ -2276,6 +2313,10 @@ model Problem {
   /// Responsible team
   teamId Int?  @map("team_id")
   team   Team? @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  /// Organisation affected by this problem
+  organizationId Int?          @map("organization_id")
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
   resolvedAt DateTime? @map("resolved_at")
   closedAt   DateTime? @map("closed_at")
@@ -2650,6 +2691,11 @@ model Change {
   /// Change requester (person who raised the change)
   createdById String? @map("created_by_id")
   createdBy   User?   @relation("ChangeCreatedBy", fields: [createdById], references: [id])
+
+  // ── Organisation ─────────────────────────────────────────────────────────
+  /// Organisation affected by or requesting this change
+  organizationId Int?          @map("organization_id")
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
   // ── Linked records ────────────────────────────────────────────────────────
   /// Problem this change is intended to permanently resolve

@@ -26,6 +26,7 @@ import BackLink from "@/components/BackLink";
 import { useFormConfig } from "@/hooks/useFormConfig";
 import { useCustomFields } from "@/hooks/useCustomFields";
 import DynamicCustomFields from "@/components/DynamicCustomFields";
+import OrganizationSelect from "@/components/OrganizationSelect";
 import {
   TicketPlus,
   ArrowRight,
@@ -435,7 +436,7 @@ export default function NewTicketPage() {
             <div className="w-72 shrink-0 space-y-4">
 
               {/* Requester */}
-              {(cfg.visible("senderName") || cfg.visible("senderEmail")) && (
+              {(cfg.visible("senderName") || cfg.visible("senderEmail") || cfg.visible("organizationId")) && (
                 <SidebarCard icon={User} iconColor="text-blue-500/80" title="Requester">
                   {cfg.visible("senderName") && (
                     <div className="space-y-1.5">
@@ -462,6 +463,24 @@ export default function NewTicketPage() {
                         className="h-8 text-xs"
                       />
                       {errors.senderEmail && <ErrorMessage message={errors.senderEmail.message} />}
+                    </div>
+                  )}
+                  {cfg.visible("organizationId") && (
+                    <div className="space-y-1.5">
+                      <FieldLabel required={cfg.required("organizationId")}>
+                        {cfg.label("organizationId")}
+                      </FieldLabel>
+                      <Controller
+                        name={"organizationId" as any}
+                        control={control}
+                        render={({ field }) => (
+                          <OrganizationSelect
+                            value={field.value ?? null}
+                            onChange={(id) => field.onChange(id ?? null)}
+                            placeholder={cfg.placeholder("organizationId")}
+                          />
+                        )}
+                      />
                     </div>
                   )}
                 </SidebarCard>

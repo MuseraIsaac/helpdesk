@@ -35,6 +35,7 @@ export const createTicketSchema = z.object({
   teamId: z.number().int().positive().nullable().optional(),
   customFields: z.record(z.string(), z.unknown()).optional().default({}),
   customTicketTypeId: z.number().int().positive().nullable().optional(),
+  organizationId: z.number().int().positive().nullable().optional(),
 });
 
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;

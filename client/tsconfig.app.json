@@ -30,5 +30,5 @@
       "core/*": ["../core/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "../core"]
 }

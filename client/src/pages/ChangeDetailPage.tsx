@@ -46,6 +46,7 @@ import ChangeTimeline from "@/components/ChangeTimeline";
 import ChangeAttachmentsPanel from "@/components/ChangeAttachmentsPanel";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
 import WatchButton from "@/components/FollowButton";
+import { toast } from "sonner";
 import {
   GitMerge,
   User,
@@ -76,6 +77,13 @@ import {
   CalendarClock,
   Bell,
   X,
+  Plus,
+  Loader2,
+  Trash2,
+  MoreHorizontal,
+  SkipForward,
+  Play,
+  BookTemplate,
 } from "lucide-react";
 
 // ── SearchableSelect ──────────────────────────────────────────────────────────
@@ -215,14 +223,17 @@ const STATE_TRANSITIONS: Partial<Record<ChangeState, { to: ChangeState; label: s
 
 // ── Helper components ─────────────────────────────────────────────────────────
 
-function SectionCard({ icon: Icon, title, children, className = "" }: {
-  icon?: React.ElementType; title: string; children: React.ReactNode; className?: string;
+function SectionCard({ icon: Icon, title, children, className = "", actions }: {
+  icon?: React.ElementType; title: string; children: React.ReactNode; className?: string; actions?: React.ReactNode;
 }) {
   return (
     <div className={`rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden ${className}`}>
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border/50 bg-muted/20">
-        {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">{title}</span>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-muted/20">
+        <div className="flex items-center gap-2">
+          {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">{title}</span>
+        </div>
+        {actions && <div className="flex items-center gap-1 shrink-0">{actions}</div>}
       </div>
       <div className="p-4">{children}</div>
     </div>
@@ -238,22 +249,354 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function RichSection({ title, content }: { title: string; content: string | null | undefined }) {
-  if (!content) return null;
+function EditableSection({
+  title, content, field, changeId, onSaved, readonly,
+}: {
+  title: string;
+  content: string | null | undefined;
+  field: string;
+  changeId: number;
+  onSaved: () => void;
+  readonly?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(content ?? "");
+  const qc = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: () => axios.patch(`/api/changes/${changeId}`, { [field]: value || null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["change", String(changeId)] });
+      onSaved();
+      setEditing(false);
+      toast.success("Saved");
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to save"),
+  });
+
   return (
-    <SectionCard icon={FileText} title={title}>
-      <RichTextRenderer content={content} className="text-sm text-foreground/90" />
+    <SectionCard
+      icon={FileText}
+      title={title}
+      actions={
+        !readonly ? (
+          editing ? (
+            <button
+              onClick={() => setEditing(false)}
+              className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
+            >
+              <X className="h-3 w-3" /> Cancel
+            </button>
+          ) : (
+            <button
+              onClick={() => { setValue(content ?? ""); setEditing(true); }}
+              className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
+            >
+              <Pencil className="h-3 w-3" /> Edit
+            </button>
+          )
+        ) : undefined
+      }
+    >
+      {editing ? (
+        <div className="space-y-3">
+          <Textarea
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            rows={8}
+            className="text-sm resize-y font-mono"
+            placeholder={`Enter ${title.toLowerCase()}…`}
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+              {mutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+              Save
+            </Button>
+          </div>
+        </div>
+      ) : content ? (
+        <RichTextRenderer content={content} className="text-sm text-foreground/90" />
+      ) : (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground/50 italic">Not recorded yet.</p>
+          {!readonly && (
+            <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => { setValue(""); setEditing(true); }}>
+              <Plus className="h-3 w-3" /> Add
+            </Button>
+          )}
+        </div>
+      )}
     </SectionCard>
   );
 }
 
-const TASK_ICON: Record<string, React.ReactNode> = {
-  completed:   <CheckCircle2  className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />,
-  in_progress: <Circle        className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />,
-  failed:      <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />,
-  skipped:     <Circle        className="h-4 w-4 text-muted-foreground/30 shrink-0 mt-0.5" />,
-  pending:     <Circle        className="h-4 w-4 text-muted-foreground/20 shrink-0 mt-0.5" />,
+const TASK_STATUS_CYCLE: Record<string, string> = {
+  pending:     "in_progress",
+  in_progress: "completed",
+  completed:   "pending",
+  failed:      "pending",
+  skipped:     "pending",
 };
+
+const TASK_STATUS_ICON: Record<string, React.ReactNode> = {
+  completed:   <CheckCircle2  className="h-4.5 w-4.5 text-emerald-500 shrink-0" />,
+  in_progress: <Play          className="h-4 w-4 text-amber-500 fill-amber-500 shrink-0" />,
+  failed:      <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />,
+  skipped:     <SkipForward   className="h-4 w-4 text-muted-foreground/40 shrink-0" />,
+  pending:     <Circle        className="h-4 w-4 text-muted-foreground/25 shrink-0" />,
+};
+
+const TASK_PHASE_LABEL: Record<string, string> = {
+  pre_implementation:  "Pre",
+  implementation:      "Impl",
+  post_implementation: "Post",
+};
+
+const TASK_STATUS_LABEL: Record<string, string> = {
+  pending:     "Pending",
+  in_progress: "In Progress",
+  completed:   "Completed",
+  failed:      "Failed",
+  skipped:     "Skipped",
+};
+
+// ── Task dialog (add/edit) ────────────────────────────────────────────────────
+
+interface TaskDialogProps {
+  changeId: number;
+  task?: { id: number; title: string; description?: string | null; phase: string; assignedToId?: string | null };
+  defaultPhase?: string;
+  agents: { id: string; name: string }[];
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function TaskDialog({ changeId, task, defaultPhase, agents, onClose, onSaved }: TaskDialogProps) {
+  const [title, setTitle]       = useState(task?.title ?? "");
+  const [description, setDesc]  = useState(task?.description ?? "");
+  const [phase, setPhase]       = useState(task?.phase ?? defaultPhase ?? "implementation");
+  const [assignedToId, setAgt]  = useState(task?.assignedToId ?? "");
+  const [open, setOpen]         = useState(false);
+  const [search, setSearch]     = useState("");
+  const qc = useQueryClient();
+
+  const filtered = agents.filter((a) => a.name.toLowerCase().includes(search.toLowerCase()));
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      task
+        ? axios.patch(`/api/changes/${changeId}/tasks/${task.id}`, { title, description: description || null, phase, assignedToId: assignedToId || null })
+        : axios.post(`/api/changes/${changeId}/tasks`, { title, description: description || undefined, phase, assignedToId: assignedToId || null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["change", String(changeId)] });
+      onSaved();
+      onClose();
+      toast.success(task ? "Task updated" : "Task added");
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed"),
+  });
+
+  const selectedAgent = agents.find((a) => a.id === assignedToId);
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <div className="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+              <ListChecks className="h-4 w-4 text-primary" />
+            </div>
+            {task ? "Edit Task" : "Add Task"}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Title <span className="text-destructive">*</span></Label>
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Describe the task…"
+              className="text-sm"
+              autoFocus
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Description</Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDesc(e.target.value)}
+              placeholder="Optional details or acceptance criteria…"
+              className="text-sm resize-none"
+              rows={3}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Phase</Label>
+              <div className="flex flex-col gap-1">
+                {(["pre_implementation", "implementation", "post_implementation"] as const).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPhase(p)}
+                    className={[
+                      "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs text-left transition-colors",
+                      phase === p ? "border-primary bg-primary/8 text-primary font-medium" : "border-input hover:border-muted-foreground/30",
+                    ].join(" ")}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${p === "pre_implementation" ? "bg-blue-500" : p === "implementation" ? "bg-amber-500" : "bg-emerald-500"}`} />
+                    {p === "pre_implementation" ? "Pre-Implementation" : p === "implementation" ? "Implementation" : "Post-Implementation"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Assignee</Label>
+              <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setSearch(""); }}>
+                <PopoverTrigger asChild>
+                  <button className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-sm shadow-sm hover:bg-accent/50 transition-colors">
+                    <span className={selectedAgent ? "" : "text-muted-foreground"}>
+                      {selectedAgent ? selectedAgent.name : "Unassigned"}
+                    </span>
+                    <ChevronsUpDown className="h-3.5 w-3.5 opacity-40 ml-2 shrink-0" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-48 p-0" align="start">
+                  <div className="p-2 border-b">
+                    <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search…" className="h-7 text-xs border-0 shadow-none focus-visible:ring-0 bg-transparent px-1" autoFocus />
+                  </div>
+                  <div className="max-h-40 overflow-y-auto p-1">
+                    <button className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent cursor-pointer" onClick={() => { setAgt(""); setOpen(false); }}>
+                      <span className="text-muted-foreground">Unassigned</span>
+                    </button>
+                    {filtered.map((a) => (
+                      <button key={a.id} onClick={() => { setAgt(a.id); setOpen(false); setSearch(""); }}
+                        className={["flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent cursor-pointer", a.id === assignedToId ? "bg-accent/60 font-medium" : ""].join(" ")}>
+                        {a.name}
+                        {a.id === assignedToId && <Check className="h-3 w-3 text-primary shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" className="gap-1.5" onClick={() => mutation.mutate()} disabled={!title.trim() || mutation.isPending}>
+            {mutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            {task ? "Save changes" : "Add task"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Task row ──────────────────────────────────────────────────────────────────
+
+function TaskRow({
+  task, changeId, onSaved, readonly, agents,
+}: {
+  task: { id: number; title: string; description?: string | null; phase: string; status: string; assignedTo?: { id: string; name: string } | null; assignedToId?: string | null; completionNote?: string | null; completedBy?: { name: string } | null };
+  changeId: number;
+  onSaved: () => void;
+  readonly?: boolean;
+  agents: { id: string; name: string }[];
+}) {
+  const [editOpen, setEditOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState(task.completionNote ?? "");
+  const qc = useQueryClient();
+
+  const statusMutation = useMutation({
+    mutationFn: (status: string) => {
+      const isCompleting = status === "completed";
+      return axios.patch(`/api/changes/${changeId}/tasks/${task.id}`, {
+        status,
+        ...(isCompleting && note ? { completionNote: note } : {}),
+      });
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["change", String(changeId)] }); onSaved(); },
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed"),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => axios.delete(`/api/changes/${changeId}/tasks/${task.id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["change", String(changeId)] }); onSaved(); toast.success("Task removed"); },
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed"),
+  });
+
+  const nextStatus = TASK_STATUS_CYCLE[task.status] ?? "in_progress";
+
+  return (
+    <>
+      {editOpen && (
+        <TaskDialog changeId={changeId} task={{ id: task.id, title: task.title, description: task.description, phase: task.phase, assignedToId: task.assignedToId }} agents={agents} onClose={() => setEditOpen(false)} onSaved={onSaved} />
+      )}
+      <div className="flex items-start gap-3 py-3 first:pt-0 last:pb-0 group/row">
+        <button
+          className="shrink-0 mt-0.5 hover:scale-110 transition-transform disabled:opacity-50"
+          onClick={() => !readonly && statusMutation.mutate(nextStatus)}
+          disabled={readonly || statusMutation.isPending}
+          title={`Mark as ${TASK_STATUS_LABEL[nextStatus]}`}
+        >
+          {statusMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : TASK_STATUS_ICON[task.status]}
+        </button>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={["text-sm font-medium", task.status === "completed" ? "line-through text-muted-foreground" : ""].join(" ")}>
+              {task.title}
+            </span>
+            <span className={[
+              "text-[10px] px-1.5 py-0.5 rounded-full border font-medium",
+              task.phase === "pre_implementation"  ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200/50" :
+              task.phase === "post_implementation" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200/50" :
+                                                     "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-200/50",
+            ].join(" ")}>
+              {TASK_PHASE_LABEL[task.phase] ?? task.phase}
+            </span>
+          </div>
+          {task.description && (
+            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{task.description}</p>
+          )}
+          <div className="flex items-center gap-3 mt-1">
+            {task.assignedTo && (
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <User className="h-3 w-3" /> {task.assignedTo.name}
+              </p>
+            )}
+            {task.completionNote && (
+              <p className="text-[11px] text-muted-foreground/70 italic">"{task.completionNote}"</p>
+            )}
+          </div>
+        </div>
+
+        {!readonly && (
+          <div className="flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditOpen(true)}>
+              <Pencil className="h-3 w-3" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive/70 hover:text-destructive" onClick={() => deleteMutation.mutate()} disabled={deleteMutation.isPending}>
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 
 function fmt(iso: string | null | undefined) {
   if (!iso) return "—";
@@ -332,43 +675,91 @@ interface EditChangeDialogProps {
   onSaved: () => void;
 }
 
+function toLocalDT(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function EditChangeDialog({ changeId, change, open, onOpenChange, onSaved }: EditChangeDialogProps) {
-  const { register, handleSubmit, control, reset, formState: { isDirty, isSubmitting, errors } } =
-    useForm<UpdateChangeInput>({
-      resolver: zodResolver(updateChangeSchema),
-      defaultValues: {
-        title:       change.title,
-        changeType:  change.changeType,
-        risk:        change.risk,
-        priority:    change.priority,
-        description: change.description ?? "",
-      },
-    });
+  // ── Plain state — no Zod on optional fields to avoid silent validation failures ──
+  const [title,              setTitle]         = useState(change.title);
+  const [changeType,         setChangeType]    = useState(change.changeType ?? "normal");
+  const [risk,               setRisk]          = useState(change.risk ?? "medium");
+  const [priority,           setPriority]      = useState(change.priority ?? "medium");
+  const [description,        setDescription]   = useState(change.description ?? "");
+  const [assignedToId,       setAssignedToId]  = useState((change as any).assignedTo?.id ?? "");
+  const [coordGroupId,       setCoordGroupId]  = useState(
+    (change as any).coordinatorGroup?.id ? String((change as any).coordinatorGroup.id) : ""
+  );
+  const [plannedStart,       setPlannedStart]  = useState(toLocalDT(change.plannedStart));
+  const [plannedEnd,         setPlannedEnd]    = useState(toLocalDT(change.plannedEnd));
+  const [saveError,          setSaveError]     = useState<string | null>(null);
+  const [saving,             setSaving]        = useState(false);
+  const [activeTab,          setActiveTab]     = useState("details");
+  const [titleError,         setTitleError]    = useState("");
 
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const { data: agentsData } = useQuery({
+    queryKey: ["agents"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ agents: { id: string; name: string }[] }>("/api/agents");
+      return data.agents;
+    },
+    enabled: open,
+  });
 
-  const onSubmit = async (data: UpdateChangeInput) => {
+  const { data: teamsData } = useQuery({
+    queryKey: ["teams"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ teams: { id: number; name: string }[] }>("/api/teams");
+      return data.teams;
+    },
+    enabled: open,
+  });
+
+  const agentOptions = (agentsData ?? []).map((a) => ({ value: a.id, label: a.name }));
+  const teamOptions  = (teamsData  ?? []).map((t) => ({ value: String(t.id), label: t.name }));
+
+  function handleClose() {
+    onOpenChange(false);
+    setActiveTab("details");
     setSaveError(null);
+    setTitleError("");
+  }
+
+  async function handleSave() {
+    if (!title.trim()) { setTitleError("Title is required"); setActiveTab("details"); return; }
+    setTitleError("");
+    setSaveError(null);
+    setSaving(true);
     try {
       await axios.patch(`/api/changes/${changeId}`, {
-        title:       data.title,
-        changeType:  data.changeType,
-        risk:        data.risk,
-        priority:    data.priority,
-        description: data.description || null,
+        title:              title.trim(),
+        changeType,
+        risk,
+        priority,
+        description:        description || null,
+        assignedToId:       assignedToId || null,
+        coordinatorGroupId: coordGroupId ? Number(coordGroupId) : null,
+        plannedStart:       plannedStart ? new Date(plannedStart).toISOString() : null,
+        plannedEnd:         plannedEnd   ? new Date(plannedEnd).toISOString()   : null,
       });
       onSaved();
-      onOpenChange(false);
+      handleClose();
+      toast.success("Change updated");
     } catch (err) {
       if (axios.isAxiosError(err)) {
         setSaveError(err.response?.data?.error ?? "Failed to save changes");
       }
+    } finally {
+      setSaving(false);
     }
-  };
+  }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
-      <DialogContent className="sm:max-w-lg">
+    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <div className="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
@@ -378,88 +769,135 @@ function EditChangeDialog({ changeId, change, open, onOpenChange, onSaved }: Edi
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-1">
+        <div className="space-y-0 mt-1">
           {saveError && <ErrorAlert message={saveError} />}
 
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Title <span className="text-destructive">*</span></Label>
-            <Input {...register("title")} className="text-sm" />
-            {errors.title && <p className="text-xs text-destructive">{errors.title.message}</p>}
+          {/* Inner tab navigation */}
+          <div className="flex gap-1 border-b mb-4">
+            {[
+              { id: "details",    label: "Details" },
+              { id: "assignment", label: "Assignment & Schedule" },
+            ].map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setActiveTab(t.id)}
+                className={[
+                  "px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors",
+                  activeTab === t.id
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                ].join(" ")}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Change Type</Label>
-              <Controller
-                name="changeType"
-                control={control}
-                render={({ field }) => (
-                  <SearchableSelect
-                    value={field.value ?? ""}
-                    onValueChange={field.onChange}
-                    options={CHANGE_TYPE_OPTIONS}
-                    placeholder="Type…"
-                    triggerClassName="h-8 text-xs"
-                  />
-                )}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Risk Level</Label>
-              <Controller
-                name="risk"
-                control={control}
-                render={({ field }) => (
-                  <SearchableSelect
-                    value={field.value ?? ""}
-                    onValueChange={field.onChange}
-                    options={CHANGE_RISK_OPTIONS}
-                    placeholder="Risk…"
-                    triggerClassName="h-8 text-xs"
-                  />
-                )}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Priority</Label>
-              <Controller
-                name="priority"
-                control={control}
-                render={({ field }) => (
-                  <SearchableSelect
-                    value={field.value ?? ""}
-                    onValueChange={field.onChange}
-                    options={PRIORITY_OPTIONS}
-                    placeholder="Priority…"
-                    triggerClassName="h-8 text-xs"
-                  />
-                )}
-              />
-            </div>
-          </div>
+          {activeTab === "details" && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Title <span className="text-destructive">*</span></Label>
+                <Input
+                  value={title}
+                  onChange={(e) => { setTitle(e.target.value); if (e.target.value.trim()) setTitleError(""); }}
+                  className="text-sm"
+                  autoFocus
+                />
+                {titleError && <p className="text-xs text-destructive">{titleError}</p>}
+              </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Description</Label>
-            <Textarea
-              {...register("description")}
-              placeholder="High-level description of the change…"
-              className="text-sm min-h-[90px] resize-y"
-            />
-          </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Change Type</Label>
+                  <SearchableSelect value={changeType} onValueChange={setChangeType} options={CHANGE_TYPE_OPTIONS} placeholder="Type…" triggerClassName="h-8 text-xs" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Risk Level</Label>
+                  <SearchableSelect value={risk} onValueChange={setRisk} options={CHANGE_RISK_OPTIONS} placeholder="Risk…" triggerClassName="h-8 text-xs" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Priority</Label>
+                  <SearchableSelect value={priority} onValueChange={setPriority} options={PRIORITY_OPTIONS} placeholder="Priority…" triggerClassName="h-8 text-xs" />
+                </div>
+              </div>
 
-          <DialogFooter className="gap-2 pt-1">
-            <Button type="button" variant="outline" size="sm"
-              onClick={() => { onOpenChange(false); reset(); }} disabled={isSubmitting}>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Description</Label>
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="High-level description of the change…"
+                  className="text-sm min-h-[90px] resize-y"
+                />
+              </div>
+            </div>
+          )}
+
+          {activeTab === "assignment" && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Assigned to</Label>
+                  <SearchableSelect
+                    value={assignedToId}
+                    onValueChange={setAssignedToId}
+                    options={[{ value: "", label: "Unassigned" }, ...agentOptions]}
+                    placeholder="Agent…"
+                    triggerClassName="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Coordinator group</Label>
+                  <SearchableSelect
+                    value={coordGroupId}
+                    onValueChange={setCoordGroupId}
+                    options={[{ value: "", label: "None" }, ...teamOptions]}
+                    placeholder="Team…"
+                    triggerClassName="h-8 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">Planned change window</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-muted-foreground">Start</p>
+                    <Input
+                      type="datetime-local"
+                      value={plannedStart}
+                      onChange={(e) => setPlannedStart(e.target.value)}
+                      className="h-9 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-muted-foreground">End</p>
+                    <Input
+                      type="datetime-local"
+                      value={plannedEnd}
+                      onChange={(e) => setPlannedEnd(e.target.value)}
+                      className="h-9 text-xs"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">Set the planned maintenance window for this change.</p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 pt-4">
+            <Button type="button" variant="outline" size="sm" onClick={handleClose} disabled={saving}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" className="gap-1.5" disabled={!isDirty || isSubmitting}>
-              {isSubmitting
-                ? <><span className="h-3.5 w-3.5 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground animate-spin" />Saving…</>
+            <Button type="button" size="sm" className="gap-1.5" onClick={handleSave} disabled={saving}>
+              {saving
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Saving…</>
                 : <><Save className="h-3.5 w-3.5" />Save Changes</>
               }
             </Button>
           </DialogFooter>
-        </form>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -714,6 +1152,16 @@ export default function ChangeDetailPage() {
   const queryClient = useQueryClient();
   const [editOpen, setEditOpen] = useState(false);
   const [templateDialog, setTemplateDialog] = useState(false);
+  const [taskDialog, setTaskDialog] = useState<{ open: boolean; task?: any; defaultPhase?: string }>({ open: false });
+
+  const { data: agentsData } = useQuery({
+    queryKey: ["agents"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ agents: { id: string; name: string }[] }>("/api/agents");
+      return data.agents;
+    },
+  });
+  const agents = agentsData ?? [];
 
   const { data: change, isLoading, error } = useQuery({
     queryKey: ["change", String(changeId)],
@@ -1006,19 +1454,17 @@ export default function ChangeDetailPage() {
 
               {/* ── Planning ── */}
               <TabsContent value="planning" className="flex-1 overflow-y-auto p-6 space-y-4 mt-0">
-                <RichSection title="Work Instructions"             content={change.workInstructions} />
-                <RichSection title="Service Impact Assessment"     content={change.serviceImpactAssessment} />
-                <RichSection title="Risk Assessment & Mitigation"  content={change.riskAssessmentAndMitigation} />
-                <RichSection title="Rollback Plan"                 content={change.rollbackPlan} />
-                {!change.workInstructions && !change.serviceImpactAssessment &&
-                 !change.riskAssessmentAndMitigation && !change.rollbackPlan && (
-                  <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
-                    <div className="h-12 w-12 rounded-2xl bg-muted flex items-center justify-center">
-                      <Shield className="h-6 w-6 text-muted-foreground" />
-                    </div>
-                    <p className="text-sm text-muted-foreground">No planning documents recorded yet.</p>
+                {!isClosed && (
+                  <div className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/20 px-4 py-2.5 text-xs text-muted-foreground">
+                    <Pencil className="h-3 w-3 shrink-0" />
+                    Click <strong>Edit</strong> on any section below to update planning documents inline.
                   </div>
                 )}
+                <EditableSection title="Justification"              content={change.justification}             field="justification"             changeId={changeId} onSaved={invalidateChange} readonly={isClosed} />
+                <EditableSection title="Work Instructions"           content={change.workInstructions}          field="workInstructions"          changeId={changeId} onSaved={invalidateChange} readonly={isClosed} />
+                <EditableSection title="Service Impact Assessment"   content={change.serviceImpactAssessment}   field="serviceImpactAssessment"   changeId={changeId} onSaved={invalidateChange} readonly={isClosed} />
+                <EditableSection title="Risk Assessment & Mitigation" content={change.riskAssessmentAndMitigation} field="riskAssessmentAndMitigation" changeId={changeId} onSaved={invalidateChange} readonly={isClosed} />
+                <EditableSection title="Rollback Plan"               content={change.rollbackPlan}              field="rollbackPlan"              changeId={changeId} onSaved={invalidateChange} readonly={isClosed} />
               </TabsContent>
 
               {/* ── Notifications ── */}
@@ -1028,58 +1474,130 @@ export default function ChangeDetailPage() {
 
               {/* ── Tasks ── */}
               <TabsContent value="tasks" className="flex-1 overflow-y-auto p-6 space-y-4 mt-0">
-                {change.prechecks && (
-                  <SectionCard icon={CheckCircle2} title="Pre-Implementation Checks">
-                    <RichTextRenderer content={change.prechecks} className="text-sm" />
-                  </SectionCard>
+                {taskDialog.open && (
+                  <TaskDialog
+                    changeId={changeId}
+                    task={taskDialog.task}
+                    defaultPhase={taskDialog.defaultPhase}
+                    agents={agents}
+                    onClose={() => setTaskDialog({ open: false })}
+                    onSaved={invalidateChange}
+                  />
                 )}
 
-                {change.tasks && change.tasks.length > 0 ? (
-                  <SectionCard icon={ListChecks} title="Implementation Tasks">
-                    <div className="space-y-0 divide-y divide-border/50">
-                      {change.tasks.map((task) => (
-                        <div key={task.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
-                          {TASK_ICON[task.status] ?? TASK_ICON.pending}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-sm font-medium">{task.title}</span>
-                              <span className="text-[10px] text-muted-foreground capitalize shrink-0">
-                                {task.phase} · #{task.position}
+                {(() => {
+                  const allTasks = change.tasks ?? [];
+                  const byPhase = {
+                    pre_implementation:  allTasks.filter((t) => t.phase === "pre_implementation"),
+                    implementation:      allTasks.filter((t) => t.phase === "implementation"),
+                    post_implementation: allTasks.filter((t) => t.phase === "post_implementation"),
+                  };
+
+                  const PHASE_CONFIG = [
+                    {
+                      phase: "pre_implementation" as const,
+                      title: "Pre-Implementation Tasks",
+                      dot: "bg-blue-500",
+                      checksField: "prechecks" as const,
+                      checksTitle: "Pre-Implementation Checks",
+                    },
+                    {
+                      phase: "implementation" as const,
+                      title: "Implementation Tasks",
+                      dot: "bg-amber-500",
+                      checksField: null,
+                      checksTitle: null,
+                    },
+                    {
+                      phase: "post_implementation" as const,
+                      title: "Post-Implementation Tasks",
+                      dot: "bg-emerald-500",
+                      checksField: "postchecks" as const,
+                      checksTitle: "Post-Implementation Checks",
+                    },
+                  ] as const;
+
+                  return (
+                    <>
+                      {PHASE_CONFIG.map(({ phase, title, dot, checksField, checksTitle }) => {
+                        const phaseTasks = byPhase[phase];
+                        return (
+                          <div key={phase} className="space-y-3">
+                            {/* Phase header */}
+                            <div className="flex items-center gap-2">
+                              <span className={`h-2 w-2 rounded-full shrink-0 ${dot}`} />
+                              <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+                                {title}
                               </span>
+                              {phaseTasks.length > 0 && (
+                                <span className="text-[10px] bg-muted text-muted-foreground px-1.5 rounded-full">{phaseTasks.length}</span>
+                              )}
                             </div>
-                            {task.description && (
-                              <p className="text-xs text-muted-foreground mt-0.5">{task.description}</p>
-                            )}
-                            {task.assignedTo && (
-                              <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1">
-                                <User className="h-3 w-3" />
-                                {task.assignedTo.name}
-                              </p>
-                            )}
-                            {task.completionNote && (
-                              <p className="text-[11px] text-muted-foreground/70 italic mt-0.5">"{task.completionNote}"</p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </SectionCard>
-                ) : (
-                  !change.prechecks && !change.postchecks && (
-                    <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
-                      <div className="h-12 w-12 rounded-2xl bg-muted flex items-center justify-center">
-                        <ListChecks className="h-6 w-6 text-muted-foreground" />
-                      </div>
-                      <p className="text-sm text-muted-foreground">No tasks recorded for this change.</p>
-                    </div>
-                  )
-                )}
 
-                {change.postchecks && (
-                  <SectionCard icon={CheckCircle2} title="Post-Implementation Checks">
-                    <RichTextRenderer content={change.postchecks} className="text-sm" />
-                  </SectionCard>
-                )}
+                            {/* Checklist notes for pre/post */}
+                            {checksField && (
+                              <EditableSection
+                                title={checksTitle!}
+                                content={(change as any)[checksField]}
+                                field={checksField}
+                                changeId={changeId}
+                                onSaved={invalidateChange}
+                                readonly={isClosed}
+                              />
+                            )}
+
+                            {/* Tasks card */}
+                            <SectionCard
+                              icon={ListChecks}
+                              title={`${phaseTasks.length} task${phaseTasks.length !== 1 ? "s" : ""}`}
+                              actions={
+                                !isClosed ? (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 text-xs gap-1 px-2"
+                                    onClick={() => setTaskDialog({ open: true, task: undefined, defaultPhase: phase })}
+                                  >
+                                    <Plus className="h-3 w-3" /> Add
+                                  </Button>
+                                ) : undefined
+                              }
+                            >
+                              {phaseTasks.length > 0 ? (
+                                <div className="space-y-0 divide-y divide-border/50">
+                                  {phaseTasks.map((task) => (
+                                    <TaskRow
+                                      key={task.id}
+                                      task={task}
+                                      changeId={changeId}
+                                      onSaved={invalidateChange}
+                                      readonly={isClosed}
+                                      agents={agents}
+                                    />
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-between py-2">
+                                  <p className="text-xs text-muted-foreground/50 italic">No tasks for this phase yet.</p>
+                                  {!isClosed && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-7 text-xs gap-1 px-2 text-muted-foreground"
+                                      onClick={() => setTaskDialog({ open: true, task: undefined, defaultPhase: phase })}
+                                    >
+                                      <Plus className="h-3 w-3" /> Add task
+                                    </Button>
+                                  )}
+                                </div>
+                              )}
+                            </SectionCard>
+                          </div>
+                        );
+                      })}
+                    </>
+                  );
+                })()}
               </TabsContent>
 
               {/* ── Attachments ── */}

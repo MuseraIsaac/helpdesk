@@ -173,6 +173,7 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
       teamId: data.teamId ?? null,
       customFields: (data.customFields ?? {}) as any,
       customTicketTypeId: data.customTicketTypeId ?? null,
+      organizationId: data.organizationId ?? null,
       status: "open",
       source: "agent",
       firstResponseDueAt: slaDeadlines.firstResponseDueAt,

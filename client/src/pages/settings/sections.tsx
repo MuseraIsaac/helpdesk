@@ -27,7 +27,7 @@ import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
 import SettingsFormShell from "./SettingsFormShell";
 import { SettingsField, SettingsSwitchRow, SettingsGroup } from "./SettingsField";
 import EscalationRulesManager from "@/components/EscalationRulesManager";
-import { Upload, X } from "lucide-react";
+import { Upload, X, Sparkles, Monitor } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -109,6 +109,7 @@ import {
 } from "core/constants/preferences.ts";
 import { injectThemeColors } from "@/lib/theme-injector";
 import { isValidHex, normalizeHex } from "@/lib/color-utils";
+import { portalAccentVars, agentLoginVars } from "@/lib/portalColor";
 
 // ── Loading skeleton ──────────────────────────────────────────────────────────
 
@@ -297,9 +298,20 @@ export function BrandingSection() {
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
-  const primaryColor   = watch("primaryColor");
-  const logoDataUrl    = watch("logoDataUrl");
-  const faviconDataUrl = watch("faviconDataUrl");
+  const primaryColor        = watch("primaryColor");
+  const logoDataUrl         = watch("logoDataUrl");
+  const faviconDataUrl      = watch("faviconDataUrl");
+  const portalAccentColor   = watch("portalAccentColor")   || "#059669";
+  const loginHeadline       = watch("portalLoginHeadline");
+  const loginHighlight      = watch("portalLoginHighlight");
+  const loginTagline        = watch("portalLoginTagline");
+  const loginBadge          = watch("portalLoginBadge");
+  const watchedCompanyName  = watch("companyName");
+  const agentPanelColor     = watch("agentLoginPanelColor") || "#6366f1";
+  const agentHeadline       = watch("agentLoginHeadline");
+  const agentHighlight      = watch("agentLoginHighlight");
+  const agentTagline        = watch("agentLoginTagline");
+  const agentBadge          = watch("agentLoginBadge");
 
   if (isLoading) return <SectionLoading />;
 
@@ -317,6 +329,25 @@ export function BrandingSection() {
         <SettingsField label="Company name" htmlFor="companyName">
           <Input id="companyName" placeholder="Acme Corp" {...register("companyName")} />
         </SettingsField>
+        <SettingsField
+          label="Platform subtitle"
+          description="Short label shown below the company name in the sidebar and on the login panel."
+          htmlFor="platformSubtitle"
+        >
+          <Input id="platformSubtitle" placeholder="Service Desk" {...register("platformSubtitle")} />
+        </SettingsField>
+        <SettingsField
+          label="Company website"
+          description="Shown as a branded link on the customer portal homepage. Leave blank to hide."
+          htmlFor="companyWebsite"
+        >
+          <Input
+            id="companyWebsite"
+            type="url"
+            placeholder="https://www.yourcompany.com"
+            {...register("companyWebsite")}
+          />
+        </SettingsField>
 
         {/* ── App logo ──────────────────────────────────────────────────── */}
         <SettingsField
@@ -325,7 +356,6 @@ export function BrandingSection() {
             <span className="space-y-1.5 block">
               <span className="block">
                 Displayed in the sidebar and on outbound emails.
-                If no favicon is uploaded separately, this image is also used as the browser tab icon.
               </span>
               <span className="flex flex-wrap gap-1.5 mt-1">
                 <SpecBadge>SVG recommended</SpecBadge>
@@ -348,69 +378,48 @@ export function BrandingSection() {
           />
         </SettingsField>
 
-        {/* ── Browser favicon ───────────────────────────────────────────── */}
+        {/* ── Favicon ───────────────────────────────────────────────────── */}
         <SettingsField
-          label="Browser favicon"
+          label="Favicon"
           description={
             <span className="space-y-1.5 block">
               <span className="block">
-                The small icon shown in the browser tab and bookmarks bar.
-                Upload a dedicated favicon for best results — the logo fallback
-                often renders poorly at 16 × 16 px.
+                Browser tab icon. Overrides the default favicon for all users.
               </span>
               <span className="flex flex-wrap gap-1.5 mt-1">
-                <SpecBadge>PNG preferred</SpecBadge>
-                <SpecBadge>ICO supported</SpecBadge>
-                <SpecBadge>SVG (modern browsers)</SpecBadge>
-                <SpecBadge>32 × 32 px ideal</SpecBadge>
-                <SpecBadge>16 × 16 px minimum</SpecBadge>
-                <SpecBadge>square only</SpecBadge>
+                <SpecBadge>PNG recommended</SpecBadge>
+                <SpecBadge>ICO accepted</SpecBadge>
+                <SpecBadge>32 × 32 px</SpecBadge>
+                <SpecBadge>square format</SpecBadge>
               </span>
-              {!faviconDataUrl && logoDataUrl && (
-                <span className="block text-amber-600 dark:text-amber-400 text-[11px] mt-1">
-                  Currently using the app logo as fallback — it may appear blurry at small sizes.
-                </span>
-              )}
             </span>
           }
         >
-          <div className="space-y-3">
-            <ImageUploadField
-              value={faviconDataUrl}
-              onChange={v => setValue("faviconDataUrl", v, { shouldDirty: true })}
-              onRemove={() => setValue("faviconDataUrl", "", { shouldDirty: true })}
-              previewSize="h-10 w-10"
-              previewLabel="Favicon preview"
-              uploadLabel="Upload favicon"
-              accept="image/png,image/x-icon,image/svg+xml,image/vnd.microsoft.icon"
-            />
-            {/* Side-by-side size comparison so users can see how it renders */}
-            {faviconDataUrl && (
-              <div className="flex items-end gap-4 pt-1">
-                <div className="flex flex-col items-center gap-1">
-                  <img src={faviconDataUrl} alt="" className="h-8 w-8 object-contain" />
-                  <span className="text-[10px] text-muted-foreground">32 px</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <img src={faviconDataUrl} alt="" className="h-4 w-4 object-contain" />
-                  <span className="text-[10px] text-muted-foreground">16 px</span>
-                </div>
-                <p className="text-[11px] text-muted-foreground pb-5">
-                  Preview at actual browser-tab sizes
-                </p>
-              </div>
-            )}
-          </div>
+          <ImageUploadField
+            value={faviconDataUrl}
+            onChange={v => setValue("faviconDataUrl", v, { shouldDirty: true })}
+            onRemove={() => setValue("faviconDataUrl", "", { shouldDirty: true })}
+            previewSize="h-10 w-10"
+            previewLabel="Favicon preview"
+            uploadLabel="Upload favicon"
+            accept="image/png,image/x-icon,image/svg+xml,image/webp"
+          />
         </SettingsField>
 
         <SettingsField label="Primary color" description="Used for buttons and accents in emails.">
           <div className="flex items-center gap-2">
             <input
               type="color"
-              {...register("primaryColor")}
+              value={primaryColor || "#6366f1"}
+              onChange={e => setValue("primaryColor", e.target.value, { shouldDirty: true })}
               className="h-9 w-14 rounded border bg-background cursor-pointer p-0.5"
             />
-            <Input {...register("primaryColor")} className="font-mono" maxLength={7} />
+            <Input
+              value={primaryColor || ""}
+              onChange={e => setValue("primaryColor", e.target.value, { shouldDirty: true })}
+              className="font-mono"
+              maxLength={7}
+            />
             <span className="h-7 w-7 rounded-full border shrink-0" style={{ backgroundColor: primaryColor }} />
           </div>
         </SettingsField>
@@ -422,6 +431,277 @@ export function BrandingSection() {
         </SettingsField>
         <SettingsField label="Tagline" description="Short subtitle shown below the title." htmlFor="helpCenterTagline">
           <Input id="helpCenterTagline" placeholder="How can we help you?" {...register("helpCenterTagline")} />
+        </SettingsField>
+      </SettingsGroup>
+
+      <SettingsGroup title="Customer Portal">
+        <SettingsField
+          label="Portal accent color"
+          description="Applied to the portal login panel, navigation active states, and action buttons throughout the customer portal."
+          htmlFor="portalAccentColor"
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={portalAccentColor || "#059669"}
+              onChange={e => setValue("portalAccentColor", e.target.value, { shouldDirty: true })}
+              className="h-9 w-14 rounded border bg-background cursor-pointer p-0.5"
+            />
+            <Input
+              value={portalAccentColor || ""}
+              onChange={e => setValue("portalAccentColor", e.target.value, { shouldDirty: true })}
+              className="font-mono"
+              maxLength={7}
+            />
+            <span className="h-7 w-7 rounded-full border shrink-0" style={{ backgroundColor: portalAccentColor }} />
+          </div>
+        </SettingsField>
+
+        {/* ── Login page text customisation ── */}
+        <SettingsField
+          label="Login headline"
+          description="First line of the hero text on the left panel of the login page."
+          htmlFor="portalLoginHeadline"
+        >
+          <Input id="portalLoginHeadline" placeholder="We're here" {...register("portalLoginHeadline")} />
+        </SettingsField>
+
+        <SettingsField
+          label="Headline highlight"
+          description="Second line — displayed in a gradient accent color below the headline."
+          htmlFor="portalLoginHighlight"
+        >
+          <Input id="portalLoginHighlight" placeholder="to help you." {...register("portalLoginHighlight")} />
+        </SettingsField>
+
+        <SettingsField
+          label="Login tagline"
+          description="Supporting paragraph below the headline."
+          htmlFor="portalLoginTagline"
+        >
+          <textarea
+            id="portalLoginTagline"
+            rows={2}
+            placeholder="Access your support requests, track resolutions…"
+            {...register("portalLoginTagline")}
+            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+          />
+        </SettingsField>
+
+        <SettingsField
+          label="Badge text"
+          description="Short text inside the pill badge at the top of the hero area."
+          htmlFor="portalLoginBadge"
+        >
+          <Input id="portalLoginBadge" placeholder="Self-service support, anytime" {...register("portalLoginBadge")} />
+        </SettingsField>
+
+        {/* ── Customer portal live mini-preview ── */}
+        <SettingsField label="Login page preview" description="Updates live as you type — shows the left panel of the customer login page.">
+          <div
+            className="w-64 rounded-xl overflow-hidden border shadow-md"
+            style={portalAccentVars(portalAccentColor)}
+          >
+            <div
+              className="relative flex flex-col h-52 px-4 py-3 overflow-hidden"
+              style={{ background: "linear-gradient(135deg, var(--pa-dkr) 0%, var(--pa-dk) 45%, var(--pa) 100%)" }}
+            >
+              {/* Glow orb */}
+              <div className="absolute -top-8 -left-8 h-24 w-24 rounded-full blur-2xl opacity-20 pointer-events-none" style={{ backgroundColor: "var(--pa-lt)" }} />
+
+              {/* Logo + company */}
+              <div className="flex items-center gap-1.5 relative z-10">
+                <div className="h-4 w-4 rounded bg-white/20 border border-white/30 flex items-center justify-center">
+                  <Monitor className="h-2.5 w-2.5 text-white/70" />
+                </div>
+                <span className="text-white/70 text-[8px] font-bold tracking-tight truncate max-w-[100px]">
+                  {watchedCompanyName || "Your Company"}
+                </span>
+              </div>
+
+              {/* Hero content */}
+              <div className="mt-auto relative z-10 space-y-1">
+                {/* Badge pill */}
+                <div className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/8 px-2 py-0.5 mb-1">
+                  <Sparkles className="h-2 w-2" style={{ color: "var(--pa-lt)" }} />
+                  <span className="text-white/60 text-[7px] truncate max-w-[120px]">
+                    {loginBadge || "Self-service support, anytime"}
+                  </span>
+                </div>
+
+                {/* Headline */}
+                <p className="text-white font-black text-[13px] leading-none">
+                  {loginHeadline || "We're here"}
+                </p>
+
+                {/* Highlight line */}
+                <p
+                  className="font-black text-[13px] leading-none bg-clip-text text-transparent"
+                  style={{ backgroundImage: "linear-gradient(90deg, var(--pa-lt), white, var(--pa-lt))" }}
+                >
+                  {loginHighlight || "to help you."}
+                </p>
+
+                {/* Tagline */}
+                <p className="text-white/50 text-[7.5px] leading-relaxed pt-0.5 line-clamp-2">
+                  {loginTagline || "Access your support requests and get help from our team."}
+                </p>
+              </div>
+            </div>
+
+            {/* Form stub */}
+            <div className="bg-background px-4 py-3 space-y-1.5">
+              <div className="h-2 w-16 rounded-sm bg-muted/60" />
+              <div className="h-5 w-full rounded-md border border-border/50 bg-muted/30" />
+              <div className="h-2 w-16 rounded-sm bg-muted/60 mt-1" />
+              <div className="h-5 w-full rounded-md border border-border/50 bg-muted/30" />
+              <div
+                className="h-6 w-full rounded-lg mt-1.5"
+                style={{ backgroundColor: "var(--pa)" }}
+              />
+            </div>
+          </div>
+        </SettingsField>
+      </SettingsGroup>
+
+      {/* ── Agent Login ───────────────────────────────────────────────────── */}
+      <SettingsGroup title="Agent Login">
+        <SettingsField
+          label="Panel accent color"
+          description="Controls the hue and tint of the dark left panel on the agent sign-in page. The panel always stays dark — this color sets its personality."
+          htmlFor="agentLoginPanelColor"
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={agentPanelColor || "#6366f1"}
+              onChange={e => setValue("agentLoginPanelColor", e.target.value, { shouldDirty: true })}
+              className="h-9 w-14 rounded border bg-background cursor-pointer p-0.5"
+            />
+            <Input
+              value={agentPanelColor || ""}
+              onChange={e => setValue("agentLoginPanelColor", e.target.value, { shouldDirty: true })}
+              className="font-mono"
+              maxLength={7}
+            />
+            <span className="h-7 w-7 rounded-full border shrink-0" style={{ backgroundColor: agentPanelColor }} />
+          </div>
+        </SettingsField>
+
+        <SettingsField
+          label="Headline"
+          description="First line of the hero text on the left panel."
+          htmlFor="agentLoginHeadline"
+        >
+          <Input id="agentLoginHeadline" placeholder="Resolve faster." {...register("agentLoginHeadline")} />
+        </SettingsField>
+
+        <SettingsField
+          label="Headline highlight"
+          description="Second line — rendered in a gradient tint on the dark panel."
+          htmlFor="agentLoginHighlight"
+        >
+          <Input id="agentLoginHighlight" placeholder="Deliver better." {...register("agentLoginHighlight")} />
+        </SettingsField>
+
+        <SettingsField
+          label="Tagline"
+          description="Supporting paragraph below the headline."
+          htmlFor="agentLoginTagline"
+        >
+          <textarea
+            id="agentLoginTagline"
+            rows={2}
+            placeholder="The modern helpdesk built for IT teams…"
+            {...register("agentLoginTagline")}
+            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+          />
+        </SettingsField>
+
+        <SettingsField
+          label="Badge text"
+          description="Short text inside the pill badge above the headline."
+          htmlFor="agentLoginBadge"
+        >
+          <Input id="agentLoginBadge" placeholder="AI-Powered Service Management" {...register("agentLoginBadge")} />
+        </SettingsField>
+
+        {/* ── Agent login live mini-preview ── */}
+        <SettingsField label="Login page preview" description="Updates live — shows the left panel of the agent sign-in page.">
+          <div
+            className="w-64 rounded-xl overflow-hidden border shadow-md"
+            style={agentLoginVars(agentPanelColor)}
+          >
+            {/* Dark panel */}
+            <div
+              className="relative flex flex-col h-52 px-4 py-3 overflow-hidden"
+              style={{ background: "linear-gradient(135deg, var(--al-dk1) 0%, var(--al-dk2) 45%, var(--al-dk3) 100%)" }}
+            >
+              {/* Grid overlay */}
+              <svg className="absolute inset-0 w-full h-full opacity-[0.06]" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <pattern id="pg" width="20" height="20" patternUnits="userSpaceOnUse">
+                    <path d="M 20 0 L 0 0 0 20" fill="none" stroke="white" strokeWidth="0.5" />
+                  </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#pg)" />
+              </svg>
+
+              {/* Glow orb */}
+              <div className="absolute -top-8 -left-8 h-24 w-24 rounded-full blur-2xl opacity-25 pointer-events-none" style={{ backgroundColor: "var(--al-glow)" }} />
+
+              {/* Logo + company */}
+              <div className="flex items-center gap-1.5 relative z-10">
+                <div className="h-4 w-4 rounded-lg bg-white/15 border border-white/25 flex items-center justify-center">
+                  <span className="text-white/70 text-[7px] font-black">{watchedCompanyName?.[0]?.toUpperCase() || "Z"}</span>
+                </div>
+                <span className="text-white/70 text-[8px] font-bold tracking-tight truncate max-w-[100px]">
+                  {watchedCompanyName || "Your Company"}
+                </span>
+              </div>
+
+              {/* Hero content */}
+              <div className="mt-auto relative z-10 space-y-1">
+                {/* Badge pill */}
+                <div className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/8 px-2 py-0.5 mb-1">
+                  <Sparkles className="h-2 w-2" style={{ color: "var(--al-lt)" }} />
+                  <span className="text-white/60 text-[7px] truncate max-w-[130px]">
+                    {agentBadge || "AI-Powered Service Management"}
+                  </span>
+                </div>
+
+                {/* Headline */}
+                <p className="text-white font-black text-[13px] leading-none">
+                  {agentHeadline || "Resolve faster."}
+                </p>
+
+                {/* Highlight */}
+                <p
+                  className="font-black text-[13px] leading-none bg-clip-text text-transparent"
+                  style={{ backgroundImage: "linear-gradient(90deg, var(--al-lt), var(--al-ll), var(--al-lt))" }}
+                >
+                  {agentHighlight || "Deliver better."}
+                </p>
+
+                {/* Tagline */}
+                <p className="text-white/50 text-[7.5px] leading-relaxed pt-0.5 line-clamp-2">
+                  {agentTagline || "The modern helpdesk for IT teams."}
+                </p>
+              </div>
+            </div>
+
+            {/* Form stub */}
+            <div className="bg-background px-4 py-3 space-y-1.5">
+              <div className="h-2 w-16 rounded-sm bg-muted/60" />
+              <div className="h-5 w-full rounded-md border border-border/50 bg-muted/30" />
+              <div className="h-2 w-16 rounded-sm bg-muted/60 mt-1" />
+              <div className="h-5 w-full rounded-md border border-border/50 bg-muted/30" />
+              <div
+                className="h-6 w-full rounded-lg mt-1.5"
+                style={{ background: `linear-gradient(135deg, var(--al-glow), var(--al-dk2))` }}
+              />
+            </div>
+          </div>
         </SettingsField>
       </SettingsGroup>
     </SettingsFormShell>
@@ -2890,7 +3170,7 @@ export function CmdbSection() {
       <SettingsGroup title="Discovery Connectors">
         <p className="text-sm text-muted-foreground -mt-1 mb-3">
           Discovery connectors automatically populate your CMDB by scanning your environment. Configure connectors in{" "}
-          <Link to="/admin/discovery" className="text-primary underline underline-offset-2">Administration → Discovery</Link>.
+          <Link to="/discovery" className="text-primary underline underline-offset-2">Administration → Discovery</Link>.
         </p>
         {([
           { key: "agent",   label: "Agent-based Discovery",           desc: "Lightweight agent installed on endpoints to report hardware and software inventory." },
@@ -2907,7 +3187,7 @@ export function CmdbSection() {
               </div>
               <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
             </div>
-            <Link to="/admin/discovery">
+            <Link to="/discovery">
               <Button type="button" variant="outline" size="sm" className="text-xs h-7 shrink-0">Configure</Button>
             </Link>
           </div>
@@ -3492,10 +3772,13 @@ export function BusinessHoursSection() {
         </SettingsField>
         <SettingsField label="Timezone" description="Overrides the general timezone for this calendar. Leave blank to inherit from General settings." htmlFor="calendarTimezone">
           <Controller name="calendarTimezone" control={control} render={({ field }) => (
-            <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v)}>
+            <Select
+              value={field.value || "__inherit__"}
+              onValueChange={(v) => field.onChange(v === "__inherit__" ? "" : v)}
+            >
               <SelectTrigger><SelectValue placeholder="Inherit from General" /></SelectTrigger>
               <SelectContent className="max-h-64">
-                <SelectItem value="">Inherit from General</SelectItem>
+                <SelectItem value="__inherit__">Inherit from General</SelectItem>
                 {timezones.map((tz) => <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>)}
               </SelectContent>
             </Select>

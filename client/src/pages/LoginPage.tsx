@@ -5,137 +5,341 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { signIn, useSession } from "@/lib/auth-client";
 import { useBranding } from "@/lib/useBranding";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { agentLoginVars } from "@/lib/portalColor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import ErrorAlert from "@/components/ErrorAlert";
-import ErrorMessage from "@/components/ErrorMessage";
-import { Loader2 } from "lucide-react";
+import { Link } from "react-router";
+import {
+  Loader2, Shield, Zap, BarChart2, GitBranch,
+  Mail, Lock, ChevronRight, Sparkles, CheckCircle2,
+  ExternalLink,
+} from "lucide-react";
 
 const loginSchema = z.object({
   email: z.email("Please enter a valid email"),
   password: z.string().min(1, "Password is required"),
 });
-
 type LoginFormData = z.infer<typeof loginSchema>;
+
+// ── Feature highlights shown on the brand panel ────────────────────────────────
+
+const FEATURES = [
+  { icon: Zap,       text: "AI-powered ticket classification & auto-resolution" },
+  { icon: Shield,    text: "SLA tracking, escalation rules, and audit logging" },
+  { icon: GitBranch, text: "Full ITIL suite — incidents, changes, problems & more" },
+  { icon: BarChart2, text: "Real-time analytics and customisable dashboards" },
+] as const;
+
+// ── Decorative SVG grid ───────────────────────────────────────────────────────
+
+function GridPattern() {
+  return (
+    <svg
+      className="absolute inset-0 w-full h-full opacity-[0.07]"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="white" strokeWidth="0.5" />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#grid)" />
+    </svg>
+  );
+}
+
+// ── Animated logo mark ────────────────────────────────────────────────────────
+
+function LogoMark({ src, company }: { src?: string; company?: string }) {
+  const letter = (company ?? "Z")[0]?.toUpperCase() ?? "Z";
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={company ?? "Logo"}
+        className="h-11 w-11 rounded-2xl object-contain shadow-lg"
+      />
+    );
+  }
+  return (
+    <div className="h-11 w-11 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center shadow-lg backdrop-blur-sm">
+      <span className="text-white font-black text-xl">{letter}</span>
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function LoginPage() {
   const { data: session, isPending } = useSession();
   const navigate = useNavigate();
   const [serverError, setServerError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const { data: branding } = useBranding();
-  const logoDataUrl = branding?.logoDataUrl;
+
+  const logoDataUrl      = branding?.logoDataUrl;
+  const companyName      = branding?.companyName      || "Zentra";
+  const platformSubtitle = branding?.platformSubtitle || "Service Desk";
+  const primaryColor     = branding?.primaryColor     || "#4F46E5";
+  const panelColor     = branding?.agentLoginPanelColor || "#6366f1";
+  const agentHeadline  = branding?.agentLoginHeadline   || "Resolve faster.";
+  const agentHighlight = branding?.agentLoginHighlight  || "Deliver better.";
+  const agentTagline   = branding?.agentLoginTagline    || "The modern helpdesk built for IT teams who want to move fast without breaking things.";
+  const agentBadge     = branding?.agentLoginBadge      || "AI-Powered Service Management";
+  const panelVars      = agentLoginVars(panelColor);
 
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<LoginFormData>({
-    resolver: zodResolver(loginSchema),
-  });
+  } = useForm<LoginFormData>({ resolver: zodResolver(loginSchema) });
 
   if (isPending) {
     return (
-      <div className="flex items-center justify-center h-screen text-muted-foreground">
-        <Loader2 className="animate-spin mr-2 h-5 w-5" />
-        Loading...
+      <div className="flex items-center justify-center h-screen bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center animate-pulse">
+            <Sparkles className="h-5 w-5 text-primary" />
+          </div>
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        </div>
       </div>
     );
   }
 
-  if (session) {
-    return <Navigate to="/" replace />;
-  }
+  if (session) return <Navigate to="/" replace />;
 
   const onSubmit = async (data: LoginFormData) => {
     setServerError("");
-
     const { error } = await signIn.email(data);
-
-    if (error) {
-      setServerError(error.message ?? "Login failed");
-      return;
-    }
-
+    if (error) { setServerError(error.message ?? "Login failed"); return; }
     navigate("/", { replace: true });
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-background">
-      <div className="w-full max-w-[400px] px-4 animate-in-page">
-        <div className="flex flex-col items-center mb-10">
-          {logoDataUrl ? (
-            <img src={logoDataUrl} alt="Zentra" className="h-12 w-12 rounded-2xl object-contain mb-5" />
-          ) : (
-            <div className="h-12 w-12 rounded-2xl bg-primary flex items-center justify-center mb-5">
-              <span className="text-primary-foreground font-bold text-xl">Z</span>
+    <div className="min-h-screen flex" style={panelVars}>
+
+      {/* ── Left brand panel ───────────────────────────────────────────────── */}
+      <div
+        className="hidden lg:flex lg:w-[52%] xl:w-[55%] relative flex-col overflow-hidden"
+        style={{ background: "linear-gradient(135deg, var(--al-dk1) 0%, var(--al-dk2) 45%, var(--al-dk3) 100%)" }}
+      >
+        <GridPattern />
+
+        {/* Glow orbs */}
+        <div
+          className="absolute -top-32 -left-32 h-96 w-96 rounded-full blur-[100px] opacity-30 pointer-events-none"
+          style={{ backgroundColor: "var(--al-glow)" }}
+        />
+        <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full blur-[120px] opacity-15 pointer-events-none"
+          style={{ backgroundColor: "var(--al-dk2)" }} />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-64 w-64 rounded-full blur-[80px] opacity-10 pointer-events-none"
+          style={{ backgroundColor: "var(--al-lt)" }} />
+
+        {/* Content */}
+        <div className="relative z-10 flex flex-col h-full px-12 py-10">
+
+          {/* Logo + name */}
+          <div className="flex items-center gap-3">
+            <LogoMark src={logoDataUrl} company={companyName} />
+            <div>
+              <p className="text-white font-bold text-lg leading-tight tracking-tight">{companyName}</p>
+              <p className="text-white/50 text-[11px] uppercase tracking-widest font-medium">{platformSubtitle}</p>
             </div>
-          )}
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Welcome back
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1.5">
-            Sign in to your Zentra account
+          </div>
+
+          {/* Hero text */}
+          <div className="mt-auto mb-12">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/8 px-3.5 py-1.5 text-xs text-white/70 mb-6 backdrop-blur-sm">
+              <Sparkles className="h-3 w-3 text-indigo-300" />
+              {agentBadge}
+            </div>
+
+            <h2 className="text-4xl xl:text-5xl font-black text-white leading-[1.1] tracking-tight mb-4">
+              {agentHeadline}<br />
+              <span
+                className="bg-clip-text text-transparent"
+                style={{ backgroundImage: `linear-gradient(90deg, #a78bfa, #60a5fa, #34d399)` }}
+              >
+                {agentHighlight}
+              </span>
+            </h2>
+            <p className="text-white/55 text-base leading-relaxed max-w-sm">
+              {agentTagline}
+            </p>
+
+            {/* Feature list */}
+            <div className="mt-8 space-y-3.5">
+              {FEATURES.map(({ icon: Icon, text }) => (
+                <div key={text} className="flex items-start gap-3">
+                  <div className="h-6 w-6 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center shrink-0 mt-0.5">
+                    <Icon className="h-3.5 w-3.5 text-indigo-300" />
+                  </div>
+                  <p className="text-white/65 text-sm leading-snug">{text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <p className="text-white/25 text-xs mt-auto">
+            © {new Date().getFullYear()} {companyName}. All rights reserved.
           </p>
         </div>
-        <Card>
-          <CardHeader>
-            <CardTitle>Sign in</CardTitle>
-            <CardDescription>
-              Enter your credentials to continue
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit(onSubmit)} noValidate>
-              {serverError && (
-                <ErrorAlert message={serverError} className="mb-4" />
-              )}
-              <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="admin@example.com"
-                    {...register("email")}
-                  />
-                  {errors.email && (
-                    <ErrorMessage message={errors.email.message} />
-                  )}
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="password">Password</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="Enter your password"
-                    {...register("password")}
-                  />
-                  {errors.password && (
-                    <ErrorMessage message={errors.password.message} />
-                  )}
-                </div>
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting && (
-                    <Loader2 className="animate-spin mr-2 h-4 w-4" />
-                  )}
-                  {isSubmitting ? "Signing in..." : "Sign in"}
-                </Button>
+      </div>
+
+      {/* ── Right form panel ───────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col items-center justify-center bg-background px-6 py-12 relative">
+
+        {/* Subtle background texture */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(99,102,241,0.08),transparent)] pointer-events-none" />
+
+        {/* Mobile-only logo */}
+        <div className="lg:hidden flex items-center gap-2.5 mb-10">
+          {logoDataUrl ? (
+            <img src={logoDataUrl} alt={companyName} className="h-9 w-9 rounded-xl object-contain" />
+          ) : (
+            <div className="h-9 w-9 rounded-xl bg-primary flex items-center justify-center">
+              <span className="text-primary-foreground font-bold text-base">{companyName[0]?.toUpperCase()}</span>
+            </div>
+          )}
+          <span className="font-bold text-lg tracking-tight">{companyName}</span>
+        </div>
+
+        <div className="w-full max-w-[400px] relative z-10">
+
+          {/* Heading */}
+          <div className="mb-8">
+            <h1 className="text-2xl font-black tracking-tight text-foreground">Welcome back</h1>
+            <p className="text-sm text-muted-foreground mt-1.5">
+              Sign in to your {platformSubtitle} account to continue
+            </p>
+          </div>
+
+          {/* Error banner */}
+          {serverError && (
+            <div className="mb-5 flex items-start gap-3 rounded-xl border border-destructive/25 bg-destructive/8 px-4 py-3 text-sm text-destructive">
+              <span className="shrink-0 mt-0.5">⚠</span>
+              <span>{serverError}</span>
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+
+            {/* Email */}
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className="text-sm font-medium">Email address</Label>
+              <div className="relative">
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50 pointer-events-none" />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="you@company.com"
+                  className="pl-10 h-11 bg-muted/30 border-border/60 focus:bg-background transition-colors"
+                  {...register("email")}
+                />
               </div>
-            </form>
-          </CardContent>
-        </Card>
+              {errors.email && (
+                <p className="text-xs text-destructive flex items-center gap-1 mt-1">
+                  <span>•</span> {errors.email.message}
+                </p>
+              )}
+            </div>
+
+            {/* Password */}
+            <div className="space-y-1.5">
+              <Label htmlFor="password" className="text-sm font-medium">Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50 pointer-events-none" />
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  className="pl-10 pr-12 h-11 bg-muted/30 border-border/60 focus:bg-background transition-colors"
+                  {...register("password")}
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowPassword(v => !v)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+              {errors.password && (
+                <p className="text-xs text-destructive flex items-center gap-1 mt-1">
+                  <span>•</span> {errors.password.message}
+                </p>
+              )}
+            </div>
+
+            {/* Submit */}
+            <Button
+              type="submit"
+              size="lg"
+              className="w-full h-11 font-semibold gap-2 mt-2 shadow-sm"
+              disabled={isSubmitting}
+              style={!isSubmitting ? {
+                background: `linear-gradient(135deg, ${primaryColor}, ${primaryColor}cc)`,
+                boxShadow: `0 4px 16px ${primaryColor}40`,
+              } : undefined}
+            >
+              {isSubmitting ? (
+                <><Loader2 className="h-4 w-4 animate-spin" />Signing in…</>
+              ) : (
+                <>Sign in <ChevronRight className="h-4 w-4 opacity-70" /></>
+              )}
+            </Button>
+          </form>
+
+          {/* Trust badges */}
+          <div className="mt-8 pt-5 border-t border-border/40">
+            <div className="flex items-center justify-center gap-5 text-[11px] text-muted-foreground/50">
+              {[
+                { icon: Shield,       label: "Secure login" },
+                { icon: CheckCircle2, label: "SOC 2 ready" },
+                { icon: Lock,         label: "Encrypted" },
+              ].map(({ icon: Icon, label }) => (
+                <span key={label} className="flex items-center gap-1.5">
+                  <Icon className="h-3 w-3" />
+                  {label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Customer portal link */}
+          <div className="mt-5 pt-4 border-t border-border/40">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">Need support as a customer?</p>
+              <Link
+                to="/portal/login"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline underline-offset-4 transition-colors"
+              >
+                Go to Support Portal
+                <ExternalLink className="h-3 w-3" />
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom footer */}
+        <div className="absolute bottom-6 flex items-center gap-3">
+          <div className="h-px w-8 bg-gradient-to-r from-transparent via-border/40 to-transparent" />
+          <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/80 px-3.5 py-1.5 shadow-[0_1px_8px_0_rgba(0,0,0,0.07)] backdrop-blur-sm">
+            <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-muted border border-border/60 shrink-0 shadow-sm">
+              <img src="/favicon.png" alt="" aria-hidden className="h-2.5 w-2.5 object-contain" />
+            </span>
+            <span className="text-[10.5px] text-muted-foreground/50 font-medium tracking-wide">Powered by</span>
+            <span className="text-[10.5px] font-black tracking-tight text-foreground/65">Zentra</span>
+            <div className="h-3 w-px bg-border/70 shrink-0" />
+            <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-muted-foreground/40">ITSM</span>
+          </div>
+          <div className="h-px w-8 bg-gradient-to-l from-transparent via-border/40 to-transparent" />
+        </div>
       </div>
     </div>
   );

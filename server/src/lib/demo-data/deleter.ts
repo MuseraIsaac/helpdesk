@@ -49,31 +49,40 @@ interface StoredRecordIds {
   csatRatingIds?:      number[];
   incidentUpdateIds?:  number[];
   approvalRequestIds?: number[];
+  saasIds?:            number[];
+  licenseIds?:         number[];
+  dutyPlanIds?:        number[];
+  ticketTypeIds?:      number[];
+  ticketStatusIds?:    number[];
 }
 
 export interface LiveEntityCounts {
-  users:           number;
-  teams:           number;
-  organisations:   number;
-  customers:       number;
-  kbArticles:      number;
-  kbCategories:    number;
-  macros:          number;
-  cabGroups:       number;
-  catalogItems:    number;
-  tickets:         number;
-  incidents:       number;
-  serviceRequests: number;
-  problems:        number;
-  changes:         number;
-  assets:          number;
-  configItems:     number;
-  // sub-records (notes, replies, etc.) counted separately for display clarity
-  notes:           number;
-  replies:         number;
-  csatRatings:     number;
-  incidentUpdates: number;
-  approvals:       number;
+  users:              number;
+  teams:              number;
+  organisations:      number;
+  customers:          number;
+  kbArticles:         number;
+  kbCategories:       number;
+  macros:             number;
+  cabGroups:          number;
+  catalogItems:       number;
+  tickets:            number;
+  incidents:          number;
+  serviceRequests:    number;
+  problems:           number;
+  changes:            number;
+  assets:             number;
+  configItems:        number;
+  notes:              number;
+  replies:            number;
+  csatRatings:        number;
+  incidentUpdates:    number;
+  approvals:          number;
+  saasSubscriptions:  number;
+  softwareLicenses:   number;
+  dutyPlans:          number;
+  ticketTypes:        number;
+  ticketStatuses:     number;
 }
 
 export interface BatchPreview {
@@ -114,28 +123,34 @@ export async function previewBatchDeletion(batchId: number): Promise<BatchPrevie
     macros, cabGroups, catalogItems,
     tickets, incidents, serviceRequests, problems, changes,
     assets, configItems, notes, replies, csatRatings, incidentUpdates, approvals,
+    saasSubscriptions, softwareLicenses, dutyPlans, ticketTypes, ticketStatuses,
   ] = await Promise.all([
-    ids.userIds?.length            ? prisma.user.count({ where: { id: { in: ids.userIds } } }) : 0,
-    ids.teamIds?.length            ? prisma.team.count({ where: { id: { in: ids.teamIds } } }) : 0,
-    ids.orgIds?.length             ? prisma.organization.count({ where: { id: { in: ids.orgIds } } }) : 0,
-    ids.customerIds?.length        ? prisma.customer.count({ where: { id: { in: ids.customerIds } } }) : 0,
-    ids.kbArticleIds?.length       ? prisma.kbArticle.count({ where: { id: { in: ids.kbArticleIds } } }) : 0,
-    ids.kbCategoryIds?.length      ? prisma.kbCategory.count({ where: { id: { in: ids.kbCategoryIds } } }) : 0,
-    ids.macroIds?.length           ? prisma.macro.count({ where: { id: { in: ids.macroIds } } }) : 0,
-    ids.cabGroupIds?.length        ? prisma.cabGroup.count({ where: { id: { in: ids.cabGroupIds } } }) : 0,
-    ids.catalogItemIds?.length     ? prisma.catalogItem.count({ where: { id: { in: ids.catalogItemIds } } }) : 0,
-    ids.ticketIds?.length          ? prisma.ticket.count({ where: { id: { in: ids.ticketIds } } }) : 0,
-    ids.incidentIds?.length        ? prisma.incident.count({ where: { id: { in: ids.incidentIds } } }) : 0,
-    ids.requestIds?.length         ? prisma.serviceRequest.count({ where: { id: { in: ids.requestIds } } }) : 0,
-    ids.problemIds?.length         ? prisma.problem.count({ where: { id: { in: ids.problemIds } } }) : 0,
-    ids.changeIds?.length          ? prisma.change.count({ where: { id: { in: ids.changeIds } } }) : 0,
-    ids.assetIds?.length           ? prisma.asset.count({ where: { id: { in: ids.assetIds } } }) : 0,
-    ids.ciIds?.length              ? prisma.configItem.count({ where: { id: { in: ids.ciIds } } }) : 0,
-    ids.noteIds?.length            ? prisma.note.count({ where: { id: { in: ids.noteIds } } }) : 0,
-    ids.replyIds?.length           ? prisma.reply.count({ where: { id: { in: ids.replyIds } } }) : 0,
-    ids.csatRatingIds?.length      ? prisma.csatRating.count({ where: { id: { in: ids.csatRatingIds } } }) : 0,
-    ids.incidentUpdateIds?.length  ? prisma.incidentUpdate.count({ where: { id: { in: ids.incidentUpdateIds } } }) : 0,
-    ids.approvalRequestIds?.length ? prisma.approvalRequest.count({ where: { id: { in: ids.approvalRequestIds } } }) : 0,
+    ids.userIds?.length             ? prisma.user.count({ where: { id: { in: ids.userIds } } }) : 0,
+    ids.teamIds?.length             ? prisma.team.count({ where: { id: { in: ids.teamIds } } }) : 0,
+    ids.orgIds?.length              ? prisma.organization.count({ where: { id: { in: ids.orgIds } } }) : 0,
+    ids.customerIds?.length         ? prisma.customer.count({ where: { id: { in: ids.customerIds } } }) : 0,
+    ids.kbArticleIds?.length        ? prisma.kbArticle.count({ where: { id: { in: ids.kbArticleIds } } }) : 0,
+    ids.kbCategoryIds?.length       ? prisma.kbCategory.count({ where: { id: { in: ids.kbCategoryIds } } }) : 0,
+    ids.macroIds?.length            ? prisma.macro.count({ where: { id: { in: ids.macroIds } } }) : 0,
+    ids.cabGroupIds?.length         ? prisma.cabGroup.count({ where: { id: { in: ids.cabGroupIds } } }) : 0,
+    ids.catalogItemIds?.length      ? prisma.catalogItem.count({ where: { id: { in: ids.catalogItemIds } } }) : 0,
+    ids.ticketIds?.length           ? prisma.ticket.count({ where: { id: { in: ids.ticketIds } } }) : 0,
+    ids.incidentIds?.length         ? prisma.incident.count({ where: { id: { in: ids.incidentIds } } }) : 0,
+    ids.requestIds?.length          ? prisma.serviceRequest.count({ where: { id: { in: ids.requestIds } } }) : 0,
+    ids.problemIds?.length          ? prisma.problem.count({ where: { id: { in: ids.problemIds } } }) : 0,
+    ids.changeIds?.length           ? prisma.change.count({ where: { id: { in: ids.changeIds } } }) : 0,
+    ids.assetIds?.length            ? prisma.asset.count({ where: { id: { in: ids.assetIds } } }) : 0,
+    ids.ciIds?.length               ? prisma.configItem.count({ where: { id: { in: ids.ciIds } } }) : 0,
+    ids.noteIds?.length             ? prisma.note.count({ where: { id: { in: ids.noteIds } } }) : 0,
+    ids.replyIds?.length            ? prisma.reply.count({ where: { id: { in: ids.replyIds } } }) : 0,
+    ids.csatRatingIds?.length       ? prisma.csatRating.count({ where: { id: { in: ids.csatRatingIds } } }) : 0,
+    ids.incidentUpdateIds?.length   ? prisma.incidentUpdate.count({ where: { id: { in: ids.incidentUpdateIds } } }) : 0,
+    ids.approvalRequestIds?.length  ? prisma.approvalRequest.count({ where: { id: { in: ids.approvalRequestIds } } }) : 0,
+    ids.saasIds?.length             ? prisma.saaSSubscription.count({ where: { id: { in: ids.saasIds } } }) : 0,
+    ids.licenseIds?.length          ? prisma.softwareLicense.count({ where: { id: { in: ids.licenseIds } } }) : 0,
+    ids.dutyPlanIds?.length         ? prisma.dutyPlan.count({ where: { id: { in: ids.dutyPlanIds } } }) : 0,
+    ids.ticketTypeIds?.length       ? prisma.ticketTypeConfig.count({ where: { id: { in: ids.ticketTypeIds } } }) : 0,
+    ids.ticketStatusIds?.length     ? prisma.ticketStatusConfig.count({ where: { id: { in: ids.ticketStatusIds } } }) : 0,
   ]);
 
   const liveCounts: LiveEntityCounts = {
@@ -144,6 +159,7 @@ export async function previewBatchDeletion(batchId: number): Promise<BatchPrevie
     tickets, incidents, serviceRequests, problems, changes,
     assets, configItems,
     notes, replies, csatRatings, incidentUpdates, approvals,
+    saasSubscriptions, softwareLicenses, dutyPlans, ticketTypes, ticketStatuses,
   };
 
   const totalLive = Object.values(liveCounts).reduce((s, v) => s + v, 0);
@@ -316,6 +332,40 @@ export async function deleteDemoBatch(batchId: number, actor: DeletionActor): Pr
     if (ids.kbCategoryIds?.length) {
       const { count } = await prisma.kbCategory.deleteMany({ where: { id: { in: ids.kbCategoryIds } } });
       deleted.kbCategories = count;
+    }
+
+    // ── 12a. Software & SaaS ─────────────────────────────────────────────────
+    if (ids.saasIds?.length) {
+      await prisma.saaSUserAssignment.deleteMany({ where: { subscriptionId: { in: ids.saasIds } } });
+      const { count } = await prisma.saaSSubscription.deleteMany({ where: { id: { in: ids.saasIds } } });
+      (deleted as any).saasSubscriptions = count;
+    }
+    if (ids.licenseIds?.length) {
+      await prisma.licenseAssignment.deleteMany({ where: { licenseId: { in: ids.licenseIds } } });
+      const { count } = await prisma.softwareLicense.deleteMany({ where: { id: { in: ids.licenseIds } } });
+      (deleted as any).softwareLicenses = count;
+    }
+
+    // ── 12b. Duty Plans ───────────────────────────────────────────────────────
+    if (ids.dutyPlanIds?.length) {
+      await prisma.dutyAssignment.deleteMany({ where: { planId: { in: ids.dutyPlanIds } } });
+      await prisma.dutyShift.deleteMany({ where: { planId: { in: ids.dutyPlanIds } } });
+      const { count } = await prisma.dutyPlan.deleteMany({ where: { id: { in: ids.dutyPlanIds } } });
+      (deleted as any).dutyPlans = count;
+      // Clean up duty plan roles for teams that had plans in this batch
+      if (ids.teamIds?.length) {
+        await prisma.dutyPlanRole.deleteMany({ where: { teamId: { in: ids.teamIds } } });
+      }
+    }
+
+    // ── 12c. Ticket Configuration ─────────────────────────────────────────────
+    if (ids.ticketTypeIds?.length) {
+      const { count } = await prisma.ticketTypeConfig.deleteMany({ where: { id: { in: ids.ticketTypeIds } } });
+      (deleted as any).ticketTypes = count;
+    }
+    if (ids.ticketStatusIds?.length) {
+      const { count } = await prisma.ticketStatusConfig.deleteMany({ where: { id: { in: ids.ticketStatusIds } } });
+      (deleted as any).ticketStatuses = count;
     }
 
     // ── 12. Supporting entities ───────────────────────────────────────────────

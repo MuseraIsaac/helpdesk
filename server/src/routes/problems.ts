@@ -319,6 +319,7 @@ router.post(
         assignedToId: data.assignedToId ?? null,
         teamId: data.teamId ?? null,
         customFields: (data.customFields ?? {}) as any,
+        organizationId: data.organizationId ?? null,
       },
       select: { id: true, problemNumber: true, status: true },
     });

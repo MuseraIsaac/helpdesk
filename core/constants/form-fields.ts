@@ -11,10 +11,11 @@ export type FieldType =
 
 export type FieldWidth = "full" | "half";
 
-export type FormEntityType = "ticket" | "request" | "change" | "problem" | "article";
+export type FormEntityType = "ticket" | "incident" | "request" | "change" | "problem" | "article";
 
 export const formEntityTypes: FormEntityType[] = [
   "ticket",
+  "incident",
   "request",
   "change",
   "problem",
@@ -22,11 +23,12 @@ export const formEntityTypes: FormEntityType[] = [
 ];
 
 export const formEntityTypeLabel: Record<FormEntityType, string> = {
-  ticket:  "Ticket",
-  request: "Service Request",
-  change:  "Change Request",
-  problem: "Problem",
-  article: "Knowledge Article",
+  ticket:   "Ticket",
+  incident: "Incident",
+  request:  "Service Request",
+  change:   "Change Request",
+  problem:  "Problem",
+  article:  "Knowledge Article",
 };
 
 export interface FieldDef {
@@ -39,6 +41,8 @@ export interface FieldDef {
   section: string;
   order: number;
   description?: string;
+  /** When false, the field defaults to hidden in new installations. Default: true */
+  defaultVisible?: boolean;
 }
 
 // ─── Ticket ────────────────────────────────────────────────────────────────────
@@ -51,6 +55,7 @@ const TICKET_FIELDS: FieldDef[] = [
   // Section: Requester
   { key: "senderName",      label: "Sender Name",       placeholder: "John Smith",                               type: "text",     required: true,  width: "half", section: "Requester",              order: 40 },
   { key: "senderEmail",     label: "Sender Email",      placeholder: "john@example.com",                         type: "email",    required: true,  width: "half", section: "Requester",              order: 50 },
+  { key: "organizationId",  label: "Organization",      placeholder: "Select organization…",                     type: "select",   required: false, width: "half", section: "Requester",              order: 55, defaultVisible: false, description: "Link this ticket to an organisation from Contacts." },
   // Section: Triage
   { key: "priority",        label: "Priority",          placeholder: "Select priority",                          type: "select",   required: false, width: "half", section: "Triage",                 order: 60 },
   { key: "severity",        label: "Severity",          placeholder: "Select severity",                          type: "select",   required: false, width: "half", section: "Triage",                 order: 70 },
@@ -70,6 +75,7 @@ const REQUEST_FIELDS: FieldDef[] = [
   // Section: Request Details
   { key: "title",           label: "Title",                       placeholder: "Brief description of what is needed",                              type: "text",     required: true,  width: "full", section: "Request Details",  order: 10 },
   { key: "description",     label: "Description",                 placeholder: "Provide details about the request, justification, and context",    type: "textarea", required: false, width: "full", section: "Request Details",  order: 20 },
+  { key: "organizationId",   label: "Organization",              placeholder: "Select organization…",                                                                             type: "select",      required: false, width: "half", section: "Request Details",  order: 25, defaultVisible: false, description: "Link this request to an organisation from Contacts." },
   // Section: Classification
   { key: "catalogItemName", label: "Service / Catalog Item",      placeholder: "e.g. Laptop provisioning, VPN access",                            type: "text",     required: false, width: "half", section: "Classification",   order: 30 },
   { key: "priority",        label: "Priority",                    placeholder: "Select priority",                                                  type: "select",   required: false, width: "half", section: "Classification",   order: 40 },
@@ -90,6 +96,7 @@ const CHANGE_FIELDS: FieldDef[] = [
   // Section: Basic Information
   { key: "title",                       label: "Change Summary",                 placeholder: "Brief one-line summary of what this change does…",                                                               type: "text",     required: true,  width: "full", section: "Basic Information",             order: 10 },
   { key: "description",                 label: "Description",                    placeholder: "High-level description of the change…",                                                                          type: "textarea", required: false, width: "full", section: "Basic Information",             order: 20 },
+  { key: "organizationId",               label: "Organization",                  placeholder: "Select organization…",                                                                                                                               type: "select",   required: false, width: "half", section: "Basic Information",             order: 25, defaultVisible: false, description: "Organisation requesting or impacted by this change." },
   // Section: Classification
   { key: "changeType",                  label: "Change Type",                    placeholder: "",                                                                                                               type: "select",   required: false, width: "half", section: "Classification",                order: 30 },
   { key: "changeModel",                 label: "Change Model",                   placeholder: "",                                                                                                               type: "select",   required: false, width: "half", section: "Classification",                order: 40 },
@@ -135,6 +142,7 @@ const PROBLEM_FIELDS: FieldDef[] = [
   // Section: Problem Details
   { key: "title",              label: "Title",                       placeholder: "Brief description of the underlying issue",              type: "text",        required: true,  width: "full", section: "Problem Details",        order: 10 },
   { key: "description",        label: "Description",                 placeholder: "What is the recurring issue? What symptoms observed?",  type: "textarea",    required: false, width: "full", section: "Problem Details",        order: 20 },
+  { key: "organizationId",      label: "Organization",                placeholder: "Select organization…",                                           type: "select",      required: false, width: "half", section: "Problem Details",        order: 25, defaultVisible: false, description: "Organisation affected by this problem." },
   // Section: Classification
   { key: "priority",           label: "Priority",                    placeholder: "Select priority",                                       type: "select",      required: false, width: "half", section: "Classification",         order: 30 },
   { key: "affectedService",    label: "Affected Service / CI",       placeholder: "e.g. Payment gateway, Auth service",                    type: "text",        required: false, width: "half", section: "Classification",         order: 40 },
@@ -148,6 +156,24 @@ const PROBLEM_FIELDS: FieldDef[] = [
   { key: "linkedChangeRef",    label: "Linked Change Reference",     placeholder: "e.g. CHG-0042",                                         type: "text",        required: false, width: "half", section: "Initial Investigation",  order: 100 },
   // Section: Linked Incidents
   { key: "linkedIncidentIds",  label: "Linked Incidents",            placeholder: "",                                                      type: "multiselect", required: false, width: "full", section: "Linked Incidents",       order: 110, description: "Select related incidents to link to this problem at creation." },
+];
+
+// ─── Incident ─────────────────────────────────────────────────────────────────
+
+const INCIDENT_FIELDS: FieldDef[] = [
+  // Section: Incident Details
+  { key: "title",            label: "Incident Title",           placeholder: "Brief, descriptive title of what is happening…",          type: "text",     required: true,  width: "full", section: "Incident Details",      order: 10 },
+  { key: "priority",         label: "Priority",                 placeholder: "Select priority",                                          type: "select",   required: true,  width: "half", section: "Incident Details",      order: 20 },
+  { key: "isMajor",          label: "Major Incident",           placeholder: "",                                                         type: "switch",   required: false, width: "half", section: "Incident Details",      order: 30, description: "Flag this as a major incident for escalated response procedures." },
+  // Section: Description
+  { key: "description",      label: "Description",              placeholder: "What is happening? What symptoms have been observed?",     type: "richtext", required: false, width: "full", section: "Description",           order: 40 },
+  // Section: Impact
+  { key: "affectedSystem",   label: "Affected System / Service", placeholder: "e.g. Payment gateway, Authentication service…",          type: "text",     required: false, width: "full", section: "Impact",                order: 50 },
+  { key: "affectedUserCount", label: "Estimated Affected Users", placeholder: "e.g. 500",                                               type: "number",   required: false, width: "half", section: "Impact",                order: 60 },
+  // Section: Assignment
+  { key: "commanderId",      label: "Incident Commander",       placeholder: "Unassigned",                                               type: "select",   required: false, width: "half", section: "Assignment",            order: 70 },
+  { key: "assignedToId",     label: "Assigned Analyst",         placeholder: "Unassigned",                                               type: "select",   required: false, width: "half", section: "Assignment",            order: 80 },
+  { key: "teamId",           label: "Team",                     placeholder: "No team",                                                  type: "select",   required: false, width: "half", section: "Assignment",            order: 90 },
 ];
 
 // ─── Article ──────────────────────────────────────────────────────────────────
@@ -171,11 +197,12 @@ const ARTICLE_FIELDS: FieldDef[] = [
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
 export const FORM_FIELD_REGISTRY: Record<FormEntityType, FieldDef[]> = {
-  ticket:  TICKET_FIELDS,
-  request: REQUEST_FIELDS,
-  change:  CHANGE_FIELDS,
-  problem: PROBLEM_FIELDS,
-  article: ARTICLE_FIELDS,
+  ticket:   TICKET_FIELDS,
+  incident: INCIDENT_FIELDS,
+  request:  REQUEST_FIELDS,
+  change:   CHANGE_FIELDS,
+  problem:  PROBLEM_FIELDS,
+  article:  ARTICLE_FIELDS,
 };
 
 /** Returns the ordered list of unique section names for an entity type. */

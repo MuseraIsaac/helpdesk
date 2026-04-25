@@ -92,27 +92,32 @@ interface DemoBatch {
 }
 
 interface LiveEntityCounts {
-  users:           number;
-  teams:           number;
-  organisations:   number;
-  customers:       number;
-  kbArticles:      number;
-  kbCategories:    number;
-  macros:          number;
-  cabGroups:       number;
-  catalogItems:    number;
-  tickets:         number;
-  incidents:       number;
-  serviceRequests: number;
-  problems:        number;
-  changes:         number;
-  assets:          number;
-  configItems:     number;
-  notes:           number;
-  replies:         number;
-  csatRatings:     number;
-  incidentUpdates: number;
-  approvals:       number;
+  users:              number;
+  teams:              number;
+  organisations:      number;
+  customers:          number;
+  kbArticles:         number;
+  kbCategories:       number;
+  macros:             number;
+  cabGroups:          number;
+  catalogItems:       number;
+  tickets:            number;
+  incidents:          number;
+  serviceRequests:    number;
+  problems:           number;
+  changes:            number;
+  assets:             number;
+  configItems:        number;
+  notes:              number;
+  replies:            number;
+  csatRatings:        number;
+  incidentUpdates:    number;
+  approvals:          number;
+  saasSubscriptions:  number;
+  softwareLicenses:   number;
+  dutyPlans:          number;
+  ticketTypes:        number;
+  ticketStatuses:     number;
 }
 
 interface BatchPreview {
@@ -200,6 +205,21 @@ const ENTITY_GROUPS: {
       { key: "csatRatings",     label: "CSAT ratings" },
       { key: "incidentUpdates", label: "Incident timeline updates" },
       { key: "approvals",       label: "Approval requests" },
+    ],
+  },
+  {
+    label: "Software & SaaS", icon: Server,
+    entries: [
+      { key: "saasSubscriptions", label: "SaaS subscriptions" },
+      { key: "softwareLicenses",  label: "Software licenses" },
+    ],
+  },
+  {
+    label: "Scheduling & Config", icon: BarChart2,
+    entries: [
+      { key: "dutyPlans",    label: "Duty plans" },
+      { key: "ticketTypes",  label: "Custom ticket types" },
+      { key: "ticketStatuses", label: "Custom ticket statuses" },
     ],
   },
 ];

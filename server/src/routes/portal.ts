@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { hashPassword } from "better-auth/crypto";
+import multer from "multer";
+import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { requireCustomer } from "../middleware/require-customer";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
@@ -11,7 +12,10 @@ import { logAudit } from "../lib/audit";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { htmlToText } from "../lib/html-to-text";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
-import { loadFile } from "../lib/storage";
+import {
+  loadFile, saveFile, ALLOWED_MIME_TYPES, getMaxFileSizeBytes,
+} from "../lib/storage";
+import { scanBuffer } from "../lib/virus-scan";
 import prisma from "../db";
 import {
   portalRegisterSchema,
@@ -76,6 +80,124 @@ router.post("/register", async (req, res) => {
   await upsertCustomer(data.email, data.name);
 
   res.status(201).json({ message: "Account created. You can now sign in." });
+});
+
+// ─── My Account ────────────────────────────────────────────────────────────
+
+router.get("/me", requireCustomer, async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: {
+      id: true, name: true, email: true, createdAt: true,
+      preference: { select: { jobTitle: true, phone: true, timezone: true } },
+    },
+  });
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+  // Also fetch the linked CRM customer record (has org info)
+  const customer = await prisma.customer.findUnique({
+    where: { email: req.user.email },
+    select: {
+      id: true, jobTitle: true, phone: true,
+      organization: { select: { id: true, name: true } },
+    },
+  });
+
+  res.json({ user, customer });
+});
+
+router.patch("/me", requireCustomer, async (req, res) => {
+  const { name, jobTitle, phone } = req.body as {
+    name?: string;
+    jobTitle?: string;
+    phone?: string;
+  };
+
+  if (name !== undefined && (typeof name !== "string" || name.trim().length === 0)) {
+    res.status(400).json({ error: "Name must be a non-empty string" });
+    return;
+  }
+
+  // Update auth user record
+  if (name !== undefined) {
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { name: name.trim(), updatedAt: new Date() },
+    });
+  }
+
+  // Update or create preference row
+  if (jobTitle !== undefined || phone !== undefined) {
+    await prisma.userPreference.upsert({
+      where: { userId: req.user.id },
+      create: {
+        userId: req.user.id,
+        jobTitle: jobTitle ?? null,
+        phone: phone ?? null,
+        updatedAt: new Date(),
+      },
+      update: {
+        ...(jobTitle !== undefined && { jobTitle: jobTitle || null }),
+        ...(phone    !== undefined && { phone:    phone    || null }),
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  // Keep CRM customer record in sync
+  if (name !== undefined || jobTitle !== undefined || phone !== undefined) {
+    await prisma.customer.updateMany({
+      where: { email: req.user.email },
+      data: {
+        ...(name     !== undefined && { name: name.trim() }),
+        ...(jobTitle !== undefined && { jobTitle: jobTitle || null }),
+        ...(phone    !== undefined && { phone:    phone    || null }),
+      },
+    });
+  }
+
+  res.json({ ok: true });
+});
+
+// ─── Change password ────────────────────────────────────────────────────────
+
+router.post("/me/password", requireCustomer, async (req, res) => {
+  const { currentPassword, newPassword } = req.body as {
+    currentPassword?: string;
+    newPassword?: string;
+  };
+
+  if (!currentPassword || !newPassword) {
+    res.status(400).json({ error: "currentPassword and newPassword are required" });
+    return;
+  }
+  if (typeof newPassword !== "string" || newPassword.length < 8) {
+    res.status(400).json({ error: "New password must be at least 8 characters" });
+    return;
+  }
+
+  const account = await prisma.account.findFirst({
+    where: { userId: req.user.id, providerId: "credential" },
+    select: { id: true, password: true },
+  });
+  if (!account?.password) {
+    res.status(400).json({ error: "No password set on this account" });
+    return;
+  }
+
+  const valid = await verifyPassword({ hash: account.password, password: currentPassword });
+  if (!valid) {
+    res.status(401).json({ error: "Current password is incorrect" });
+    return;
+  }
+
+  const hashed = await hashPassword(newPassword);
+  await prisma.account.update({
+    where: { id: account.id },
+    data: { password: hashed, updatedAt: new Date() },
+  });
+
+  res.json({ ok: true });
 });
 
 // ─── My Tickets ────────────────────────────────────────────────────────────
@@ -370,6 +492,65 @@ router.get("/attachments/:id/download", requireCustomer, async (req, res) => {
   res.setHeader("Content-Length", buffer.length);
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.send(buffer);
+});
+
+// ─── Portal Attachment Upload ─────────────────────────────────────────────────
+//
+// POST /api/portal/tickets/:id/attachments
+//
+// Customers can upload files to their own tickets only.
+// Returns the created Attachment record (id, filename, size, mimeType).
+
+router.post("/tickets/:id/attachments", requireCustomer, async (req, res, next) => {
+  const ticketId = parseId(req.params.id);
+  if (!ticketId) { res.status(400).json({ error: "Invalid ticket ID" }); return; }
+
+  // Verify ownership
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    select: { senderEmail: true },
+  });
+  if (!ticket || ticket.senderEmail !== req.user.email) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+
+  // Multer upload (single file)
+  const maxSize = await getMaxFileSizeBytes();
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: maxSize, files: 1 },
+    fileFilter: (_req, file, cb) => {
+      if (ALLOWED_MIME_TYPES.has(file.mimetype)) cb(null, true);
+      else cb(Object.assign(new Error(`File type not allowed: ${file.mimetype}`), { status: 415 }));
+    },
+  }).single("file");
+
+  upload(req, res, async (err) => {
+    if (err) { next(err); return; }
+    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
+
+    const { originalname, mimetype, buffer } = req.file;
+    const virusScanStatus = await scanBuffer(buffer, originalname);
+    const { key: storageKey, checksum, provider: storageProvider } = await saveFile(buffer, originalname);
+
+    const attachment = await prisma.attachment.create({
+      data: {
+        filename: originalname,
+        mimeType: mimetype,
+        size: buffer.length,
+        storageKey,
+        storageProvider,
+        checksum,
+        virusScanStatus,
+        ticketId,
+        uploadedById: req.user.id,
+      },
+      select: { id: true, filename: true, size: true, mimeType: true, virusScanStatus: true },
+    });
+
+    res.status(201).json({ attachment });
+  });
 });
 
 // ── Portal: Service Requests ───────────────────────────────────────────────────

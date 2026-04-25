@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth-client";
 import axios from "axios";
@@ -29,7 +29,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import ErrorAlert from "@/components/ErrorAlert";
-import NewIncidentDialog from "@/components/NewIncidentDialog";
 import ModuleBulkActionsBar from "@/components/ModuleBulkActionsBar";
 import {
   AlertTriangle,
@@ -37,6 +36,8 @@ import {
   ChevronRight,
   Clock,
   Shield,
+  Plus,
+  Siren,
 } from "lucide-react";
 
 // ── Badges ────────────────────────────────────────────────────────────────────
@@ -126,6 +127,7 @@ function formatRelative(iso: string) {
 // ── IncidentsPage ─────────────────────────────────────────────────────────────
 
 export default function IncidentsPage() {
+  const navigate = useNavigate();
   const { data: session } = useSession();
   const currentUserId = session?.user?.id ?? "";
 
@@ -179,7 +181,14 @@ export default function IncidentsPage() {
             )}
           </p>
         </div>
-        <NewIncidentDialog />
+        <Button
+          size="sm"
+          className="gap-1.5 shadow-sm bg-red-600 hover:bg-red-700 text-white border-0"
+          onClick={() => navigate("/incidents/new")}
+        >
+          <Siren className="h-3.5 w-3.5" />
+          Declare Incident
+        </Button>
       </div>
 
       {/* Filters */}

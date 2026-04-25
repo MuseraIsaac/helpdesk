@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useForm, FormProvider, Controller, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -35,6 +36,7 @@ import BackLink from "@/components/BackLink";
 import { useFormConfig } from "@/hooks/useFormConfig";
 import { useCustomFields } from "@/hooks/useCustomFields";
 import DynamicCustomFields from "@/components/DynamicCustomFields";
+import OrganizationSelect from "@/components/OrganizationSelect";
 import {
   GitMerge,
   X,
@@ -49,8 +51,120 @@ import {
   FolderTree,
   Bell,
   Info,
+  BookTemplate,
+  Check,
+  ChevronRight,
+  Loader2,
 } from "lucide-react";
+import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Change } from "core/constants/change.ts";
+
+// ── Template types ────────────────────────────────────────────────────────────
+
+interface ChangeTemplate {
+  id: number;
+  title: string;
+  body: string;
+  isActive: boolean;
+  createdBy: { id: string; name: string };
+  createdAt: string;
+}
+
+// ── Template picker dialog ────────────────────────────────────────────────────
+
+function TemplatePicker({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (t: ChangeTemplate) => void;
+  onClose: () => void;
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["templates", "change"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ templates: ChangeTemplate[] }>("/api/templates?type=change");
+      return data;
+    },
+  });
+
+  const [search, setSearch] = useState("");
+  const templates = (data?.templates ?? []).filter((t) =>
+    t.isActive && t.title.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <div className="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+              <BookTemplate className="h-4 w-4 text-primary" />
+            </div>
+            Start from Template
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Select a template to pre-fill the form. You can edit all fields after loading.
+          </p>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search templates…"
+            className="h-9 text-sm"
+            autoFocus
+          />
+
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : templates.length === 0 ? (
+            <div className="flex flex-col items-center py-10 text-center gap-2">
+              <BookTemplate className="h-8 w-8 text-muted-foreground/20" />
+              <p className="text-sm text-muted-foreground">
+                {search ? "No templates match your search" : "No change templates yet"}
+              </p>
+              {!search && (
+                <p className="text-xs text-muted-foreground">
+                  Use <strong>Save as Template</strong> on any existing change to create one.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
+              {templates.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => { onSelect(t); onClose(); }}
+                  className="w-full text-left rounded-xl border bg-card px-4 py-3.5 hover:border-primary/40 hover:bg-accent/30 transition-all group"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium group-hover:text-primary transition-colors">{t.title}</span>
+                      </div>
+                      {t.body && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                          {t.body.slice(0, 150)}{t.body.length > 150 ? "…" : ""}
+                        </p>
+                      )}
+                      <p className="text-[10px] text-muted-foreground/60 mt-1.5">by {t.createdBy.name}</p>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground/30 group-hover:text-primary/50 shrink-0 mt-0.5 transition-colors" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // ── Section card shell ────────────────────────────────────────────────────────
 
@@ -180,8 +294,18 @@ export default function NewChangePage() {
   });
 
   const isPending = mutation.isPending;
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [loadedTemplate, setLoadedTemplate] = useState<string | null>(null);
 
   function onCancel() { void navigate("/changes"); }
+
+  function applyTemplate(t: ChangeTemplate) {
+    const { setValue } = methods;
+    setValue("title",       t.title,  { shouldDirty: true });
+    setValue("description", t.body ?? "", { shouldDirty: true });
+    setLoadedTemplate(t.title);
+    toast.success(`Template "${t.title}" loaded`);
+  }
 
   // ── Submit button (shared between header + footer) ────────────────────────
 
@@ -227,6 +351,16 @@ export default function NewChangePage() {
               <Button
                 type="button"
                 variant="outline"
+                onClick={() => setTemplateOpen(true)}
+                disabled={isPending}
+                className="gap-1.5"
+              >
+                <BookTemplate className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">From Template</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
                 onClick={onCancel}
                 disabled={isPending}
                 className="gap-1.5"
@@ -240,6 +374,10 @@ export default function NewChangePage() {
         </div>
       </div>
 
+      {templateOpen && (
+        <TemplatePicker onSelect={applyTemplate} onClose={() => setTemplateOpen(false)} />
+      )}
+
       {/* ── Form body ── */}
       <FormProvider {...methods}>
         <form
@@ -249,6 +387,26 @@ export default function NewChangePage() {
         >
           {mutation.error && (
             <ErrorAlert error={mutation.error} fallback="Failed to create change request" />
+          )}
+
+          {/* Template loaded banner */}
+          {loadedTemplate && (
+            <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+              <div className="flex items-center gap-2.5">
+                <Check className="h-4 w-4 text-primary shrink-0" />
+                <p className="text-sm font-medium text-primary">
+                  Template loaded: <span className="font-semibold">"{loadedTemplate}"</span>
+                </p>
+                <span className="text-xs text-muted-foreground">— review and edit all fields below.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLoadedTemplate(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
           )}
 
           {/* 1 · Basic Information */}
@@ -278,6 +436,25 @@ export default function NewChangePage() {
                     {...register("description")}
                     placeholder={cfg.placeholder("description")}
                     className="min-h-[100px] resize-y"
+                  />
+                </div>
+              )}
+
+              {cfg.visible("organizationId") && (
+                <div className="space-y-1.5">
+                  <FieldLabel required={cfg.required("organizationId")}>
+                    {cfg.label("organizationId")}
+                  </FieldLabel>
+                  <Controller
+                    name={"organizationId" as any}
+                    control={control}
+                    render={({ field }) => (
+                      <OrganizationSelect
+                        value={field.value ?? null}
+                        onChange={(id) => field.onChange(id ?? null)}
+                        placeholder={cfg.placeholder("organizationId")}
+                      />
+                    )}
                   />
                 </div>
               )}

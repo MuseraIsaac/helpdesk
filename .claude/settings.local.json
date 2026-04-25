@@ -120,7 +120,9 @@
       "Bash(bun _check_auth.ts)",
       "Bash(bun _fix_auth.ts)",
       "Bash(grep -E \"\\\\.tsx$\")",
-      "Bash(grep -r \"on-duty\\\\|onDuty\" \"C:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk\" -path \"*/node_modules\" -prune -o --include=\"*.ts\" --include=\"*.tsx\" -print)"
+      "Bash(grep -r \"on-duty\\\\|onDuty\" \"C:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk\" -path \"*/node_modules\" -prune -o --include=\"*.ts\" --include=\"*.tsx\" -print)",
+      "Bash(bun --help)",
+      "Bash(bun *)"
     ]
   }
 }

@@ -33,9 +33,39 @@ import { randomUUID, createHash } from "node:crypto";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-export const UPLOAD_DIR = resolve(process.env.UPLOAD_DIR ?? "./uploads");
-export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+// Resolve relative to this file's directory so the path is correct regardless
+// of the process working directory (which changes when bun --watch is invoked
+// from the monorepo root instead of from server/).
+export const UPLOAD_DIR = resolve(
+  process.env.UPLOAD_DIR ?? join(import.meta.dirname, "../../../uploads")
+);
+/** Hard-coded fallback used before settings are available (e.g. at module load). */
+export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB default
 export const MAX_FILES_PER_UPLOAD = 5;
+
+// In-process cache so we don't hit the DB on every upload request.
+let _fileSizeCache: { bytes: number; expiresAt: number } | null = null;
+
+/**
+ * Returns the current max file-size in bytes, reading from
+ * Settings → Advanced → "Max attachment size (MB)" with a 30-second cache.
+ * Falls back to MAX_FILE_SIZE if the DB is unreachable.
+ */
+export async function getMaxFileSizeBytes(): Promise<number> {
+  const now = Date.now();
+  if (_fileSizeCache && now < _fileSizeCache.expiresAt) {
+    return _fileSizeCache.bytes;
+  }
+  try {
+    const { getSection } = await import("./settings");
+    const advanced = await getSection("advanced");
+    const bytes = (advanced.maxAttachmentSizeMb ?? 10) * 1024 * 1024;
+    _fileSizeCache = { bytes, expiresAt: now + 30_000 };
+    return bytes;
+  } catch {
+    return MAX_FILE_SIZE;
+  }
+}
 
 /**
  * MIME-type allowlist.

@@ -132,6 +132,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useMe } from "@/hooks/useMe";
 
 // ── Grid layout engine ────────────────────────────────────────────────────────
 
@@ -178,8 +179,8 @@ function DashboardWidget({
   return (
     <div
       className={[
-        "h-full flex flex-col overflow-hidden rounded-xl transition-shadow",
-        editMode ? "ring-2 shadow-lg" : "",
+        "h-full flex flex-col overflow-hidden rounded-xl transition-all duration-200",
+        editMode ? "ring-2 shadow-xl" : "hover:shadow-md",
       ].join(" ")}
       style={editMode
         ? { "--tw-ring-color": accentColor ? `${accentColor}50` : undefined } as React.CSSProperties
@@ -547,26 +548,42 @@ function MetricCard({
   const card = (
     <Card
       className={[
-        "relative overflow-hidden transition-all",
-        href ? "hover:shadow-md hover:-translate-y-0.5 cursor-pointer" : "",
+        "relative overflow-hidden transition-all duration-200 group/metric",
+        href ? "hover:shadow-lg hover:-translate-y-0.5 cursor-pointer" : "",
+        "shadow-sm",
       ].join(" ")}
-      style={resolvedColor ? { borderTopColor: resolvedColor, borderTopWidth: 2 } : undefined}
+      style={resolvedColor ? {
+        borderTopColor: resolvedColor,
+        borderTopWidth: 3,
+        boxShadow: href ? undefined : `0 1px 3px 0 ${resolvedColor}15, 0 1px 2px -1px ${resolvedColor}10`,
+      } : undefined}
     >
-      {/* Subtle gradient tint behind the card */}
+      {/* Gradient tint fill */}
       {resolvedColor && (
         <div
-          className="absolute inset-0 pointer-events-none"
-          style={{ background: `linear-gradient(135deg, ${resolvedColor}08 0%, transparent 60%)` }}
+          className="absolute inset-0 pointer-events-none transition-opacity duration-200 group-hover/metric:opacity-150"
+          style={{ background: `linear-gradient(135deg, ${resolvedColor}0d 0%, ${resolvedColor}04 40%, transparent 70%)` }}
+        />
+      )}
+      {/* Bottom glow line */}
+      {resolvedColor && (
+        <div
+          className="absolute bottom-0 left-4 right-4 h-px pointer-events-none opacity-40"
+          style={{ background: `linear-gradient(90deg, transparent, ${resolvedColor}, transparent)` }}
         />
       )}
 
       <CardHeader className={density === "compact" ? "pb-1 relative" : "pb-2 relative"}>
         <div className="flex items-start justify-between gap-2">
-          {/* Icon badge */}
+          {/* Icon badge with glow ring */}
           <div
-            className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0"
+            className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0 transition-transform duration-200 group-hover/metric:scale-105"
             style={resolvedColor
-              ? { background: `${resolvedColor}18`, border: `1px solid ${resolvedColor}30` }
+              ? {
+                  background: `linear-gradient(135deg, ${resolvedColor}22, ${resolvedColor}0f)`,
+                  border: `1px solid ${resolvedColor}35`,
+                  boxShadow: `0 0 0 3px ${resolvedColor}0f`,
+                }
               : { background: "hsl(var(--muted))" }
             }
           >
@@ -580,14 +597,14 @@ function MetricCard({
             <TooltipProvider delayDuration={200}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Info className="h-3 w-3 text-muted-foreground/40 cursor-default mt-0.5 shrink-0" />
+                  <Info className="h-3 w-3 text-muted-foreground/30 cursor-default mt-0.5 shrink-0 hover:text-muted-foreground/60 transition-colors" />
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-[200px] text-xs">{hint}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           )}
         </div>
-        <CardTitle className="text-[12px] font-medium text-muted-foreground leading-tight mt-2">
+        <CardTitle className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70 leading-tight mt-2.5">
           {title}
         </CardTitle>
       </CardHeader>
@@ -598,12 +615,12 @@ function MetricCard({
         ) : (
           <div>
             <p
-              className={`font-bold tracking-tight leading-none ${density === "compact" ? "text-2xl" : "text-3xl"}`}
+              className={`font-black tracking-tight leading-none tabular-nums ${density === "compact" ? "text-2xl" : "text-[2rem]"}`}
               style={valueStyle}
             >
               {value ?? "—"}
             </p>
-            {sub && <p className="text-[11px] text-muted-foreground mt-1 leading-tight">{sub}</p>}
+            {sub && <p className="text-[11px] text-muted-foreground mt-1.5 leading-tight">{sub}</p>}
           </div>
         )}
       </CardContent>
@@ -645,14 +662,25 @@ function WidgetHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <CardHeader className="pb-3">
+    <CardHeader className="pb-3 relative">
+      {/* Accent strip on the left edge */}
+      {accentColor && (
+        <div
+          className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full"
+          style={{ background: `linear-gradient(180deg, ${accentColor}, ${accentColor}40)` }}
+        />
+      )}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
           {Icon && (
             <div
               className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0"
               style={accentColor
-                ? { background: `${accentColor}18`, border: `1px solid ${accentColor}30` }
+                ? {
+                    background: `linear-gradient(135deg, ${accentColor}22, ${accentColor}0e)`,
+                    border: `1px solid ${accentColor}30`,
+                    boxShadow: `0 0 0 3px ${accentColor}0a`,
+                  }
                 : { background: "hsl(var(--muted))" }
               }
             >
@@ -663,9 +691,9 @@ function WidgetHeader({
             </div>
           )}
           <div className="min-w-0">
-            <CardTitle className="text-[13px] font-semibold leading-tight">{title}</CardTitle>
+            <CardTitle className="text-[13px] font-bold leading-tight tracking-tight">{title}</CardTitle>
             {description && (
-              <CardDescription className="text-[12px] mt-0.5 leading-snug">{description}</CardDescription>
+              <CardDescription className="text-[11px] mt-0.5 leading-snug">{description}</CardDescription>
             )}
           </div>
         </div>
@@ -1054,6 +1082,19 @@ function PeriodSelector({
 
 export default function HomePage() {
   const navigate = useNavigate();
+  const { data: meData } = useMe();
+  const firstName = meData?.user?.name?.split(" ")[0] ?? "";
+
+  const greeting = useMemo(() => {
+    const h = new Date().getHours();
+    if (h < 12) return "Good morning";
+    if (h < 17) return "Good afternoon";
+    return "Good evening";
+  }, []);
+
+  const todayLabel = useMemo(() =>
+    new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }),
+  []);
 
   // ── Dashboard config ─────────────────────────────────────────────────────────
 
@@ -2506,18 +2547,66 @@ export default function HomePage() {
 
           {/* ── Normal header ──────────────────────────────────────────────── */}
           {!editMode && (
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight">
-                  {activeDashboard ? activeDashboard.name : "Dashboard"}
-                </h1>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  {preset === "custom" && customRange
-                    ? `${customRange.from} – ${customRange.to}`
-                    : PRESET_LABELS[preset]}
-                </p>
+            <div className="space-y-3">
+              {/* ── Hero greeting strip ─────────────────────────────────── */}
+              <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-background via-background to-primary/[0.04] px-6 py-5 shadow-sm">
+                {/* Decorative glow orbs */}
+                <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-primary/8 blur-3xl" />
+                <div className="pointer-events-none absolute -left-8 bottom-0 h-40 w-40 rounded-full bg-indigo-500/6 blur-2xl" />
+
+                <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  {/* Left: greeting */}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
+                        <Activity className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <h1 className="text-xl font-bold tracking-tight leading-tight">
+                          {greeting}{firstName ? `, ${firstName}` : ""}
+                        </h1>
+                        <p className="text-xs text-muted-foreground mt-0.5">{todayLabel}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: live KPI pills */}
+                  {!overviewLoading && overview && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {overview.openTickets > 0 && (
+                        <Link to="/tickets?status=open"
+                          className="group flex items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-700 hover:bg-orange-100 transition-colors dark:border-orange-800/40 dark:bg-orange-950/30 dark:text-orange-400">
+                          <CircleDot className="h-3 w-3" />
+                          {overview.openTickets} open
+                        </Link>
+                      )}
+                      {overview.escalatedTickets > 0 && (
+                        <Link to="/tickets?escalated=true"
+                          className="flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 transition-colors dark:border-red-800/40 dark:bg-red-950/30 dark:text-red-400">
+                          <AlertTriangle className="h-3 w-3" />
+                          {overview.escalatedTickets} escalated
+                        </Link>
+                      )}
+                      {overview.breachedTickets > 0 && (
+                        <Link to="/tickets?view=overdue"
+                          className="flex items-center gap-1.5 rounded-full border border-red-300 bg-red-100 px-3 py-1 text-xs font-semibold text-red-800 hover:bg-red-200 transition-colors dark:border-red-700/40 dark:bg-red-950/40 dark:text-red-300">
+                          <ShieldAlert className="h-3 w-3" />
+                          {overview.breachedTickets} SLA breached
+                        </Link>
+                      )}
+                      {overview.openTickets === 0 && overview.escalatedTickets === 0 && overview.breachedTickets === 0 && (
+                        <span className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/30 dark:text-emerald-400">
+                          <Check className="h-3 w-3" />
+                          All clear
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
+
+              {/* ── Toolbar row ─────────────────────────────────────────── */}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <DashboardSwitcher
                   activeDashboard={activeDashboard}
                   dashboardList={dashboardList}
@@ -2540,53 +2629,43 @@ export default function HomePage() {
                   isCloning={cloneDashboard.isPending}
                   switchError={setDefaultDashboard.error}
                 />
-                <PeriodSelector
-                  preset={preset}
-                  onPreset={p => { setPreset(p); if (p !== "custom") setCustomRange(null); }}
-                  customRange={customRange}
-                  onCustomRange={setCustomRange}
-                />
-                {activeDashboard && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={() => cloneDashboard.mutate({ dashboardId: activeDashboard.id, setAsDefault: true })}
-                    disabled={cloneDashboard.isPending}
-                  >
-                    {cloneDashboard.isPending
-                      ? <Settings2 className="h-3.5 w-3.5 animate-spin" />
-                      : <Copy className="h-3.5 w-3.5" />}
-                    Clone
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <PeriodSelector
+                    preset={preset}
+                    onPreset={p => { setPreset(p); if (p !== "custom") setCustomRange(null); }}
+                    customRange={customRange}
+                    onCustomRange={setCustomRange}
+                  />
+
+                  <div className="h-4 w-px bg-border/60 mx-0.5 hidden sm:block" />
+
+                  {activeDashboard && (
+                    <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground"
+                      onClick={() => cloneDashboard.mutate({ dashboardId: activeDashboard.id, setAsDefault: true })}
+                      disabled={cloneDashboard.isPending}>
+                      {cloneDashboard.isPending
+                        ? <Settings2 className="h-3.5 w-3.5 animate-spin" />
+                        : <Copy className="h-3.5 w-3.5" />}
+                      <span className="hidden sm:inline">Clone</span>
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground"
+                    onClick={() => setTemplateDialogOpen(true)}>
+                    <Plus className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">From Template</span>
                   </Button>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => setTemplateDialogOpen(true)}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  From Template
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={enterEditMode}
-                >
-                  <PenLine className="h-3.5 w-3.5" />
-                  Edit Layout
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => setCustomizerOpen(true)}
-                >
-                  <Settings2 className="h-3.5 w-3.5" />
-                  Customize
-                </Button>
+                  <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground"
+                    onClick={enterEditMode}>
+                    <PenLine className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Edit Layout</span>
+                  </Button>
+                  <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground"
+                    onClick={() => setCustomizerOpen(true)}>
+                    <Settings2 className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Customize</span>
+                  </Button>
+                </div>
               </div>
             </div>
           )}

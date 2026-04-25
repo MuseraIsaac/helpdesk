@@ -11,6 +11,9 @@
  *   POST   /api/changes/:id/request-approval    — submit a change for CAB approval
  *   POST   /api/changes/:id/ci-links            — link an additional CI to a change
  *   DELETE /api/changes/:id/ci-links/:ciId      — remove a CI link from a change
+ *   POST   /api/changes/:id/tasks               — create a task on a change
+ *   PATCH  /api/changes/:id/tasks/:taskId       — update a task (status, title, etc.)
+ *   DELETE /api/changes/:id/tasks/:taskId       — remove a task from a change
  */
 
 import { Router } from "express";
@@ -283,8 +286,9 @@ router.post(
         notificationRequired: data.notificationRequired ?? null,
         impactedUsers:        data.impactedUsers        ?? null,
         communicationNotes:   data.communicationNotes   ?? null,
-        customFields:         (data.customFields ?? {}) as any,
-        createdById:   req.user.id,
+        customFields:   (data.customFields ?? {}) as any,
+        organizationId: data.organizationId ?? null,
+        createdById:    req.user.id,
       },
       select: DETAIL_SELECT,
     });
@@ -1072,6 +1076,109 @@ router.delete(
     res.status(204).send();
   }
 );
+
+// ─── Task CRUD ────────────────────────────────────────────────────────────────
+
+import { z as zTask } from "zod/v4";
+
+const createTaskSchema = zTask.object({
+  title:        zTask.string().min(1).max(500),
+  description:  zTask.string().max(2000).optional(),
+  phase:        zTask.enum(["pre_implementation", "implementation", "post_implementation"]).default("implementation"),
+  assignedToId: zTask.string().optional().nullable(),
+  position:     zTask.number().int().min(1).optional(),
+});
+
+const updateTaskSchema = zTask.object({
+  title:          zTask.string().min(1).max(500).optional(),
+  description:    zTask.string().max(2000).optional().nullable(),
+  phase:          zTask.enum(["pre_implementation", "implementation", "post_implementation"]).optional(),
+  status:         zTask.enum(["pending", "in_progress", "completed", "skipped", "failed"]).optional(),
+  assignedToId:   zTask.string().optional().nullable(),
+  completionNote: zTask.string().max(2000).optional().nullable(),
+});
+
+router.post("/:id/tasks", requireAuth, requirePermission("changes.update"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid change ID" }); return; }
+
+  const change = await prisma.change.findUnique({ where: { id, deletedAt: null }, select: { id: true, state: true } });
+  if (!change) { res.status(404).json({ error: "Change not found" }); return; }
+
+  const body = validate(createTaskSchema, req.body, res);
+  if (!body) return;
+
+  const count = await prisma.changeTask.count({ where: { changeId: id } });
+
+  const task = await prisma.changeTask.create({
+    data: {
+      changeId:     id,
+      title:        body.title,
+      description:  body.description ?? null,
+      phase:        body.phase,
+      position:     body.position ?? count + 1,
+      assignedToId: body.assignedToId ?? null,
+    },
+    include: { assignedTo: { select: { id: true, name: true } } },
+  });
+
+  await prisma.changeEvent.create({
+    data: { changeId: id, actorId: req.user.id, action: "task.created", meta: { taskId: task.id, title: task.title } },
+  });
+
+  res.status(201).json({ task });
+});
+
+router.patch("/:id/tasks/:taskId", requireAuth, requirePermission("changes.update"), async (req, res) => {
+  const id     = parseId(req.params.id);
+  const taskId = parseId(req.params.taskId);
+  if (!id || !taskId) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  const task = await prisma.changeTask.findUnique({ where: { id: taskId, changeId: id } });
+  if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+
+  const body = validate(updateTaskSchema, req.body, res);
+  if (!body) return;
+
+  const completedNow = body.status === "completed" && task.status !== "completed";
+
+  const updated = await prisma.changeTask.update({
+    where: { id: taskId },
+    data: {
+      ...(body.title          !== undefined && { title: body.title }),
+      ...(body.description    !== undefined && { description: body.description }),
+      ...(body.phase          !== undefined && { phase: body.phase }),
+      ...(body.assignedToId   !== undefined && { assignedToId: body.assignedToId }),
+      ...(body.completionNote !== undefined && { completionNote: body.completionNote }),
+      ...(body.status         !== undefined && { status: body.status }),
+      ...(completedNow && { completedById: req.user.id, completedAt: new Date() }),
+    },
+    include: { assignedTo: { select: { id: true, name: true } }, completedBy: { select: { id: true, name: true } } },
+  });
+
+  await prisma.changeEvent.create({
+    data: { changeId: id, actorId: req.user.id, action: "task.updated", meta: { taskId, title: updated.title, status: updated.status } },
+  });
+
+  res.json({ task: updated });
+});
+
+router.delete("/:id/tasks/:taskId", requireAuth, requirePermission("changes.update"), async (req, res) => {
+  const id     = parseId(req.params.id);
+  const taskId = parseId(req.params.taskId);
+  if (!id || !taskId) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  const task = await prisma.changeTask.findUnique({ where: { id: taskId, changeId: id } });
+  if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+
+  await prisma.changeTask.delete({ where: { id: taskId } });
+
+  await prisma.changeEvent.create({
+    data: { changeId: id, actorId: req.user.id, action: "task.deleted", meta: { taskId, title: task.title } },
+  });
+
+  res.json({ ok: true });
+});
 
 // ─── Bulk Actions ──────────────────────────────────────────────────────────────
 

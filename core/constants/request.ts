@@ -28,6 +28,14 @@ export interface RequestItemRecord {
   createdAt: string;
 }
 
+export interface FulfillmentTaskNote {
+  id: number;
+  content: string;
+  author: { id: string; name: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface FulfillmentTask {
   id: number;
   title: string;
@@ -41,6 +49,7 @@ export interface FulfillmentTask {
   createdBy: { id: string; name: string } | null;
   createdAt: string;
   updatedAt: string;
+  notes: FulfillmentTaskNote[];
 }
 
 export interface RequestEvent {

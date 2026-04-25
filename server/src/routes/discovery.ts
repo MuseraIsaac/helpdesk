@@ -16,7 +16,8 @@
  *  POST /api/discovery/import/csv/validate   validate CSV without importing
  */
 
-import { Router } from "express";
+import express, { Router } from "express";
+import ExcelJS from "exceljs";
 import { requireAuth } from "../middleware/require-auth";
 import { requirePermission } from "../middleware/require-permission";
 import { validate } from "../lib/validate";
@@ -34,22 +35,99 @@ import { enqueueSyncJob } from "../lib/run-discovery-sync";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
+// Parse every import request body as a raw Buffer so we can handle both CSV
+// (text) and Excel (binary) with the same middleware.
+const parseImportBody = express.raw({ type: "*/*", limit: "20mb" });
+
+// ── xlsx magic-byte detection ─────────────────────────────────────────────────
+
+/** Returns true if the buffer starts with the PK zip signature (xlsx/xlsm) or
+ *  the legacy CFB signature (xls). Both are Excel variants we can handle. */
+function isXlsxBuffer(buf: Buffer): boolean {
+  if (buf.length < 4) return false;
+  // xlsx / xlsm: PK\x03\x04
+  if (buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04) return true;
+  // xls (BIFF): D0 CF 11 E0
+  if (buf[0] === 0xd0 && buf[1] === 0xcf && buf[2] === 0x11 && buf[3] === 0xe0) return true;
+  return false;
+}
+
+// ── xlsx → CSV converter ──────────────────────────────────────────────────────
+
+function xlsCellToString(cell: ExcelJS.CellValue): string {
+  if (cell === null || cell === undefined) return "";
+  if (typeof cell === "object") {
+    if ("richText" in cell) return (cell as ExcelJS.CellRichTextValue).richText.map(r => r.text).join("");
+    if ("result"  in cell) return xlsCellToString((cell as ExcelJS.CellFormulaValue).result as ExcelJS.CellValue);
+    if ("text"    in cell) return String((cell as { text: string }).text);
+    if (cell instanceof Date) return cell.toISOString().slice(0, 10);
+  }
+  return String(cell);
+}
+
+function csvEscapeCell(v: string): string {
+  if (v.includes(",") || v.includes('"') || v.includes("\n") || v.includes("\r")) {
+    return `"${v.replace(/"/g, '""')}"`;
+  }
+  return v;
+}
+
+/**
+ * Converts an xlsx Buffer to a CSV string that the CsvDiscoveryAdapter can consume.
+ *
+ * Header detection handles our two-row template format:
+ *   Row 1 → descriptions (long text, not column names) → skip
+ *   Row 2 → actual column headers like "externalId *", "name *"
+ * Also handles plain single-header-row xlsx files.
+ */
+async function xlsxBufferToCSV(buf: Buffer | ArrayBuffer): Promise<string> {
+  const wb = new ExcelJS.Workbook();
+  // ExcelJS expects a Node-compatible Buffer; coerce from Bun's Buffer<ArrayBufferLike>
+  const nodeBuf: Buffer = Buffer.from(buf instanceof ArrayBuffer ? buf : buf.buffer, buf instanceof ArrayBuffer ? 0 : buf.byteOffset, buf instanceof ArrayBuffer ? buf.byteLength : buf.byteLength);
+  await (wb.xlsx as unknown as { load(b: unknown): Promise<ExcelJS.Workbook> }).load(nodeBuf);
+
+  const ws = wb.worksheets[0];
+  if (!ws) throw new Error("Excel file has no worksheets");
+
+  // Collect non-empty rows as string arrays
+  const allRows: string[][] = [];
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    const vals = (row.values as ExcelJS.CellValue[]).slice(1); // ExcelJS is 1-indexed
+    allRows.push(vals.map(xlsCellToString));
+  });
+
+  if (allRows.length === 0) return "";
+
+  // Determine which row holds the column headers.
+  // Strip asterisks/spaces and lowercase for comparison.
+  const KNOWN = new Set(["externalid", "external_id", "id", "name", "asset_name"]);
+  function looksLikeHeaderRow(row: string[]): boolean {
+    return row.some(cell => KNOWN.has(cell.trim().toLowerCase().replace(/[*\s]/g, "")));
+  }
+
+  let headerRowIdx = 0;
+  if (!looksLikeHeaderRow(allRows[0]!)) {
+    // Row 0 is descriptions (our template). Check row 1.
+    if (allRows.length >= 2 && looksLikeHeaderRow(allRows[1]!)) {
+      headerRowIdx = 1;
+    }
+    // else fall back to row 0 as headers (unknown format)
+  }
+
+  // Strip asterisks from header cells (our template adds " *" to required columns)
+  const headerRow = allRows[headerRowIdx]!.map(h => h.trim().replace(/\s*\*\s*$/, ""));
+  const dataRows  = allRows.slice(headerRowIdx + 1).filter(r => r.some(c => c !== ""));
+
+  const lines = [
+    headerRow.map(csvEscapeCell).join(","),
+    ...dataRows.map(row => row.map(csvEscapeCell).join(",")),
+  ];
+  return lines.join("\n");
+}
+
 const router = Router();
 router.use(requireAuth);
 
-// ── Inline multipart/form-data parser for CSV upload (no multer dep) ─────────
-// Uses the raw body; assumes the client sends multipart with one `file` field.
-// For production-grade file handling, add multer to server/package.json.
-
-async function readRawBody(req: import("express").Request): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.setEncoding("utf8");
-    req.on("data", (chunk) => { body += chunk; });
-    req.on("end",  () => resolve(body));
-    req.on("error", reject);
-  });
-}
 
 // ── SELECT projections ────────────────────────────────────────────────────────
 
@@ -311,20 +389,124 @@ router.get("/runs/:id", requirePermission("assets.view"), async (req, res) => {
   });
 });
 
-// ── POST /import/csv ──────────────────────────────────────────────────────────
+// ── GET /import/csv/template — download Excel import template ─────────────────
+
+router.get("/import/csv/template", requirePermission("assets.view"), async (_req, res) => {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Zentra ITSM";
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet("Asset Import", { views: [{ state: "frozen", ySplit: 2 }] });
+
+  const COLS = [
+    { key: "externalId",      header: "externalId *",      width: 22, note: "Required. Unique ID for upsert identity (e.g. serial number, BIOS UUID, or your own ID)." },
+    { key: "name",            header: "name *",             width: 32, note: "Required. Human-readable asset name." },
+    { key: "type",            header: "type",               width: 14, note: "Optional. One of: computer, printer, network, software, other. Defaults to 'other'." },
+    { key: "serialNumber",    header: "serialNumber",       width: 22, note: "Hardware serial number (alias: serial_number, serial)." },
+    { key: "assetTag",        header: "assetTag",           width: 16, note: "Barcode or asset tag label (alias: asset_tag, tag)." },
+    { key: "manufacturer",    header: "manufacturer",       width: 20, note: "Make / manufacturer name (alias: make)." },
+    { key: "model",           header: "model",              width: 24, note: "Model name or number." },
+    { key: "status",          header: "status",             width: 14, note: "One of: active, in_repair, retired, lost." },
+    { key: "condition",       header: "condition",          width: 14, note: "One of: new, good, fair, poor." },
+    { key: "location",        header: "location",           width: 24, note: "Physical location or room number." },
+    { key: "site",            header: "site",               width: 20, note: "Site or building name." },
+    { key: "assignedToEmail", header: "assignedToEmail",   width: 30, note: "Email of the assigned user (alias: assigned_to_email, email). Must match an existing agent account." },
+  ] as const;
+
+  ws.columns = COLS.map(c => ({ key: c.key, width: c.width }));
+
+  // Row 1: field descriptions (light grey, italic, smaller font)
+  const descRow = ws.addRow(COLS.map(c => c.note));
+  descRow.height = 45;
+  descRow.eachCell((cell) => {
+    cell.font       = { italic: true, size: 8, color: { argb: "FF6B7280" } };
+    cell.fill       = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
+    cell.alignment  = { wrapText: true, vertical: "top" };
+    cell.border     = { bottom: { style: "thin", color: { argb: "FFE5E7EB" } } };
+  });
+
+  // Row 2: column headers (indigo background, white bold text)
+  const headerRow = ws.addRow(COLS.map(c => c.header));
+  headerRow.height = 22;
+  headerRow.eachCell((cell) => {
+    cell.font      = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+    cell.fill      = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4F46E5" } };
+    cell.alignment = { vertical: "middle", horizontal: "center" };
+    cell.border    = { bottom: { style: "medium", color: { argb: "FF3730A3" } } };
+  });
+
+  // Freeze after the header row (rows 1 + 2)
+  ws.views = [{ state: "frozen", ySplit: 2, xSplit: 0 }];
+
+  // Row 3+: example data rows
+  const examples = [
+    {
+      externalId: "ASSET-001", name: "MacBook Pro 16-inch (2023)", type: "computer",
+      serialNumber: "C02X1234JKLM", assetTag: "TAG-001", manufacturer: "Apple",
+      model: "MacBook Pro 16 M3 Max", status: "active", condition: "good",
+      location: "Floor 2, Desk 24", site: "HQ Building", assignedToEmail: "jane.doe@company.com",
+    },
+    {
+      externalId: "ASSET-002", name: "HP LaserJet Pro M404dn", type: "printer",
+      serialNumber: "VNB3Q01234", assetTag: "TAG-002", manufacturer: "HP",
+      model: "LaserJet Pro M404dn", status: "active", condition: "good",
+      location: "Floor 1, Print Room", site: "HQ Building", assignedToEmail: "",
+    },
+    {
+      externalId: "ASSET-003", name: "Cisco Catalyst 9200 Switch", type: "network",
+      serialNumber: "FCW2345A678", assetTag: "TAG-003", manufacturer: "Cisco",
+      model: "Catalyst 9200-24P", status: "active", condition: "good",
+      location: "Server Room", site: "HQ Building", assignedToEmail: "",
+    },
+  ];
+
+  examples.forEach((row, i) => {
+    const r = ws.addRow(row);
+    r.height = 18;
+    r.eachCell((cell) => {
+      cell.fill      = { type: "pattern", pattern: "solid", fgColor: { argb: i % 2 === 0 ? "FFFFFFFF" : "FFF8FAFF" } };
+      cell.font      = { size: 10 };
+      cell.alignment = { vertical: "middle" };
+    });
+  });
+
+  // Required columns get a light amber tint for the header cells
+  [1, 2].forEach(colIdx => {
+    const cell = headerRow.getCell(colIdx);
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF6D28D9" } };
+  });
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", 'attachment; filename="asset-import-template.xlsx"');
+  await wb.xlsx.write(res);
+  res.end();
+});
+
+// ── POST /import/csv ─────────────────────────────────────────────────────────
+// Accepts both CSV (text/plain) and Excel (xlsx/xls) files.
 
 router.post(
   "/import/csv",
   requirePermission("assets.manage"),
+  parseImportBody,
   async (req, res) => {
-    // Parse options from query string
     const opts = validate(csvImportOptionsSchema, req.query, res);
     if (!opts) return;
 
-    // Read raw body (CSV text)
-    const csvContent = await readRawBody(req);
+    const buf = req.body as Buffer;
+    if (!buf || buf.length === 0) {
+      return res.status(400).json({ error: "No file body received" });
+    }
+
+    let csvContent: string;
+    if (isXlsxBuffer(buf)) {
+      csvContent = await xlsxBufferToCSV(buf);
+    } else {
+      csvContent = buf.toString("utf8").trim();
+    }
+
     if (!csvContent.trim()) {
-      return res.status(400).json({ error: "Empty CSV body" });
+      return res.status(400).json({ error: "File is empty or could not be parsed" });
     }
 
     // Ensure a connector exists for this source slug
@@ -364,10 +546,22 @@ router.post(
 router.post(
   "/import/csv/validate",
   requirePermission("assets.manage"),
+  parseImportBody,
   async (req, res) => {
-    const csvContent = await readRawBody(req);
+    const buf = req.body as Buffer;
+    if (!buf || buf.length === 0) {
+      return res.status(400).json({ error: "No file body received" });
+    }
+
+    let csvContent: string;
+    if (isXlsxBuffer(buf)) {
+      csvContent = await xlsxBufferToCSV(buf);
+    } else {
+      csvContent = buf.toString("utf8").trim();
+    }
+
     if (!csvContent.trim()) {
-      return res.status(400).json({ error: "Empty CSV body" });
+      return res.status(400).json({ error: "File is empty or could not be parsed" });
     }
 
     const report = validateCsvContent(csvContent);

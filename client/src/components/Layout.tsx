@@ -148,7 +148,9 @@ interface SidebarContentProps {
 function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCollapse, onClose, onSignOut }: SidebarContentProps) {
   const initials = getInitials(name);
   const { data: branding } = useBranding();
-  const logoDataUrl = branding?.logoDataUrl;
+  const logoDataUrl      = branding?.logoDataUrl;
+  const companyName      = branding?.companyName      || "Zentra";
+  const platformSubtitle = branding?.platformSubtitle || "Service Desk";
 
   const orbStyle: React.CSSProperties = {
     background: "linear-gradient(135deg, var(--sidebar-primary) 0%, var(--sidebar-ring) 100%)",
@@ -171,7 +173,7 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
         <Link to="/" onClick={onClose} className="flex items-center gap-2.5 min-w-0 group">
           {logoDataUrl ? (
             <img src={logoDataUrl} alt="Logo"
-              className="h-7 w-7 rounded-lg object-contain shrink-0 ring-1 ring-sidebar-border" />
+              className="h-7 w-7 object-contain shrink-0" />
           ) : (
             <div className="h-7 w-7 rounded-lg flex items-center justify-center shrink-0" style={orbStyle}>
               <span className="text-white font-bold text-[11px] tracking-tight">Z</span>
@@ -181,9 +183,9 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
           {!collapsed && (
             <div className="min-w-0 leading-none">
               <span className="text-[14px] font-semibold tracking-tight text-sidebar-foreground truncate block group-hover:text-sidebar-primary transition-colors duration-150">
-                Zentra
+                {companyName}
               </span>
-              <span className="text-[10px] text-sidebar-foreground/30 mt-0.5 block">ITSM Platform</span>
+              <span className="text-[10px] text-sidebar-foreground/30 mt-0.5 block">{platformSubtitle}</span>
             </div>
           )}
         </Link>

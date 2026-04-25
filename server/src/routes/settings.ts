@@ -13,17 +13,30 @@ const router = Router();
 
 /**
  * GET /api/settings/branding/public
- * Public endpoint — no auth required. Returns only safe display fields used
- * by layouts and the favicon injector before the user is authenticated.
+ * Public endpoint — no auth required. Returns safe display fields for layouts.
+ * The favicon is a static asset (/favicon.png) and is not returned here.
  */
 router.get("/branding/public", async (_req, res) => {
   const data = await getSection("branding");
+  const d = data as Record<string, unknown>;
   res.json({
     data: {
-      logoDataUrl:    (data as Record<string, unknown>).logoDataUrl    ?? "",
-      faviconDataUrl: (data as Record<string, unknown>).faviconDataUrl ?? "",
-      companyName:    (data as Record<string, unknown>).companyName    ?? "",
-      primaryColor:   (data as Record<string, unknown>).primaryColor   ?? "#6366f1",
+      logoDataUrl:          d.logoDataUrl          ?? "",
+      faviconDataUrl:       d.faviconDataUrl       ?? "",
+      companyName:          d.companyName          ?? "",
+      platformSubtitle:     d.platformSubtitle     ?? "Service Desk",
+      primaryColor:         d.primaryColor         ?? "#6366f1",
+      companyWebsite:       d.companyWebsite       ?? "",
+      portalAccentColor:    d.portalAccentColor    ?? "#059669",
+      portalLoginHeadline:  d.portalLoginHeadline  ?? "We're here",
+      portalLoginHighlight: d.portalLoginHighlight ?? "to help you.",
+      portalLoginTagline:   d.portalLoginTagline   ?? "Access your support requests, track resolutions, and get help from our team — all in one place.",
+      portalLoginBadge:     d.portalLoginBadge     ?? "Self-service support, anytime",
+      agentLoginPanelColor: d.agentLoginPanelColor ?? "#6366f1",
+      agentLoginHeadline:   d.agentLoginHeadline   ?? "Resolve faster.",
+      agentLoginHighlight:  d.agentLoginHighlight  ?? "Deliver better.",
+      agentLoginTagline:    d.agentLoginTagline    ?? "The modern helpdesk built for IT teams who want to move fast without breaking things.",
+      agentLoginBadge:      d.agentLoginBadge      ?? "AI-Powered Service Management",
     },
   });
 });

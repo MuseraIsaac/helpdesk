@@ -20,8 +20,8 @@ import {
   loadFile,
   removeFile,
   ALLOWED_MIME_TYPES,
-  MAX_FILE_SIZE,
   MAX_FILES_PER_UPLOAD,
+  getMaxFileSizeBytes,
 } from "../lib/storage";
 import { scanBuffer } from "../lib/virus-scan";
 import { createDownloadToken, verifyDownloadToken } from "../lib/download-token";
@@ -29,20 +29,21 @@ import { can } from "core/constants/permission.ts";
 import { changeDocumentTypes } from "core/constants/change.ts";
 import type { ChangeDocumentType } from "core/constants/change.ts";
 import prisma from "../db";
+import type { Request, Response, NextFunction } from "express";
 
 const router = Router({ mergeParams: true });
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_FILE_SIZE, files: MAX_FILES_PER_UPLOAD },
-  fileFilter: (_req, file, cb) => {
-    if (ALLOWED_MIME_TYPES.has(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(Object.assign(new Error(`File type not allowed: ${file.mimetype}`), { status: 415 }));
-    }
-  },
-});
+async function uploadSingle(req: Request, res: Response, next: NextFunction) {
+  const maxSize = await getMaxFileSizeBytes();
+  multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: maxSize, files: 1 },
+    fileFilter: (_req, file, cb) => {
+      if (ALLOWED_MIME_TYPES.has(file.mimetype)) cb(null, true);
+      else cb(Object.assign(new Error(`File type not allowed: ${file.mimetype}`), { status: 415 }));
+    },
+  }).single("file")(req, res, next);
+}
 
 function contentDisposition(filename: string): string {
   const ascii   = filename.replace(/[^\x20-\x7e]/g, "_");
@@ -98,7 +99,7 @@ router.post(
   "/upload",
   requireAuth,
   requirePermission("changes.update"),
-  upload.single("file"),
+  uploadSingle,
   async (req, res) => {
     const changeId = parseId((req.params as Record<string, string>)["changeId"]);
     if (!changeId) { res.status(400).json({ error: "Invalid change ID" }); return; }

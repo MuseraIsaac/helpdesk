@@ -80,32 +80,32 @@ export interface MentionContext {
  * Parse mentions from HTML and fire in-app notifications to the mentioned
  * users (skipping the author). Respects the `notifyOnMentioned` setting.
  * Fire-and-forget safe.
+ *
+ * Each unique mentioned user receives exactly one notification per
+ * note/update, regardless of how many times they appear in the content.
  */
 export async function notifyMentions(
   html: string | null | undefined,
   ctx: MentionContext
 ): Promise<void> {
-  // All occurrences including duplicates — e.g. [@Alice, @Bob, @Alice] = 3 entries
   const allMentions = extractMentionedUserIds(html);
   if (allMentions.length === 0) return;
 
   const settings = await getSection("notifications");
   if (!settings.inAppNotificationsEnabled || !settings.notifyOnMentioned) return;
 
-  // Fire one notification per mention occurrence so the recipient's
-  // notification count matches the number of times they were mentioned.
-  // Self-mentions are skipped regardless of how many times.
-  for (const userId of allMentions) {
-    if (userId === ctx.authorId) continue;
-    void notify({
-      event:        "user.mentioned",
-      recipientIds: [userId],
-      title:        `You were mentioned in ${ctx.entityNumber}`,
-      body:         ctx.entityTitle,
-      entityType:   ctx.entityType,
-      entityId:     ctx.entityId,
-      entityUrl:    ctx.entityUrl,
-      channels:     ["in_app"],
-    });
-  }
+  // Deduplicate — one notification per user per note/update, self-mentions excluded.
+  const recipientIds = [...new Set(allMentions)].filter((id) => id !== ctx.authorId);
+  if (recipientIds.length === 0) return;
+
+  void notify({
+    event:        "user.mentioned",
+    recipientIds,
+    title:        `You were mentioned in ${ctx.entityNumber}`,
+    body:         ctx.entityTitle,
+    entityType:   ctx.entityType,
+    entityId:     ctx.entityId,
+    entityUrl:    ctx.entityUrl,
+    channels:     ["in_app"],
+  });
 }

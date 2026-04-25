@@ -33,6 +33,10 @@ import {
   TICKET_POOL, INCIDENT_POOL, REQUEST_POOL,
   PROBLEM_POOL, CHANGE_POOL, ASSET_POOL, CI_POOL,
 } from "./data-pools";
+import {
+  SAAS_SUBSCRIPTION_POOL, SOFTWARE_LICENSE_POOL,
+  TICKET_TYPE_POOL, TICKET_STATUS_POOL,
+} from "./data-pools-extended";
 
 // ── Progress helpers ──────────────────────────────────────────────────────────
 
@@ -546,20 +550,228 @@ async function generateCmdb(ctx: GeneratorContext, batchId: number, progress: Ba
   await markModuleDone(batchId, "cmdb", ctx.ciIds.length, progress);
 }
 
+// ── Software & SaaS ───────────────────────────────────────────────────────────
+
+async function generateSoftware(ctx: GeneratorContext, batchId: number, progress: BatchProgress): Promise<void> {
+  await markModuleRunning(batchId, "software", progress);
+  const p = ctx.params;
+  const now = new Date();
+
+  let saasNum = 1;
+  for (const spec of take(SAAS_SUBSCRIPTION_POOL, p.saas)) {
+    const renewalDate = spec.renewalMonths > 0
+      ? new Date(now.getFullYear(), now.getMonth() + spec.renewalMonths, 1)
+      : null;
+    const startDate = daysAgo(jitter(90, 600));
+
+    const sub = await prisma.saaSSubscription.create({
+      data: {
+        subscriptionNumber: `SAAS-${pad(saasNum++, 4)}`,
+        appName:      spec.appName,
+        vendor:       spec.vendor,
+        category:     spec.category,
+        status:       spec.status,
+        plan:         spec.plan,
+        billingCycle: spec.billingCycle,
+        totalSeats:   spec.seats,
+        monthlyAmount: spec.monthly ?? null,
+        annualAmount:  spec.annual  ?? null,
+        currency:      "USD",
+        startDate:     startDate,
+        renewalDate:   renewalDate,
+        autoRenews:    spec.status === "active",
+        ownerId:       ctx.userIds[saasNum % ctx.userIds.length] ?? null,
+        createdById:   ctx.adminId,
+      },
+    });
+    ctx.saasIds.push(sub.id);
+  }
+
+  let licNum = 1;
+  for (const spec of take(SOFTWARE_LICENSE_POOL, p.licenses)) {
+    const purchaseDate = daysAgo(jitter(180, 900));
+    const expiryDate   = spec.expiryYears != null && spec.expiryYears > 0
+      ? new Date(purchaseDate.getFullYear() + spec.expiryYears, purchaseDate.getMonth(), purchaseDate.getDate())
+      : null;
+    const renewalDate  = expiryDate ? new Date(expiryDate.getTime() - 30 * 86_400_000) : null;
+
+    const lic = await prisma.softwareLicense.create({
+      data: {
+        licenseNumber: `LIC-${pad(licNum++, 4)}`,
+        productName:   spec.product,
+        vendor:        spec.vendor,
+        edition:       spec.edition,
+        platform:      spec.platform,
+        licenseType:   spec.type,
+        status:        spec.status,
+        totalSeats:    spec.seats,
+        purchaseDate:  purchaseDate,
+        purchasePrice: spec.purchase ?? null,
+        annualCost:    spec.annual   ?? null,
+        currency:      "USD",
+        startDate:     purchaseDate,
+        expiryDate:    expiryDate,
+        renewalDate:   renewalDate,
+        autoRenews:    spec.type === "subscription",
+        ownerId:       ctx.userIds[licNum % ctx.userIds.length] ?? null,
+        createdById:   ctx.adminId,
+      },
+    });
+    ctx.licenseIds.push(lic.id);
+  }
+
+  await markModuleDone(batchId, "software", ctx.saasIds.length + ctx.licenseIds.length, progress);
+}
+
+// ── Duty Plans ────────────────────────────────────────────────────────────────
+
+const SHIFT_PRESETS = [
+  { name: "Morning",   startTime: "06:00", endTime: "14:00", color: "#f59e0b", order: 0 },
+  { name: "Afternoon", startTime: "14:00", endTime: "22:00", color: "#3b82f6", order: 1 },
+  { name: "Night",     startTime: "22:00", endTime: "06:00", color: "#6366f1", order: 2 },
+];
+
+async function generateDutyPlans(ctx: GeneratorContext, batchId: number, progress: BatchProgress): Promise<void> {
+  await markModuleRunning(batchId, "duty_plans", progress);
+
+  const now      = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+  for (let ti = 0; ti < ctx.teamIds.length; ti++) {
+    const teamId = ctx.teamIds[ti]!;
+
+    // Get team members from DB
+    const members = await prisma.teamMember.findMany({
+      where: { teamId },
+      select: { userId: true },
+    });
+    if (members.length === 0) continue;
+    const memberIds = members.map((m) => m.userId);
+
+    // Grant manager role to first agent of this team (as admin)
+    const managerId = memberIds[0]!;
+    await prisma.dutyPlanRole.upsert({
+      where:  { teamId_userId: { teamId, userId: managerId } },
+      create: { teamId, userId: managerId, roleType: "manager", grantedById: ctx.adminId },
+      update: { roleType: "manager" },
+    });
+
+    // Create plan
+    const monthName = monthStart.toLocaleString("en-US", { month: "long", year: "numeric" });
+    const plan = await prisma.dutyPlan.create({
+      data: {
+        teamId,
+        title:       `${monthName} Duty Schedule`,
+        periodStart: monthStart,
+        periodEnd:   monthEnd,
+        is24x7:      true,
+        status:      "published",
+        createdById: ctx.adminId,
+        notes:       "Auto-generated demo schedule. All agents rotate across morning, afternoon, and night shifts.",
+      },
+    });
+    ctx.dutyPlanIds.push(plan.id);
+
+    // Create the 3 standard shifts
+    const shifts: { id: number; order: number }[] = [];
+    for (const preset of SHIFT_PRESETS) {
+      const shift = await prisma.dutyShift.create({
+        data: { planId: plan.id, ...preset },
+      });
+      shifts.push({ id: shift.id, order: preset.order });
+    }
+
+    // Assign agents to shifts for every day in the month
+    const msPerDay = 86_400_000;
+    let dayOffset = 0;
+    const current = new Date(monthStart);
+
+    while (current <= monthEnd) {
+      const dateUTC = new Date(Date.UTC(current.getFullYear(), current.getMonth(), current.getDate()));
+
+      for (let si = 0; si < shifts.length; si++) {
+        const shift = shifts[si]!;
+        // Round-robin assign one agent per shift per day
+        const agentId = memberIds[(dayOffset + si) % memberIds.length]!;
+        const isLeader = si === 0 && dayOffset % 3 === 0; // every 3rd day mark morning as shift leader
+
+        await prisma.dutyAssignment.upsert({
+          where: { shiftId_agentId_date: { shiftId: shift.id, agentId, date: dateUTC } },
+          create: { planId: plan.id, shiftId: shift.id, agentId, date: dateUTC, isShiftLeader: isLeader },
+          update: { isShiftLeader: isLeader },
+        });
+      }
+
+      current.setDate(current.getDate() + 1);
+      dayOffset++;
+    }
+  }
+
+  await markModuleDone(batchId, "duty_plans", ctx.dutyPlanIds.length, progress);
+}
+
+// ── Ticket Configuration ──────────────────────────────────────────────────────
+
+async function generateTicketConfig(ctx: GeneratorContext, batchId: number, progress: BatchProgress): Promise<void> {
+  await markModuleRunning(batchId, "ticket_config", progress);
+  const p = ctx.params;
+
+  for (const spec of take(TICKET_TYPE_POOL, p.ticketTypes)) {
+    const existing = await prisma.ticketTypeConfig.findUnique({ where: { slug: spec.slug } });
+    if (existing) { ctx.ticketTypeIds.push(existing.id); continue; }
+
+    const tt = await prisma.ticketTypeConfig.create({
+      data: {
+        name:        spec.name,
+        slug:        spec.slug,
+        description: spec.description,
+        color:       spec.color,
+        isActive:    true,
+        createdById: ctx.adminId,
+      },
+    });
+    ctx.ticketTypeIds.push(tt.id);
+  }
+
+  for (const spec of take(TICKET_STATUS_POOL, p.ticketStatuses)) {
+    const existing = await prisma.ticketStatusConfig.findFirst({ where: { label: spec.label } });
+    if (existing) { ctx.ticketStatusIds.push(existing.id); continue; }
+
+    const ts = await prisma.ticketStatusConfig.create({
+      data: {
+        label:         spec.label,
+        color:         spec.color,
+        workflowState: spec.workflowState,
+        slaBehavior:   spec.slaBehavior,
+        position:      spec.position,
+        isActive:      true,
+        createdById:   ctx.adminId,
+      },
+    });
+    ctx.ticketStatusIds.push(ts.id);
+  }
+
+  await markModuleDone(batchId, "ticket_config", ctx.ticketTypeIds.length + ctx.ticketStatusIds.length, progress);
+}
+
 // ── Orchestrator ──────────────────────────────────────────────────────────────
 
 const MODULE_GENERATORS: Record<ModuleKey, (ctx: GeneratorContext, batchId: number, progress: BatchProgress) => Promise<void>> = {
-  foundation: generateFoundation,
-  knowledge:  generateKnowledge,
-  macros:     generateMacros,
-  catalog:    generateCatalog,
-  tickets:    generateTickets,
-  incidents:  generateIncidents,
-  requests:   generateRequests,
-  problems:   generateProblems,
-  changes:    generateChanges,
-  assets:     generateAssets,
-  cmdb:       generateCmdb,
+  foundation:    generateFoundation,
+  knowledge:     generateKnowledge,
+  macros:        generateMacros,
+  catalog:       generateCatalog,
+  tickets:       generateTickets,
+  incidents:     generateIncidents,
+  requests:      generateRequests,
+  problems:      generateProblems,
+  changes:       generateChanges,
+  assets:        generateAssets,
+  cmdb:          generateCmdb,
+  software:      generateSoftware,
+  duty_plans:    generateDutyPlans,
+  ticket_config: generateTicketConfig,
 };
 
 export async function runGenerator(config: GeneratorConfig): Promise<void> {

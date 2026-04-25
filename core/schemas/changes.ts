@@ -39,6 +39,7 @@ export const createChangeSchema = z.object({
   impactedUsers:        z.string().trim().max(2000).optional(),
   communicationNotes:   z.string().trim().max(10000).optional(),
   customFields: z.record(z.string(), z.unknown()).optional().default({}),
+  organizationId: z.number().int().positive().nullable().optional(),
 });
 export type CreateChangeInput = z.infer<typeof createChangeSchema>;
 
@@ -46,12 +47,33 @@ export const updateChangeSchema = createChangeSchema
   .partial()
   .extend({
     state: z.enum(changeStates).optional(),
+    // Nullable overrides for all fields that can be explicitly cleared
+    description:          z.string().trim().max(10000).nullable().optional(),
+    assignedToId:         z.string().nullable().optional(),
+    coordinatorGroupId:   z.number().int().positive().nullable().optional(),
+    linkedProblemId:      z.number().int().positive().nullable().optional(),
+    serviceId:            z.number().int().positive().nullable().optional(),
+    configurationItemId:  z.number().int().positive().nullable().optional(),
+    serviceName:          z.string().trim().max(255).nullable().optional(),
+    plannedStart:         z.string().datetime({ offset: true }).nullable().optional(),
+    plannedEnd:           z.string().datetime({ offset: true }).nullable().optional(),
+    justification:        z.string().trim().max(10000).nullable().optional(),
+    workInstructions:     z.string().trim().max(10000).nullable().optional(),
+    serviceImpactAssessment: z.string().trim().max(10000).nullable().optional(),
+    rollbackPlan:         z.string().trim().max(10000).nullable().optional(),
+    riskAssessmentAndMitigation: z.string().trim().max(10000).nullable().optional(),
+    prechecks:            z.string().trim().max(5000).nullable().optional(),
+    postchecks:           z.string().trim().max(5000).nullable().optional(),
+    notificationRequired: z.boolean().nullable().optional(),
+    impactedUsers:        z.string().trim().max(2000).nullable().optional(),
+    communicationNotes:   z.string().trim().max(10000).nullable().optional(),
+    // Timestamp fields (always nullable for clearing)
     actualStart: z.string().datetime({ offset: true }).nullable().optional(),
     actualEnd:   z.string().datetime({ offset: true }).nullable().optional(),
     submittedAt: z.string().datetime({ offset: true }).nullable().optional(),
     approvedAt:  z.string().datetime({ offset: true }).nullable().optional(),
     closedAt:    z.string().datetime({ offset: true }).nullable().optional(),
-    // Closure & PIR fields — validated server-side against state eligibility
+    // Closure & PIR fields
     implementationOutcome: z.enum(implementationOutcomes).nullable().optional(),
     rollbackUsed:   z.boolean().nullable().optional(),
     closureCode:    z.string().trim().max(100).nullable().optional(),

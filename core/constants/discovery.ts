@@ -99,21 +99,25 @@ export const SYNC_TRIGGER_LABEL: Record<SyncTriggerType, string> = {
  * Source defaults to "csv" if omitted.
  */
 export const CSV_COLUMN_ALIASES: Record<string, string> = {
-  // Required
+  // Required — camelCase as typed AND lowercased (normaliseHeader lowercases all headers)
+  externalid:   "externalId",
   external_id:  "externalId",
   id:           "externalId",
   // Name
   asset_name:   "name",
   // Type
   asset_type:   "type",
-  // Identity
+  // Identity — camelCase lowercased variants
+  serialnumber:  "serialNumber",
   serial_number: "serialNumber",
   serial:        "serialNumber",
+  assettag:     "assetTag",
   asset_tag:    "assetTag",
   tag:          "assetTag",
   // Hardware
   make:         "manufacturer",
-  // Assignment
+  // Assignment — camelCase lowercased variants
+  assignedtoemail:   "assignedToEmail",
   assigned_to_email: "assignedToEmail",
   assigned_email:    "assignedToEmail",
   email:             "assignedToEmail",

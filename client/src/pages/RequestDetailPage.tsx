@@ -6,6 +6,7 @@ import axios from "axios";
 import type {
   ServiceRequest,
   FulfillmentTask,
+  FulfillmentTaskNote,
   RequestEvent,
 } from "core/constants/request.ts";
 import {
@@ -14,7 +15,6 @@ import {
   terminalRequestStatuses,
 } from "core/constants/request-status.ts";
 import {
-  fulfillmentTaskStatuses,
   fulfillmentTaskStatusLabel,
   fulfillmentTaskStatusTransitions,
 } from "core/constants/fulfillment-task-status.ts";
@@ -24,13 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import SearchableSelect from "@/components/SearchableSelect";
 import {
   Dialog,
   DialogContent,
@@ -55,6 +49,9 @@ import {
   Link2,
   BookmarkPlus,
   Server,
+  MessageSquare,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
 import WatchButton from "@/components/FollowButton";
@@ -171,6 +168,311 @@ function InlineField({
   );
 }
 
+// ── Task status badge ─────────────────────────────────────────────────────────
+
+const TASK_STATUS_STYLES: Record<string, string> = {
+  pending:           "text-muted-foreground border-border",
+  assigned:          "text-blue-600 border-blue-200 bg-blue-50",
+  in_progress:       "text-indigo-600 border-indigo-200 bg-indigo-50",
+  on_hold:           "text-amber-600 border-amber-200 bg-amber-50",
+  waiting_on_user:   "text-orange-600 border-orange-200 bg-orange-50",
+  waiting_on_vendor: "text-purple-600 border-purple-200 bg-purple-50",
+  completed:         "text-green-600 border-green-200 bg-green-50",
+  done:              "text-teal-600 border-teal-200 bg-teal-50",
+  cancelled:         "text-muted-foreground border-border",
+  skipped:           "text-muted-foreground border-border",
+};
+
+function TaskStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge
+      variant="outline"
+      className={`text-[11px] ${TASK_STATUS_STYLES[status] ?? ""}`}
+    >
+      {fulfillmentTaskStatusLabel[status as keyof typeof fulfillmentTaskStatusLabel] ?? status}
+    </Badge>
+  );
+}
+
+// ── Task notes subpanel ───────────────────────────────────────────────────────
+
+function TaskNotesPanel({
+  notes,
+  requestId,
+  taskId,
+  isTerminal,
+  refetch,
+}: {
+  notes: FulfillmentTaskNote[];
+  requestId: number;
+  taskId: number;
+  isTerminal: boolean;
+  refetch: () => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const [composing, setComposing] = useState(false);
+
+  const addNoteMutation = useMutation({
+    mutationFn: async (content: string) => {
+      await axios.post(`/api/requests/${requestId}/tasks/${taskId}/notes`, { content });
+    },
+    onSuccess: () => {
+      setDraft("");
+      setComposing(false);
+      refetch();
+    },
+  });
+
+  const deleteNoteMutation = useMutation({
+    mutationFn: async (noteId: number) => {
+      await axios.delete(`/api/requests/${requestId}/tasks/${taskId}/notes/${noteId}`);
+    },
+    onSuccess: () => refetch(),
+  });
+
+  return (
+    <div className="mt-2 space-y-2 border-t pt-2">
+      {notes.length > 0 && (
+        <ul className="space-y-2">
+          {notes.map((note) => (
+            <li key={note.id} className="flex items-start gap-2 group">
+              <div className="flex-1 rounded bg-muted/50 px-3 py-2 text-sm">
+                <p className="whitespace-pre-wrap leading-snug">{note.content}</p>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  {note.author?.name ?? "Unknown"} · {formatRelative(note.createdAt)}
+                </p>
+              </div>
+              {!isTerminal && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive shrink-0 transition-opacity"
+                  onClick={() => deleteNoteMutation.mutate(note.id)}
+                  disabled={deleteNoteMutation.isPending}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!isTerminal && (
+        composing ? (
+          <div className="space-y-2">
+            <Textarea
+              placeholder="Add a note..."
+              rows={2}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              className="text-sm resize-none"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Escape") { setComposing(false); setDraft(""); }
+              }}
+            />
+            {addNoteMutation.error && (
+              <ErrorAlert error={addNoteMutation.error} fallback="Failed to save note" />
+            )}
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => draft.trim() && addNoteMutation.mutate(draft.trim())}
+                disabled={!draft.trim() || addNoteMutation.isPending}
+              >
+                Save Note
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs"
+                onClick={() => { setComposing(false); setDraft(""); }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setComposing(true)}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <MessageSquare className="h-3 w-3" />
+            Add note
+          </button>
+        )
+      )}
+    </div>
+  );
+}
+
+// ── Task row ──────────────────────────────────────────────────────────────────
+
+function TaskRow({
+  task,
+  requestId,
+  isTerminal,
+  refetch,
+}: {
+  task: FulfillmentTask;
+  requestId: number;
+  isTerminal: boolean;
+  refetch: () => void;
+}) {
+  const [notesOpen, setNotesOpen] = useState(false);
+  const isDone = task.status === "completed" || task.status === "done" || task.status === "cancelled" || task.status === "skipped";
+
+  const updateTaskMutation = useMutation({
+    mutationFn: async (status: string) => {
+      await axios.patch(`/api/requests/${requestId}/tasks/${task.id}`, { status });
+    },
+    onSuccess: () => refetch(),
+  });
+
+  const deleteTaskMutation = useMutation({
+    mutationFn: async () => {
+      await axios.delete(`/api/requests/${requestId}/tasks/${task.id}`);
+    },
+    onSuccess: () => refetch(),
+  });
+
+  const nextStatuses = fulfillmentTaskStatusTransitions[task.status] ?? [];
+  const noteCount = task.notes?.length ?? 0;
+
+  return (
+    <div
+      className={`rounded-md border transition-opacity ${
+        task.status === "completed" || task.status === "done" ? "opacity-60" : task.status === "cancelled" || task.status === "skipped" ? "opacity-50" : ""
+      }`}
+    >
+      <div className="flex items-start gap-2 px-3 py-2.5">
+        {/* Quick-complete checkbox */}
+        <button
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border border-input flex items-center justify-center hover:bg-muted transition-colors disabled:pointer-events-none"
+          onClick={() => {
+            if (!isDone) {
+              updateTaskMutation.mutate("completed");
+            } else if (task.status === "completed") {
+              updateTaskMutation.mutate("in_progress");
+            }
+          }}
+          disabled={task.status === "cancelled" || task.status === "skipped" || isTerminal}
+          title={task.status === "completed" ? "Reopen task" : "Mark complete"}
+        >
+          {task.status === "completed" && <Check className="h-3 w-3" />}
+        </button>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span
+              className={`text-sm font-medium leading-tight ${
+                task.status === "completed" ? "line-through text-muted-foreground" : ""
+              }`}
+            >
+              {task.title}
+            </span>
+            <TaskStatusBadge status={task.status} />
+          </div>
+
+          {task.description && (
+            <p className="text-xs text-muted-foreground mt-0.5 leading-snug line-clamp-2">
+              {task.description}
+            </p>
+          )}
+
+          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
+            {task.assignedTo && (
+              <span className="flex items-center gap-1">
+                <User className="h-3 w-3" />
+                {task.assignedTo.name}
+              </span>
+            )}
+            {task.team && (
+              <span className="flex items-center gap-1">
+                <Users className="h-3 w-3" />
+                {task.team.name}
+              </span>
+            )}
+            {task.dueAt && (
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                Due {formatDatetime(task.dueAt)}
+              </span>
+            )}
+            {task.completedAt && (
+              <span className="flex items-center gap-1">
+                <Check className="h-3 w-3" />
+                Completed {formatDatetime(task.completedAt)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Status picker */}
+        {!isTerminal && !isDone && nextStatuses.length > 0 && (
+          <SearchableSelect
+            value={task.status}
+            options={[task.status, ...nextStatuses].map((s) => ({
+              value: s,
+              label: fulfillmentTaskStatusLabel[s] ?? s,
+            }))}
+            onChange={(v) => updateTaskMutation.mutate(v)}
+            className="h-7 w-36 text-xs shrink-0"
+          />
+        )}
+
+        {/* Notes toggle */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-muted-foreground shrink-0"
+          onClick={() => setNotesOpen((o) => !o)}
+          title="Task notes"
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+          {noteCount > 0 && (
+            <span className="ml-1 text-[11px]">{noteCount}</span>
+          )}
+          {notesOpen ? (
+            <ChevronUp className="h-3 w-3 ml-0.5" />
+          ) : (
+            <ChevronDown className="h-3 w-3 ml-0.5" />
+          )}
+        </Button>
+
+        {/* Delete */}
+        {!isTerminal && !isDone && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive shrink-0"
+            onClick={() => deleteTaskMutation.mutate()}
+            disabled={deleteTaskMutation.isPending}
+            title="Delete task"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+
+      {/* Notes panel */}
+      {notesOpen && (
+        <div className="px-3 pb-3">
+          <TaskNotesPanel
+            notes={task.notes ?? []}
+            requestId={requestId}
+            taskId={task.id}
+            isTerminal={isTerminal}
+            refetch={refetch}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Task list ─────────────────────────────────────────────────────────────────
 
 function TaskList({
@@ -184,16 +486,15 @@ function TaskList({
   isTerminal: boolean;
   refetch: () => void;
 }) {
-  const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDesc, setNewTaskDesc] = useState("");
 
   const addTaskMutation = useMutation({
-    mutationFn: async (title: string) => {
+    mutationFn: async () => {
       await axios.post(`/api/requests/${requestId}/tasks`, {
-        title,
-        description: newTaskDesc || undefined,
+        title: newTaskTitle.trim(),
+        description: newTaskDesc.trim() || undefined,
         position: tasks.length,
       });
     },
@@ -205,27 +506,8 @@ function TaskList({
     },
   });
 
-  const updateTaskMutation = useMutation({
-    mutationFn: async ({
-      taskId,
-      status,
-    }: {
-      taskId: number;
-      status: string;
-    }) => {
-      await axios.patch(`/api/requests/${requestId}/tasks/${taskId}`, { status });
-    },
-    onSuccess: () => refetch(),
-  });
-
-  const deleteTaskMutation = useMutation({
-    mutationFn: async (taskId: number) => {
-      await axios.delete(`/api/requests/${requestId}/tasks/${taskId}`);
-    },
-    onSuccess: () => refetch(),
-  });
-
-  const completedCount = tasks.filter((t) => t.status === "completed").length;
+  const doneStatuses = ["completed", "cancelled", "skipped"];
+  const completedCount = tasks.filter((t) => doneStatuses.includes(t.status)).length;
 
   return (
     <div className="space-y-3">
@@ -247,7 +529,7 @@ function TaskList({
             onClick={() => setAddOpen(true)}
           >
             <Plus className="h-3 w-3 mr-1" />
-            Add task
+            Add Task
           </Button>
         )}
       </div>
@@ -256,119 +538,27 @@ function TaskList({
       {tasks.length > 0 && (
         <div className="h-1.5 rounded-full bg-muted overflow-hidden">
           <div
-            className="h-full rounded-full bg-primary transition-all"
+            className="h-full rounded-full bg-primary transition-all duration-300"
             style={{ width: `${(completedCount / tasks.length) * 100}%` }}
           />
         </div>
       )}
 
-      <div className="space-y-1">
+      <div className="space-y-2">
         {tasks.length === 0 && (
           <p className="text-sm text-muted-foreground italic">
             No tasks yet. Add tasks to track fulfillment steps.
           </p>
         )}
-        {tasks.map((task) => {
-          const nextStatuses = fulfillmentTaskStatusTransitions[task.status] ?? [];
-          return (
-            <div
-              key={task.id}
-              className={`flex items-start gap-2 rounded-md border px-3 py-2 ${
-                task.status === "completed"
-                  ? "opacity-60"
-                  : task.status === "cancelled"
-                  ? "opacity-40"
-                  : ""
-              }`}
-            >
-              {/* Quick complete checkbox */}
-              <button
-                className="mt-0.5 h-4 w-4 shrink-0 rounded border border-input flex items-center justify-center hover:bg-muted transition-colors"
-                onClick={() => {
-                  if (task.status === "pending" || task.status === "in_progress") {
-                    updateTaskMutation.mutate({ taskId: task.id, status: "completed" });
-                  } else if (task.status === "completed") {
-                    updateTaskMutation.mutate({ taskId: task.id, status: "in_progress" });
-                  }
-                }}
-                disabled={task.status === "cancelled" || isTerminal}
-              >
-                {task.status === "completed" && <Check className="h-3 w-3" />}
-              </button>
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-baseline gap-2">
-                  <span
-                    className={`text-sm font-medium ${
-                      task.status === "completed" ? "line-through text-muted-foreground" : ""
-                    }`}
-                  >
-                    {task.title}
-                  </span>
-                  {task.status === "in_progress" && (
-                    <Badge variant="outline" className="text-[11px] text-indigo-600 border-indigo-200">
-                      In progress
-                    </Badge>
-                  )}
-                  {task.status === "cancelled" && (
-                    <Badge variant="outline" className="text-[11px] text-muted-foreground">
-                      Cancelled
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
-                  {task.assignedTo && (
-                    <span className="flex items-center gap-1">
-                      <User className="h-3 w-3" />
-                      {task.assignedTo.name}
-                    </span>
-                  )}
-                  {task.dueAt && (
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {formatDatetime(task.dueAt)}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Status picker */}
-              {!isTerminal && task.status !== "cancelled" && nextStatuses.length > 0 && (
-                <Select
-                  value={task.status}
-                  onValueChange={(v) =>
-                    updateTaskMutation.mutate({ taskId: task.id, status: v })
-                  }
-                >
-                  <SelectTrigger className="h-7 w-32 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={task.status}>
-                      {fulfillmentTaskStatusLabel[task.status]}
-                    </SelectItem>
-                    {nextStatuses.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {fulfillmentTaskStatusLabel[s]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-
-              {!isTerminal && task.status !== "completed" && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive shrink-0"
-                  onClick={() => deleteTaskMutation.mutate(task.id)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
-          );
-        })}
+        {tasks.map((task) => (
+          <TaskRow
+            key={task.id}
+            task={task}
+            requestId={requestId}
+            isTerminal={isTerminal}
+            refetch={refetch}
+          />
+        ))}
       </div>
 
       {/* Add task dialog */}
@@ -388,9 +578,7 @@ function TaskList({
                 value={newTaskTitle}
                 onChange={(e) => setNewTaskTitle(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && newTaskTitle.trim()) {
-                    addTaskMutation.mutate(newTaskTitle.trim());
-                  }
+                  if (e.key === "Enter" && newTaskTitle.trim()) addTaskMutation.mutate();
                 }}
                 autoFocus
               />
@@ -399,8 +587,8 @@ function TaskList({
               <Label htmlFor="task-desc">Description</Label>
               <Textarea
                 id="task-desc"
-                placeholder="Optional details"
-                rows={2}
+                placeholder="Optional details about this task"
+                rows={3}
                 value={newTaskDesc}
                 onChange={(e) => setNewTaskDesc(e.target.value)}
               />
@@ -414,7 +602,7 @@ function TaskList({
               Cancel
             </Button>
             <Button
-              onClick={() => newTaskTitle.trim() && addTaskMutation.mutate(newTaskTitle.trim())}
+              onClick={() => newTaskTitle.trim() && addTaskMutation.mutate()}
               disabled={!newTaskTitle.trim() || addTaskMutation.isPending}
             >
               Add Task
@@ -710,27 +898,18 @@ export default function RequestDetailPage() {
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Assigned To
               </span>
-              <Select
+              <SearchableSelect
                 value={request.assignedTo?.id ?? "none"}
-                onValueChange={(v) =>
-                  patchMutation.mutate({
-                    assignedToId: v === "none" ? null : v,
-                  })
-                }
+                options={[
+                  { value: "none", label: "Unassigned" },
+                  ...(agentsData?.agents.map((a) => ({ value: a.id, label: a.name })) ?? []),
+                ]}
+                placeholder="Unassigned"
+                searchPlaceholder="Search agents…"
+                onChange={(v) => patchMutation.mutate({ assignedToId: v === "none" ? null : v })}
                 disabled={isTerminal}
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="Unassigned" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Unassigned</SelectItem>
-                  {agentsData?.agents.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                className="h-8 text-sm"
+              />
             </div>
 
             {/* Team */}
@@ -738,49 +917,36 @@ export default function RequestDetailPage() {
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Team
               </span>
-              <Select
+              <SearchableSelect
                 value={request.team?.id != null ? String(request.team.id) : "none"}
-                onValueChange={(v) =>
-                  patchMutation.mutate({
-                    teamId: v === "none" ? null : Number(v),
-                  })
-                }
+                options={[
+                  { value: "none", label: "No team" },
+                  ...(teamsData?.teams.map((t) => ({ value: String(t.id), label: t.name })) ?? []),
+                ]}
+                placeholder="No team"
+                searchPlaceholder="Search teams…"
+                onChange={(v) => patchMutation.mutate({ teamId: v === "none" ? null : Number(v) })}
                 disabled={isTerminal}
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="No team" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No team</SelectItem>
-                  {teamsData?.teams.map((t) => (
-                    <SelectItem key={t.id} value={String(t.id)}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                className="h-8 text-sm"
+              />
             </div>
           </div>
 
           {/* Priority card */}
           <div className="rounded-md border p-4 space-y-2">
             <h3 className="font-medium text-sm">Priority</h3>
-            <Select
+            <SearchableSelect
               value={request.priority}
-              onValueChange={(v) => patchMutation.mutate({ priority: v })}
+              options={[
+                { value: "low",    label: "Low" },
+                { value: "medium", label: "Medium" },
+                { value: "high",   label: "High" },
+                { value: "urgent", label: "Urgent" },
+              ]}
+              onChange={(v) => patchMutation.mutate({ priority: v })}
               disabled={isTerminal}
-            >
-              <SelectTrigger className="h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {["low", "medium", "high", "urgent"].map((p) => (
-                  <SelectItem key={p} value={p} className="capitalize">
-                    {p.charAt(0).toUpperCase() + p.slice(1)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              className="h-8 text-sm"
+            />
           </div>
 
           {/* Dates card */}

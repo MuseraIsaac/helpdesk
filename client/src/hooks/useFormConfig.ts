@@ -34,9 +34,11 @@ export function useFormConfig(entityType: FormEntityType) {
     const saved = fieldMap.get(key);
     if (saved) return saved;
     const def = FORM_FIELD_REGISTRY[entityType].find((f) => f.key === key);
+    // Respect defaultVisible — fields that explicitly set it false start hidden.
+    const defaultVisible = def?.defaultVisible !== false;
     return {
       key,
-      visible:     true,
+      visible:     defaultVisible,
       required:    def?.required ?? false,
       label:       def?.label ?? key,
       placeholder: def?.placeholder ?? "",

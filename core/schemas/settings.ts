@@ -190,6 +190,13 @@ export const generalSettingsSchema = z.object({
 
 export const brandingSettingsSchema = z.object({
   companyName:        z.string().max(100).default(""),
+  /** Short subtitle shown below the company name in the sidebar and on the login panel. */
+  platformSubtitle:   z.string().max(60).default("Service Desk"),
+  /**
+   * Public website URL for the company. Shown as a branded link on the
+   * customer portal homepage (e.g. "Acme Corp Website"). Leave blank to hide.
+   */
+  companyWebsite:     z.string().max(500).default(""),
   logoDataUrl:        z.string().default(""),
   /**
    * Dedicated browser favicon. Separate from the app logo so the two can differ.
@@ -200,6 +207,40 @@ export const brandingSettingsSchema = z.object({
   primaryColor:       z.string().default("#6366f1"),
   helpCenterTitle:    z.string().max(100).default("Help Center"),
   helpCenterTagline:  z.string().max(200).default(""),
+
+  // ── Customer portal customisation ─────────────────────────────────────────
+  /**
+   * Accent color for the customer portal (buttons, active nav, login panel).
+   * Independent from the agent-side primaryColor so each surface can be branded separately.
+   */
+  portalAccentColor:    z.string().max(20).default("#059669"),
+  /** First line of the login-page hero headline. */
+  portalLoginHeadline:  z.string().max(100).default("We're here"),
+  /** Second line — displayed in a gradient accent color on the dark panel. */
+  portalLoginHighlight: z.string().max(100).default("to help you."),
+  /** Supporting paragraph below the headline. */
+  portalLoginTagline:   z.string().max(500).default(
+    "Access your support requests, track resolutions, and get help from our team — all in one place."
+  ),
+  /** Text inside the small pill badge at the top of the hero. */
+  portalLoginBadge:     z.string().max(100).default("Self-service support, anytime"),
+
+  // ── Agent portal login page customisation ─────────────────────────────────
+  /**
+   * Hue/color tint for the agent login page left panel.
+   * The panel is always rendered dark; this color controls its tint.
+   */
+  agentLoginPanelColor: z.string().max(20).default("#6366f1"),
+  /** First line of the agent login hero headline. */
+  agentLoginHeadline:   z.string().max(100).default("Resolve faster."),
+  /** Second line — displayed in a gradient on the dark panel. */
+  agentLoginHighlight:  z.string().max(100).default("Deliver better."),
+  /** Supporting paragraph below the headline. */
+  agentLoginTagline:    z.string().max(500).default(
+    "The modern helpdesk built for IT teams who want to move fast without breaking things."
+  ),
+  /** Text inside the small pill badge at the top of the agent hero. */
+  agentLoginBadge:      z.string().max(100).default("AI-Powered Service Management"),
 });
 
 export const ticketsSettingsSchema = z.object({

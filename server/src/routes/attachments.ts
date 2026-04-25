@@ -40,27 +40,35 @@ import {
   loadFile,
   removeFile,
   ALLOWED_MIME_TYPES,
-  MAX_FILE_SIZE,
   MAX_FILES_PER_UPLOAD,
+  getMaxFileSizeBytes,
 } from "../lib/storage";
 import { scanBuffer } from "../lib/virus-scan";
 import { createDownloadToken, verifyDownloadToken } from "../lib/download-token";
 import { can } from "core/constants/permission.ts";
 import prisma from "../db";
+import type { Request, Response, NextFunction } from "express";
 
 const router = Router({ mergeParams: true });
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_FILE_SIZE, files: MAX_FILES_PER_UPLOAD },
-  fileFilter: (_req, file, cb) => {
-    if (ALLOWED_MIME_TYPES.has(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(Object.assign(new Error(`File type not allowed: ${file.mimetype}`), { status: 415 }));
-    }
-  },
-});
+// Build a multer instance per request so the file-size limit always reflects
+// the current "Advanced → Max attachment size" setting without a server restart.
+function fileFilter(_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) {
+  if (ALLOWED_MIME_TYPES.has(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(Object.assign(new Error(`File type not allowed: ${file.mimetype}`), { status: 415 }));
+  }
+}
+
+async function uploadSingle(req: Request, res: Response, next: NextFunction) {
+  const maxSize = await getMaxFileSizeBytes();
+  multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: maxSize, files: 1 },
+    fileFilter,
+  }).single("file")(req, res, next);
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -90,7 +98,7 @@ function scanBlockReason(status: string): string | null {
 
 // ── Upload ────────────────────────────────────────────────────────────────────
 
-router.post("/upload", requireAuth, upload.single("file"), async (req, res) => {
+router.post("/upload", requireAuth, uploadSingle, async (req, res) => {
   const ticketId = parseId(req.params.ticketId);
   if (!ticketId) { res.status(400).json({ error: "Invalid ticket ID" }); return; }
 

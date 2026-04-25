@@ -774,8 +774,8 @@ export default function AssetsPage() {
       {cloneMut.error && <ErrorAlert error={cloneMut.error} fallback="Clone failed" />}
 
       {/* ── Table ── */}
-      <div className="rounded-lg border border-border/60 overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-lg border border-border/60 overflow-x-auto">
+        <table className="w-full min-w-max text-sm">
           <thead>
             <tr className="border-b border-border/50 bg-muted/20">
               {table.getFlatHeaders().map(header => (

@@ -28,6 +28,7 @@ import PlaceholderPage from "./pages/PlaceholderPage";
 import ApprovalsPage from "./pages/ApprovalsPage";
 import IncidentsPage from "./pages/IncidentsPage";
 import IncidentDetailPage from "./pages/IncidentDetailPage";
+import NewIncidentPage from "./pages/NewIncidentPage";
 import RequestsPage from "./pages/RequestsPage";
 import RequestDetailPage from "./pages/RequestDetailPage";
 import ProblemsPage from "./pages/ProblemsPage";
@@ -54,6 +55,7 @@ import PortalNewTicketPage from "./pages/portal/PortalNewTicketPage";
 import PortalRequestsPage from "./pages/portal/PortalRequestsPage";
 import PortalRequestDetailPage from "./pages/portal/PortalRequestDetailPage";
 import PortalNewRequestPage from "./pages/portal/PortalNewRequestPage";
+import PortalAccountPage from "./pages/portal/PortalAccountPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import CmdbPage from "./pages/CmdbPage";
 import CmdbDetailPage from "./pages/CmdbDetailPage";
@@ -115,33 +117,32 @@ function DefaultLandingRoute() {
   return <HomePage />;
 }
 
-/**
- * Injects the browser favicon from branding settings.
- * Prefers the dedicated faviconDataUrl; falls back to logoDataUrl when no
- * separate favicon has been uploaded.
- */
-function FaviconEffect() {
+/** Syncs the page title and favicon to the live branding settings. */
+function BrandingEffect() {
   const { data: branding } = useBranding();
+
   useEffect(() => {
-    // Prefer dedicated favicon; fall back to logo
-    const dataUrl = branding?.faviconDataUrl || branding?.logoDataUrl;
-    if (!dataUrl) return;
-    let link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    if (branding?.companyName) document.title = branding.companyName;
+  }, [branding?.companyName]);
+
+  useEffect(() => {
+    if (!branding?.faviconDataUrl) return;
+    let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
     if (!link) {
       link = document.createElement("link");
       link.rel = "icon";
       document.head.appendChild(link);
     }
-    link.type = dataUrl.startsWith("data:image/svg") ? "image/svg+xml" : "image/png";
-    link.href = dataUrl;
-  }, [branding?.faviconDataUrl, branding?.logoDataUrl]);
+    link.href = branding.faviconDataUrl;
+  }, [branding?.faviconDataUrl]);
+
   return null;
 }
 
 function App() {
   return (
     <>
-      <FaviconEffect />
+      <BrandingEffect />
       <Routes>
       {/* ── Agent / admin ───────────────────────────────────────────────── */}
       <Route path="/login" element={<LoginPage />} />
@@ -157,6 +158,7 @@ function App() {
           <Route path="/requests/new" element={<NewRequestPage />} />
           <Route path="/requests/:id" element={<RequestDetailPage />} />
           <Route path="/incidents" element={<IncidentsPage />} />
+          <Route path="/incidents/new" element={<NewIncidentPage />} />
           <Route path="/incidents/:id" element={<IncidentDetailPage />} />
           <Route path="/problems" element={<ProblemsPage />} />
           <Route path="/problems/new" element={<NewProblemPage />} />
@@ -265,6 +267,7 @@ function App() {
           <Route path="/portal/new-request" element={<PortalNewRequestPage />} />
           <Route path="/portal/catalog" element={<PortalCatalogPage />} />
           <Route path="/portal/catalog/:id" element={<PortalCatalogItemPage />} />
+          <Route path="/portal/account" element={<PortalAccountPage />} />
         </Route>
       </Route>
 

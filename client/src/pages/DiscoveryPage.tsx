@@ -28,7 +28,7 @@ import { createConnectorSchema, type CreateConnectorInput } from "core/schemas/d
 import ErrorAlert from "@/components/ErrorAlert";
 import {
   Radar, Plus, Upload, Play, RefreshCw, CheckCircle2, XCircle, Clock,
-  ChevronRight, AlertTriangle, Loader2, FileUp, Info,
+  ChevronRight, AlertTriangle, Loader2, FileUp, Info, Download,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -57,9 +57,22 @@ function CsvUploadDialog({ onImported }: { onImported: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const qc = useQueryClient();
 
+  function isExcelFile(f: File) {
+    return f.name.toLowerCase().endsWith(".xlsx") || f.name.toLowerCase().endsWith(".xls") ||
+      f.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      f.type === "application/vnd.ms-excel";
+  }
+
   const importMutation = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error("No file selected");
+      if (isExcelFile(file)) {
+        const buf = await file.arrayBuffer();
+        return axios.post("/api/discovery/import/csv", buf, {
+          headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+          params:  { syncPolicy },
+        }).then(r => r.data);
+      }
       const text = await file.text();
       return axios.post("/api/discovery/import/csv", text, {
         headers: { "Content-Type": "text/plain" },
@@ -83,9 +96,17 @@ function CsvUploadDialog({ onImported }: { onImported: () => void }) {
     setPreview(null);
     setValidating(true);
     try {
-      const text = await f.text();
-      const r = await axios.post("/api/discovery/import/csv/validate", text, {
-        headers: { "Content-Type": "text/plain" },
+      let body: string | ArrayBuffer;
+      let contentType: string;
+      if (isExcelFile(f)) {
+        body = await f.arrayBuffer();
+        contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      } else {
+        body = await f.text();
+        contentType = "text/plain";
+      }
+      const r = await axios.post("/api/discovery/import/csv/validate", body, {
+        headers: { "Content-Type": contentType },
       });
       setPreview(r.data);
     } catch {
@@ -98,15 +119,28 @@ function CsvUploadDialog({ onImported }: { onImported: () => void }) {
   return (
     <>
       <Button onClick={() => setOpen(true)} variant="outline" size="sm">
-        <Upload className="w-4 h-4 mr-1.5" />CSV Import
+        <Upload className="w-4 h-4 mr-1.5" />Import Assets
       </Button>
       <Dialog open={open} onOpenChange={v => { setOpen(v); if (!v) { setFile(null); setPreview(null); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Import Assets from CSV</DialogTitle>
-            <DialogDescription>
-              Upload a CSV file. Required columns: <code className="text-xs">name</code> and{" "}
-              <code className="text-xs">externalId</code> (or alias <code className="text-xs">external_id</code>).
+            <DialogTitle>Import Assets from CSV or Excel</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  Upload a CSV or Excel-compatible file. Required columns:{" "}
+                  <code className="text-xs bg-muted px-1 rounded">name</code> and{" "}
+                  <code className="text-xs bg-muted px-1 rounded">externalId</code>{" "}
+                  (aliases: <code className="text-xs bg-muted px-1 rounded">external_id</code>,{" "}
+                  <code className="text-xs bg-muted px-1 rounded">id</code>).
+                </p>
+                <a href="/api/discovery/import/csv/template" download>
+                  <Button type="button" variant="outline" size="sm" className="gap-1.5 h-7 text-xs">
+                    <Download className="w-3.5 h-3.5" />
+                    Download Excel Template
+                  </Button>
+                </a>
+              </div>
             </DialogDescription>
           </DialogHeader>
 
@@ -122,10 +156,10 @@ function CsvUploadDialog({ onImported }: { onImported: () => void }) {
                   <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</p>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">Click to select a .csv file</p>
+                <p className="text-sm text-muted-foreground">Click to select a CSV or Excel (.xlsx) file</p>
               )}
               <input
-                ref={fileRef} type="file" accept=".csv" className="hidden"
+                ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden"
                 onChange={handleFileChange}
               />
             </div>

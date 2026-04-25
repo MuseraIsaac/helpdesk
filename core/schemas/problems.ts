@@ -27,6 +27,7 @@ export const createProblemSchema = z.object({
    */
   linkedIncidentIds: z.array(z.number().int().positive()).default([]),
   customFields: z.record(z.string(), z.unknown()).optional().default({}),
+  organizationId: z.number().int().positive().nullable().optional(),
 });
 
 export type CreateProblemInput = z.infer<typeof createProblemSchema>;

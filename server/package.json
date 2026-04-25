@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev":        "bun --watch src/index.ts",
+    "dev":        "cd .. && bun --watch --env-file server/.env start-server.ts",
     "test":       "vitest run",
     "test:watch": "vitest"
   },
