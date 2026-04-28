@@ -19,6 +19,8 @@ import { type TicketType }     from "core/constants/ticket-type.ts";
 import { type TicketCategory, categoryLabel } from "core/constants/ticket-category.ts";
 import { type TicketPriority } from "core/constants/ticket-priority.ts";
 import { type TicketSeverity } from "core/constants/ticket-severity.ts";
+import { type TicketImpact }   from "core/constants/ticket-impact.ts";
+import { type TicketUrgency }  from "core/constants/ticket-urgency.ts";
 import { type TicketView }     from "core/schemas/tickets.ts";
 import { SYSTEM_DEFAULT_VIEW_CONFIG } from "core/schemas/ticket-view.ts";
 import { useTicketViews, type StoredView } from "@/hooks/useTicketViews";
@@ -33,6 +35,7 @@ import {
 } from "@/components/ui/tooltip";
 import TicketsTable          from "./TicketsTable";
 import TicketsFilters        from "./TicketsFilters";
+import TicketsFilterSidebar  from "@/components/TicketsFilterSidebar";
 import BulkActionsBar        from "@/components/BulkActionsBar";
 import TicketViewCustomizer  from "@/components/TicketViewCustomizer";
 import TicketViewBuilderDialog from "@/components/TicketViewBuilderDialog";
@@ -47,18 +50,24 @@ import {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface TicketFilters {
-  status?:             TicketStatus;
-  customStatusId?:     number;
-  ticketType?:         TicketType;
-  customTicketTypeId?: number;
-  category?:           TicketCategory;
-  priority?:           TicketPriority;
-  severity?:           TicketSeverity;
+  status?:             TicketStatus | TicketStatus[];
+  customStatusId?:     number | number[];
+  ticketType?:         TicketType | TicketType[];
+  customTicketTypeId?: number | number[];
+  category?:           TicketCategory | TicketCategory[];
+  priority?:           TicketPriority | TicketPriority[];
+  severity?:           TicketSeverity | TicketSeverity[];
+  impact?:             TicketImpact | TicketImpact[];
+  urgency?:            TicketUrgency | TicketUrgency[];
+  source?:             "email" | "portal" | "agent" | ("email" | "portal" | "agent")[];
   search?:             string;
   escalated?:          boolean;
   assignedToMe?:       boolean;
+  unassigned?:         boolean;
+  assignedToId?:       string | string[];
+  slaBreached?:        boolean;
   view?:               TicketView;
-  teamId?:             number | "none";
+  teamId?:             number | "none" | (number | "none")[];
 }
 
 interface QuickView {
@@ -78,58 +87,142 @@ const QUICK_VIEWS: QuickView[] = [
 
 // ── URL serialization ─────────────────────────────────────────────────────────
 
+function parseMulti<T>(raw: string | null): T | T[] | undefined {
+  if (!raw) return undefined;
+  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean) as T[];
+  if (parts.length === 0) return undefined;
+  return parts.length === 1 ? parts[0] : parts;
+}
+
+function parseIntCsv(raw: string | null): number | number[] | undefined {
+  if (!raw) return undefined;
+  const ns = raw.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
+  if (ns.length === 0) return undefined;
+  return ns.length === 1 ? ns[0] : ns;
+}
+
+function parseTeamCsv(raw: string | null): number | "none" | (number | "none")[] | undefined {
+  if (!raw) return undefined;
+  const items: (number | "none")[] = [];
+  for (const part of raw.split(",")) {
+    const t = part.trim();
+    if (!t) continue;
+    if (t === "none") items.push("none");
+    else {
+      const n = Number(t);
+      if (Number.isInteger(n) && n > 0) items.push(n);
+    }
+  }
+  if (items.length === 0) return undefined;
+  return items.length === 1 ? items[0] : items;
+}
+
 export function parseFiltersFromParams(params: URLSearchParams): TicketFilters {
   const f: TicketFilters = {};
-  if (params.has("status"))             f.status             = params.get("status") as TicketStatus;
-  if (params.has("customStatusId"))     f.customStatusId     = Number(params.get("customStatusId"));
-  if (params.has("ticketType"))         f.ticketType         = params.get("ticketType") as TicketType;
-  if (params.has("customTicketTypeId")) f.customTicketTypeId = Number(params.get("customTicketTypeId"));
-  if (params.has("category"))     f.category     = params.get("category") as TicketCategory;
-  if (params.has("priority"))     f.priority     = params.get("priority") as TicketPriority;
-  if (params.has("severity"))     f.severity     = params.get("severity") as TicketSeverity;
+  const status = parseMulti<TicketStatus>(params.get("status"));      if (status)  f.status     = status;
+  const cstat  = parseIntCsv(params.get("customStatusId"));            if (cstat !== undefined) f.customStatusId = cstat;
+  const tt     = parseMulti<TicketType>(params.get("ticketType"));     if (tt)      f.ticketType = tt;
+  const ctt    = parseIntCsv(params.get("customTicketTypeId"));        if (ctt !== undefined) f.customTicketTypeId = ctt;
+  const cat = parseMulti<TicketCategory>(params.get("category"));   if (cat)     f.category = cat;
+  const pri = parseMulti<TicketPriority>(params.get("priority"));   if (pri)     f.priority = pri;
+  const sev = parseMulti<TicketSeverity>(params.get("severity"));   if (sev)     f.severity = sev;
+  const imp = parseMulti<TicketImpact>(params.get("impact"));       if (imp)     f.impact   = imp;
+  const urg = parseMulti<TicketUrgency>(params.get("urgency"));     if (urg)     f.urgency  = urg;
+  const src = parseMulti<"email"|"portal"|"agent">(params.get("source")); if (src) f.source = src;
+  const assignees = parseMulti<string>(params.get("assignedToId")); if (assignees) f.assignedToId = assignees;
   if (params.has("search"))       f.search       = params.get("search")!;
   if (params.get("escalated")    === "true") f.escalated    = true;
   if (params.get("assignedToMe") === "true") f.assignedToMe = true;
+  if (params.get("unassigned")   === "true") f.unassigned   = true;
+  if (params.get("slaBreached")  === "true") f.slaBreached  = true;
   if (params.has("view"))         f.view         = params.get("view") as TicketView;
-  if (params.has("teamId")) {
-    const v = params.get("teamId")!;
-    f.teamId = v === "none" ? "none" : Number(v);
-  }
+  const team = parseTeamCsv(params.get("teamId")); if (team !== undefined) f.teamId = team;
   return f;
+}
+
+function serializeFilterValue(v: string | string[]): string {
+  return Array.isArray(v) ? v.join(",") : v;
+}
+
+function serializeNumberish(v: number | (number | "none") | (number | "none")[] | undefined): string | undefined {
+  if (v === undefined) return undefined;
+  if (Array.isArray(v)) return v.length > 0 ? v.map(String).join(",") : undefined;
+  return String(v);
 }
 
 function filtersToRecord(filters: TicketFilters, vid?: string | null): Record<string, string> {
   const p: Record<string, string> = {};
-  if (filters.status)               p.status             = filters.status;
-  if (filters.customStatusId)       p.customStatusId     = String(filters.customStatusId);
-  if (filters.ticketType)           p.ticketType         = filters.ticketType;
-  if (filters.customTicketTypeId)   p.customTicketTypeId = String(filters.customTicketTypeId);
-  if (filters.category)     p.category     = filters.category;
-  if (filters.priority)     p.priority     = filters.priority;
-  if (filters.severity)     p.severity     = filters.severity;
-  if (filters.search)       p.search       = filters.search;
-  if (filters.escalated)    p.escalated    = "true";
-  if (filters.assignedToMe) p.assignedToMe = "true";
-  if (filters.view)         p.view         = filters.view;
-  if (filters.teamId !== undefined) p.teamId = String(filters.teamId);
+  if (filters.status)             p.status             = serializeFilterValue(filters.status as string | string[]);
+  if (filters.customStatusId !== undefined) {
+    const v = serializeNumberish(filters.customStatusId);
+    if (v) p.customStatusId = v;
+  }
+  if (filters.ticketType)         p.ticketType         = serializeFilterValue(filters.ticketType as string | string[]);
+  if (filters.customTicketTypeId !== undefined) {
+    const v = serializeNumberish(filters.customTicketTypeId);
+    if (v) p.customTicketTypeId = v;
+  }
+  if (filters.category)     p.category     = serializeFilterValue(filters.category);
+  if (filters.priority)     p.priority     = serializeFilterValue(filters.priority);
+  if (filters.severity)     p.severity     = serializeFilterValue(filters.severity);
+  if (filters.impact)        p.impact        = serializeFilterValue(filters.impact);
+  if (filters.urgency)       p.urgency       = serializeFilterValue(filters.urgency);
+  if (filters.source)        p.source        = serializeFilterValue(filters.source as string | string[]);
+  if (filters.assignedToId)  p.assignedToId  = serializeFilterValue(filters.assignedToId as string | string[]);
+  if (filters.search)        p.search        = filters.search;
+  if (filters.escalated)     p.escalated     = "true";
+  if (filters.assignedToMe)  p.assignedToMe  = "true";
+  if (filters.unassigned)    p.unassigned    = "true";
+  if (filters.slaBreached)   p.slaBreached   = "true";
+  if (filters.view)          p.view          = filters.view;
+  if (filters.teamId !== undefined) {
+    const v = serializeNumberish(filters.teamId);
+    if (v) p.teamId = v;
+  }
   if (vid)                  p.vid          = vid;
   return p;
 }
 
-function describeFilters(filters: TicketFilters): string {
+function describeFilterValue(v: string | string[]): string {
+  return Array.isArray(v) ? v.join(", ") : v;
+}
+
+function describeFilters(
+  filters: TicketFilters,
+  teamLookup?: Map<number, string>,
+): string {
   if (filters.view === "overdue")           return "Overdue tickets — SLA deadline exceeded";
   if (filters.view === "at_risk")           return "At-risk tickets — within 2h of SLA breach";
   if (filters.view === "unassigned_urgent") return "Unassigned urgent tickets";
   if (filters.escalated)                   return "Escalated tickets";
   if (filters.assignedToMe)                return "My open tickets";
   const parts: string[] = [];
-  if (filters.status)     parts.push(`Status: ${filters.status}`);
-  if (filters.priority)   parts.push(`Priority: ${filters.priority}`);
-  if (filters.severity)   parts.push(`Severity: ${filters.severity}`);
-  if (filters.ticketType) parts.push(`Type: ${filters.ticketType}`);
-  if (filters.category)   parts.push(`Category: ${categoryLabel[filters.category] ?? filters.category}`);
+  if (filters.status)     parts.push(`Status: ${describeFilterValue(filters.status as string | string[])}`);
+  if (filters.priority)   parts.push(`Priority: ${describeFilterValue(filters.priority)}`);
+  if (filters.severity)   parts.push(`Severity: ${describeFilterValue(filters.severity)}`);
+  if (filters.impact)     parts.push(`Impact: ${describeFilterValue(filters.impact)}`);
+  if (filters.urgency)    parts.push(`Urgency: ${describeFilterValue(filters.urgency)}`);
+  if (filters.source)     parts.push(`Source: ${describeFilterValue(filters.source as string | string[])}`);
+  if (filters.ticketType) parts.push(`Type: ${describeFilterValue(filters.ticketType as string | string[])}`);
+  if (filters.category) {
+    const cat = filters.category;
+    const label = Array.isArray(cat)
+      ? cat.map((c) => categoryLabel[c] ?? c).join(", ")
+      : (categoryLabel[cat] ?? cat);
+    parts.push(`Category: ${label}`);
+  }
+  if (filters.unassigned) parts.push("Agent unassigned");
+  if (filters.slaBreached) parts.push("SLA breached");
   if (filters.search)     parts.push(`Search: "${filters.search}"`);
-  if (filters.teamId !== undefined) parts.push(`Team: ${filters.teamId}`);
+  if (filters.teamId !== undefined) {
+    const tIds = Array.isArray(filters.teamId) ? filters.teamId : [filters.teamId];
+    const labels = tIds.map((id) =>
+      id === "none"
+        ? "No team"
+        : (teamLookup?.get(id) ?? `Team ${id}`),
+    );
+    parts.push(`Team: ${labels.join(", ")}`);
+  }
   return parts.join(" · ");
 }
 
@@ -304,6 +397,18 @@ export default function TicketsPage() {
 
   const filters = useMemo(() => parseFiltersFromParams(searchParams), [searchParams]);
 
+  // Teams lookup — used to render `Team: <name>` instead of `Team: <id>`
+  const { data: teamsData } = useQuery({
+    queryKey: ["teams"],
+    queryFn:  () => axios.get<{ teams: { id: number; name: string }[] }>("/api/teams").then((r) => r.data.teams),
+    staleTime: 60_000,
+  });
+  const teamLookup = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const t of teamsData ?? []) m.set(t.id, t.name);
+    return m;
+  }, [teamsData]);
+
   const activeQuickView: QuickView["id"] | null = useMemo(() => {
     if (filters.view)      return filters.view as QuickView["id"];
     if (filters.escalated) return "escalated";
@@ -311,7 +416,7 @@ export default function TicketsPage() {
   }, [filters]);
 
   const hasActiveFilters = Object.keys(filters).length > 0 && !vid;
-  const filterDescription = describeFilters(filters);
+  const filterDescription = describeFilters(filters, teamLookup);
 
   function applyQuickView(viewId: QuickView["id"] | null) {
     if (!viewId) {
@@ -326,16 +431,22 @@ export default function TicketsPage() {
   function applyNamedView(v: StoredView) {
     const preset = v.config.filters ?? {};
     const record: Record<string, string> = { vid: String(v.id) };
-    if (preset.status)             record.status             = preset.status;
-    if (preset.customStatusId)     record.customStatusId     = String(preset.customStatusId);
-    if (preset.ticketType)         record.ticketType         = preset.ticketType;
-    if (preset.customTicketTypeId) record.customTicketTypeId = String(preset.customTicketTypeId);
-    if (preset.category)           record.category           = preset.category;
-    if (preset.priority)           record.priority           = preset.priority;
-    if (preset.severity)           record.severity           = preset.severity;
+    if (preset.status?.length)             record.status             = preset.status.join(",");
+    if (preset.customStatusId?.length)     record.customStatusId     = preset.customStatusId.join(",");
+    if (preset.ticketType?.length)         record.ticketType         = preset.ticketType.join(",");
+    if (preset.customTicketTypeId?.length) record.customTicketTypeId = preset.customTicketTypeId.join(",");
+    if (preset.category?.length)           record.category           = preset.category.join(",");
+    if (preset.priority?.length)           record.priority           = preset.priority.join(",");
+    if (preset.severity?.length)           record.severity           = preset.severity.join(",");
+    if (preset.impact?.length)             record.impact             = preset.impact.join(",");
+    if (preset.urgency?.length)            record.urgency            = preset.urgency.join(",");
+    if (preset.source?.length)             record.source             = preset.source.join(",");
+    if (preset.assignedToId?.length)       record.assignedToId       = preset.assignedToId.join(",");
+    if (preset.teamId?.length)             record.teamId             = preset.teamId.map(String).join(",");
     if (preset.escalated)          record.escalated          = "true";
     if (preset.assignedToMe)       record.assignedToMe       = "true";
-    if (preset.teamId !== undefined) record.teamId = String(preset.teamId);
+    if (preset.unassigned)         record.unassigned         = "true";
+    if (preset.slaBreached)        record.slaBreached        = "true";
     setSearchParams(record, { replace: true });
   }
 
@@ -358,7 +469,7 @@ export default function TicketsPage() {
   const shared   = viewList?.shared   ?? [];
 
   return (
-    <div>
+    <div className="lg:pr-[20rem]">
       {/* ── Page header ── */}
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-2xl font-semibold tracking-tight">Tickets</h1>
@@ -571,12 +682,21 @@ export default function TicketsPage() {
         <TicketsFilters filters={filters} onChange={handleFiltersChange} />
       )}
 
+      {/* Full-width table — sidebar reserves 20rem on the right via the page wrapper */}
       <TicketsTable
         key={vid ?? "default"}
         filters={filters}
         viewConfig={resolvedViewConfig}
         onSelectionChange={handleSelectionChange}
         selectionResetKey={selectionResetKey}
+      />
+
+      {/* Far-right floating filter rail — fixed to viewport edge */}
+      <TicketsFilterSidebar
+        filters={filters}
+        onChange={handleFiltersChange}
+        onClear={() => setSearchParams({}, { replace: true })}
+        onSaveAsView={() => openBuilder()}
       />
 
       <BulkActionsBar

@@ -24,6 +24,24 @@ interface Team {
 
 const ALL = "__all__";
 
+// When a saved view (or the multi-select sidebar) sets a multi-value filter,
+// the live filter bar can't display it as a single-select value — fall back
+// to "All" so the select isn't broken.
+function singleVal(v: string | string[] | undefined): string {
+  if (v == null || Array.isArray(v)) return ALL;
+  return v;
+}
+
+function singleId(v: number | number[] | undefined): number | undefined {
+  if (v == null) return undefined;
+  return Array.isArray(v) ? undefined : v;
+}
+
+function singleTeam(v: number | "none" | (number | "none")[] | undefined): string {
+  if (v == null || Array.isArray(v)) return ALL;
+  return String(v);
+}
+
 interface CustomStatusConfig {
   id: number;
   label: string;
@@ -82,9 +100,9 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
 
       <Select
         value={
-          filters.customTicketTypeId != null
-            ? `custom_${filters.customTicketTypeId}`
-            : filters.ticketType ?? ALL
+          singleId(filters.customTicketTypeId) != null
+            ? `custom_${singleId(filters.customTicketTypeId)}`
+            : singleVal(filters.ticketType as string | string[] | undefined)
         }
         onValueChange={(value) => {
           if (value === ALL) {
@@ -113,7 +131,11 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
       </Select>
 
       <Select
-        value={filters.customStatusId != null ? `custom_${filters.customStatusId}` : (filters.status ?? ALL)}
+        value={
+          singleId(filters.customStatusId) != null
+            ? `custom_${singleId(filters.customStatusId)}`
+            : singleVal(filters.status as string | string[] | undefined)
+        }
         onValueChange={(value) => {
           if (value === ALL) {
             onChange({ ...filters, status: undefined, customStatusId: undefined });
@@ -143,7 +165,7 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
       </Select>
 
       <Select
-        value={filters.priority ?? ALL}
+        value={singleVal(filters.priority)}
         onValueChange={(value) =>
           onChange({ ...filters, priority: value === ALL ? undefined : (value as TicketFilters["priority"]) })
         }
@@ -160,7 +182,7 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
       </Select>
 
       <Select
-        value={filters.severity ?? ALL}
+        value={singleVal(filters.severity)}
         onValueChange={(value) =>
           onChange({ ...filters, severity: value === ALL ? undefined : (value as TicketFilters["severity"]) })
         }
@@ -177,7 +199,7 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
       </Select>
 
       <Select
-        value={filters.category ?? ALL}
+        value={singleVal(filters.category)}
         onValueChange={(value) =>
           onChange({ ...filters, category: value === ALL ? undefined : (value as TicketFilters["category"]) })
         }
@@ -195,7 +217,7 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
 
       {teamsData && teamsData.length > 0 && (
         <Select
-          value={filters.teamId !== undefined ? String(filters.teamId) : ALL}
+          value={singleTeam(filters.teamId)}
           onValueChange={(value) =>
             onChange({
               ...filters,

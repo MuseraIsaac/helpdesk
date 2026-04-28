@@ -321,17 +321,26 @@ export default function TicketsTable({ filters, viewConfig, onSelectionChange, s
   const { data, isLoading, error } = useQuery({
     queryKey: ["tickets", apiSortKey, sortOrder, filters, pagination.pageIndex, pagination.pageSize],
     queryFn: async () => {
+      // Flatten any array filter values to comma-separated strings for the API
+      const flatFilters = Object.fromEntries(
+        Object.entries(filters).map(([k, v]) => [k, Array.isArray(v) ? v.join(",") : v]),
+      );
       const { data } = await axios.get<TicketsResponse>("/api/tickets", {
         params: {
           sortBy: apiSortKey,
           sortOrder,
-          ...filters,
+          ...flatFilters,
           page: pagination.pageIndex + 1,
           pageSize: pagination.pageSize,
         },
       });
       return data;
     },
+    // Avoid an immediate refetch when the user toggles a filter sidebar
+    // panel and React re-mounts a sibling — the same query key gets a hit
+    // for 15s before going stale.
+    staleTime: 15_000,
+    placeholderData: (prev) => prev,
   });
 
   const total = data?.total ?? 0;

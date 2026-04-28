@@ -8,7 +8,7 @@ import { upsertCustomer } from "../lib/upsert-customer";
 import { sendClassifyJob } from "../lib/classify-ticket";
 import { sendAutoResolveJob } from "../lib/auto-resolve-ticket";
 import { computeSlaDeadlines } from "../lib/sla";
-import { logAudit } from "../lib/audit";
+import { logAudit, logSystemAudit } from "../lib/audit";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { htmlToText } from "../lib/html-to-text";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
@@ -78,6 +78,11 @@ router.post("/register", async (req, res) => {
 
   // Create/link the CRM Customer record so agents see customer history
   await upsertCustomer(data.email, data.name);
+
+  void logSystemAudit(null, "customer.registered", {
+    entityType: "customer", entityId: 0, entityNumber: userId,
+    entityTitle: data.name, email: data.email, via: "portal",
+  });
 
   res.status(201).json({ message: "Account created. You can now sign in." });
 });

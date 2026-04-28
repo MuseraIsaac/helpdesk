@@ -56,22 +56,40 @@ const columnEntrySchema = z.object({
   visible: z.boolean(),
 });
 
+// Accept either a single value or an array; normalize to an array.
+// Allows legacy saved views (single string/number) to keep working.
+function arrayish<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess(
+    (v) => (v == null ? undefined : Array.isArray(v) ? v : [v]),
+    z.array(schema).optional(),
+  );
+}
+
 /**
  * Optional filter preset embedded in a saved view.
  * When the user activates a saved view that has filters, those filters are
  * applied as the initial URL params (user can still refine from there).
  */
 const savedViewFiltersSchema = z.object({
-  status:             z.string().optional(),
-  customStatusId:     z.number().int().positive().optional(),
-  ticketType:         z.string().optional(),
-  customTicketTypeId: z.number().int().positive().optional(),
-  category:           z.string().optional(),
-  priority:           z.string().optional(),
-  severity:           z.string().optional(),
+  // Multi-value fields — accept legacy single values via arrayish() preprocess
+  status:             arrayish(z.string()),
+  customStatusId:     arrayish(z.number().int().positive()),
+  ticketType:         arrayish(z.string()),
+  customTicketTypeId: arrayish(z.number().int().positive()),
+  assignedToId:       arrayish(z.string()),
+  teamId:             arrayish(z.union([z.number().int().positive(), z.literal("none")])),
+  // Existing array filters
+  category:           z.array(z.string()).optional(),
+  priority:           z.array(z.string()).optional(),
+  severity:           z.array(z.string()).optional(),
+  impact:             z.array(z.string()).optional(),
+  urgency:            z.array(z.string()).optional(),
+  source:             z.array(z.string()).optional(),
+  // Boolean toggles
   escalated:          z.boolean().optional(),
   assignedToMe:       z.boolean().optional(),
-  teamId:             z.union([z.number().int().positive(), z.literal("none")]).optional(),
+  unassigned:         z.boolean().optional(),
+  slaBreached:        z.boolean().optional(),
 }).optional();
 
 export type SavedViewFilters = NonNullable<z.infer<typeof savedViewFiltersSchema>>;

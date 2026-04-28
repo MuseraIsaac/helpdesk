@@ -517,7 +517,28 @@ const READONLY_PERMISSIONS: Permission[] = [
   "reports.view",
 ];
 
-// ── Role → permission set map ─────────────────────────────────────────────────
+// ── Built-in role defaults ────────────────────────────────────────────────────
+//
+// These are the *seeds* for the four built-in roles. At runtime the server
+// loads role definitions from the `role` DB table — so admins can rename
+// roles, change their permission sets, or add new custom roles via the
+// settings UI. The `ROLE_PERMISSIONS` map below is a mutable in-memory
+// cache populated from the DB on boot and refreshed whenever the role
+// editor saves.
+//
+// If the runtime cache is empty (e.g. during server start before the first
+// load completes, or in unit tests that don't touch the DB) `can()` falls
+// back to the built-in defaults so middleware never silently denies access.
+
+export const BUILTIN_ROLE_PERMISSIONS: Record<string, Permission[]> = {
+  admin:      ADMIN_PERMISSIONS,
+  supervisor: SUPERVISOR_PERMISSIONS,
+  agent:      AGENT_PERMISSIONS,
+  readonly:   READONLY_PERMISSIONS,
+  customer:   [],
+};
+
+// ── Mutable role → permission set map ─────────────────────────────────────────
 
 export const ROLE_PERMISSIONS: Record<string, Set<Permission>> = {
   admin:      new Set(ADMIN_PERMISSIONS),
@@ -532,9 +553,35 @@ export const ROLE_PERMISSIONS: Record<string, Set<Permission>> = {
   customer:   new Set<Permission>(),
 };
 
+/**
+ * Replace the runtime role cache with a fresh map.
+ * Called by `server/src/lib/role-cache.ts` after loading from the DB and
+ * after any admin save in the role editor.
+ *
+ * Custom roles (not in the built-in list) are added; built-in roles have
+ * their permission sets replaced. Roles that disappear from the DB are
+ * removed from the cache.
+ */
+export function setRolePermissions(roles: Record<string, Permission[]>): void {
+  for (const key of Object.keys(ROLE_PERMISSIONS)) {
+    if (!(key in roles) && !(key in BUILTIN_ROLE_PERMISSIONS)) {
+      delete ROLE_PERMISSIONS[key];
+    }
+  }
+  for (const [key, perms] of Object.entries(roles)) {
+    ROLE_PERMISSIONS[key] = new Set(perms);
+  }
+}
+
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 /** Returns true if the given role has the specified permission. */
 export function can(role: string, permission: Permission): boolean {
   return ROLE_PERMISSIONS[role]?.has(permission) ?? false;
+}
+
+/** All permission keys this role grants, in catalog order. */
+export function permissionsFor(role: string): Permission[] {
+  const set = ROLE_PERMISSIONS[role];
+  return set ? Array.from(set) : [];
 }

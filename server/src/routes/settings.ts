@@ -8,6 +8,7 @@ import {
   settingsSections,
 } from "core/schemas/settings.ts";
 import { getSection, setSection, getAllSettings, redactSensitive } from "../lib/settings";
+import { invalidateAuditSettingsCache, logSystemAudit } from "../lib/audit";
 
 const router = Router();
 
@@ -37,6 +38,12 @@ router.get("/branding/public", async (_req, res) => {
       agentLoginHighlight:  d.agentLoginHighlight  ?? "Deliver better.",
       agentLoginTagline:    d.agentLoginTagline    ?? "The modern helpdesk built for IT teams who want to move fast without breaking things.",
       agentLoginBadge:      d.agentLoginBadge      ?? "AI-Powered Service Management",
+      // Service desk contacts — exposed publicly so the customer portal can render them
+      serviceDeskEmail:     d.serviceDeskEmail     ?? "",
+      serviceDeskPhone:     d.serviceDeskPhone     ?? "",
+      serviceDeskHours:     d.serviceDeskHours     ?? "",
+      emergencyContact:     d.emergencyContact     ?? "",
+      serviceDeskLocation:  d.serviceDeskLocation  ?? "",
     },
   });
 });
@@ -148,6 +155,14 @@ router.put("/:section", requireAuth, requireAdmin, async (req, res) => {
   }
 
   const saved = await setSection(section, result.data as never, req.user.id);
+
+  // Bust the in-memory audit settings cache so logAudit picks up the change
+  // within the same request cycle, not after the 60-second TTL expires.
+  if (section === "audit") invalidateAuditSettingsCache();
+
+  // Log the settings change (fire-and-forget; must come after cache bust above)
+  void logSystemAudit(req.user.id, "settings.updated", { section });
+
   const safe = redactSensitive(section, saved as Record<string, unknown>);
   res.json({ section, data: safe });
 });

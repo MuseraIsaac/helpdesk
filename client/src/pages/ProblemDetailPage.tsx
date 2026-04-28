@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import RichTextEditor from "@/components/RichTextEditor";
 import RichTextRenderer from "@/components/RichTextRenderer";
 import SearchableSelect from "@/components/SearchableSelect";
+import LinkedChangeSelect from "@/components/LinkedChangeSelect";
 import {
   Select,
   SelectContent,
@@ -1000,12 +1001,10 @@ export default function ProblemDetailPage() {
                 </div>
                 <div className="space-y-1.5">
                   <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Linked Change Ref.</span>
-                  <Input
-                    defaultValue={problem.linkedChangeRef ?? ""}
-                    placeholder="e.g. CRQ0042"
-                    className="h-9 text-sm font-mono"
+                  <LinkedChangeSelect
+                    value={problem.linkedChangeRef}
+                    onChange={(v) => patchMutation.mutate({ linkedChangeRef: v })}
                     disabled={isTerminal}
-                    onBlur={(e) => patchMutation.mutate({ linkedChangeRef: e.target.value.trim() || null })}
                   />
                 </div>
               </div>

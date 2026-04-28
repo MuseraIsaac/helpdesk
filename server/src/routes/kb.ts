@@ -14,6 +14,7 @@ import {
   kbWorkflowActionSchema,
 } from "core/schemas/kb.ts";
 import prisma from "../db";
+import { logSystemAudit } from "../lib/audit";
 
 const router = Router();
 
@@ -426,6 +427,9 @@ router.post("/articles", async (req, res) => {
   // Save initial version if publishing immediately
   if (data.status === "published") {
     saveVersion(article.id, article.title, article.body, req.user.id, "Initial publish").catch(() => {});
+    void logSystemAudit(req.user.id, "kb.article_published", { articleId: article.id, title: article.title });
+  } else {
+    void logSystemAudit(req.user.id, "kb.article_created", { articleId: article.id, title: article.title, status: article.status });
   }
 
   res.status(201).json({ article });
@@ -510,6 +514,7 @@ router.post("/articles/:id/submit-review", async (req, res) => {
     data: { reviewStatus: "in_review" },
     include: articleInclude,
   });
+  void logSystemAudit(req.user.id, "kb.article_submitted_review", { articleId: id, title: existing.title });
   res.json({ article });
 });
 
@@ -536,6 +541,7 @@ router.post("/articles/:id/approve", async (req, res) => {
     },
     include: articleInclude,
   });
+  void logSystemAudit(req.user.id, "kb.article_approved", { articleId: id, title: existing.title });
   res.json({ article });
 });
 
@@ -568,6 +574,7 @@ router.post("/articles/:id/publish", async (req, res) => {
     saveVersion(article.id, article.title, article.body, req.user.id, data.changeNote ?? "Published").catch(() => {});
   }
 
+  void logSystemAudit(req.user.id, "kb.article_published", { articleId: id, title: article.title });
   res.json({ article });
 });
 
@@ -584,6 +591,7 @@ router.post("/articles/:id/unpublish", async (req, res) => {
     data: { status: "draft", reviewStatus: "draft" },
     include: articleInclude,
   });
+  void logSystemAudit(req.user.id, "kb.article_archived", { articleId: id, title: existing.title, from: "published", to: "draft" });
   res.json({ article });
 });
 
@@ -600,6 +608,7 @@ router.post("/articles/:id/archive", async (req, res) => {
     data: { status: "draft", reviewStatus: "archived" },
     include: articleInclude,
   });
+  void logSystemAudit(req.user.id, "kb.article_archived", { articleId: id, title: existing.title, reviewStatus: "archived" });
   res.json({ article });
 });
 

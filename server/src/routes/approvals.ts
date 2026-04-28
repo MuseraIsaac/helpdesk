@@ -16,6 +16,7 @@ import {
 import { fireApprovalHook } from "../lib/approval-hooks";
 import { getSection } from "../lib/settings";
 import { fireChangeEvent, fireRequestEvent } from "../lib/event-bus";
+import { logSystemAudit } from "../lib/audit";
 import prisma from "../db";
 import Sentry from "../lib/sentry";
 
@@ -87,6 +88,12 @@ router.post(
       where: { id: result.approvalRequest.id },
       select: REQUEST_SELECT,
     });
+
+    void logSystemAudit(req.user.id, "approval.requested", {
+      entityType: "approval", entityId: result.approvalRequest.id, entityNumber: `APR-${result.approvalRequest.id}`,
+      subjectType: input.subjectType, subjectId: input.subjectId, title: input.title,
+    });
+
     res.status(201).json({ approvalRequest: full });
   }
 );
@@ -315,6 +322,18 @@ router.post(
       where: { id },
       select: REQUEST_SELECT,
     });
+
+    // Log final decision to global audit log
+    const finalStatuses2 = ["approved", "rejected"] as const;
+    if (approvalMeta && finalStatuses2.includes(result.requestStatus as (typeof finalStatuses2)[number])) {
+      const auditAction = result.requestStatus === "approved" ? "approval.approved" : "approval.rejected" as const;
+      void logSystemAudit(req.user.id, auditAction, {
+        entityType: "approval", entityId: id, entityNumber: `APR-${id}`,
+        subjectType: approvalMeta.subjectType, subjectId: approvalMeta.subjectId,
+        decidedBy: req.user.id, comment: input.comment ?? null,
+      });
+    }
+
     res.json({ approvalRequest: updated, requestStatus: result.requestStatus });
   }
 );

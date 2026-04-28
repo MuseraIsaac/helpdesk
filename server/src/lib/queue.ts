@@ -10,10 +10,25 @@ import { registerRefreshMatViewsWorker } from "./refresh-materialized-views";
 import { registerDiscoverySyncWorker } from "./run-discovery-sync";
 import { registerCheckDiscoverySchedulesWorker } from "./check-discovery-schedules";
 import { registerPurgeTrashWorker } from "./purge-trash";
+import { registerPurgeAuditLogWorker } from "./purge-audit-log";
 import { registerTimeSupervisorWorker } from "./check-time-supervisor";
 
+// pg-boss runs its own pg pool (separate from Prisma's). Same connection
+// hardening applies — TCP keepalive + idle recycling + a connection cap so
+// the worker pool doesn't fight Prisma for the server's connection budget.
+//
+// `monitorStateIntervalMinutes` keeps a periodic query on each connection so
+// idle workers stay warm; `maintenanceIntervalMinutes` is pg-boss's own
+// archival job which also exercises the pool.
 const boss = new PgBoss({
   connectionString: process.env.DATABASE_URL!,
+  max:                          5,        // cap pg-boss connections
+  application_name:             "pg-boss",
+  monitorIntervalSeconds:       60,        // periodic activity keeps sockets warm
+  // Mirror Prisma adapter: the remote DB has ~140 ms RTT and occasional
+  // slow handshakes, so a 30 s connect timeout prevents boot from aborting
+  // when the SASL handshake takes a few seconds.
+  connectionTimeoutMillis:      30_000,
 });
 
 boss.on("error", (error) => {
@@ -41,6 +56,7 @@ export async function startQueue(): Promise<void> {
     boss.createQueue("run-discovery-sync",        { retryLimit: 2, retryDelay: 30, retryBackoff: true }),
     boss.createQueue("check-discovery-schedules"),
     boss.createQueue("purge-trash"),
+    boss.createQueue("purge-audit-log"),
     boss.createQueue("check-time-supervisor"),
   ]);
 
@@ -54,6 +70,7 @@ export async function startQueue(): Promise<void> {
   await registerDiscoverySyncWorker(boss);
   await registerCheckDiscoverySchedulesWorker(boss);
   await registerPurgeTrashWorker(boss);
+  await registerPurgeAuditLogWorker(boss);
   await registerTimeSupervisorWorker(boss);
 
   console.log("Job queue started");

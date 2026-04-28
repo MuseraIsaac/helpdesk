@@ -92,6 +92,8 @@ export const SETTINGS_CONTENT_INDEX: Record<SettingsSection, string> = {
     allow agent self-assignment assign themselves
     require email verification account verify login sign in
     password role permissions accounts management
+    custom role create rename rbac access control authorization
+    role editor permission matrix supervisor admin readonly
   `,
 
   appearance: `

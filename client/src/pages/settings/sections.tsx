@@ -434,6 +434,65 @@ export function BrandingSection() {
         </SettingsField>
       </SettingsGroup>
 
+      <SettingsGroup title="Service Desk Contacts">
+        <SettingsField
+          label="Service desk email"
+          description="Primary support address shown on the customer portal homepage. Leave blank to hide."
+          htmlFor="serviceDeskEmail"
+        >
+          <Input
+            id="serviceDeskEmail"
+            type="email"
+            placeholder="support@yourcompany.com"
+            {...register("serviceDeskEmail")}
+          />
+        </SettingsField>
+        <SettingsField
+          label="Service desk phone"
+          description="Primary support phone number. Free-form text — include country code if applicable."
+          htmlFor="serviceDeskPhone"
+        >
+          <Input
+            id="serviceDeskPhone"
+            placeholder="+1 (800) 123-4567"
+            {...register("serviceDeskPhone")}
+          />
+        </SettingsField>
+        <SettingsField
+          label="Service hours"
+          description="Operating hours and availability shown alongside the contact details."
+          htmlFor="serviceDeskHours"
+        >
+          <Input
+            id="serviceDeskHours"
+            placeholder="Mon–Fri, 9:00 AM – 6:00 PM EST"
+            {...register("serviceDeskHours")}
+          />
+        </SettingsField>
+        <SettingsField
+          label="Emergency / after-hours contact"
+          description="Optional. A separate channel for urgent issues outside business hours."
+          htmlFor="emergencyContact"
+        >
+          <Input
+            id="emergencyContact"
+            placeholder="+1 (800) 999-0000  or  oncall@yourcompany.com"
+            {...register("emergencyContact")}
+          />
+        </SettingsField>
+        <SettingsField
+          label="Office location"
+          description="Optional. Physical office or HQ address for in-person walk-ins."
+          htmlFor="serviceDeskLocation"
+        >
+          <Input
+            id="serviceDeskLocation"
+            placeholder="100 Main Street, San Francisco, CA"
+            {...register("serviceDeskLocation")}
+          />
+        </SettingsField>
+      </SettingsGroup>
+
       <SettingsGroup title="Customer Portal">
         <SettingsField
           label="Portal accent color"
@@ -1394,11 +1453,17 @@ export function UsersRolesSection() {
           <Switch checked={field.value} onCheckedChange={field.onChange} />
         )} />
       </SettingsSwitchRow>
-      <div className="rounded-lg border bg-muted/30 px-4 py-3">
+      <div className="rounded-lg border bg-muted/30 px-4 py-3 space-y-2">
         <p className="text-sm text-muted-foreground">
           Manage individual users in{" "}
           <Link to="/users" className="text-primary underline underline-offset-2">
-            Users →
+            Users &rarr;
+          </Link>
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Define what each role can do, rename built-in roles, or add new custom roles in{" "}
+          <Link to="/admin/roles" className="text-primary underline underline-offset-2">
+            Roles &amp; Permissions &rarr;
           </Link>
         </p>
       </div>
@@ -3691,12 +3756,52 @@ export function AuditSection() {
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
+        <SettingsSwitchRow label="Incident events" description="Incident creation, status changes, major declarations, and updates.">
+          <Controller name="captureIncidentEvents" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow label="Problem events" description="Problem creation, root cause updates, known errors, and PIR completions.">
+          <Controller name="captureProblemEvents" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow label="Change events" description="Change requests, approvals, schedules, implementations, and rollbacks.">
+          <Controller name="captureChangeEvents" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow label="Service request events" description="Service request submissions, approvals, fulfillment, and completion.">
+          <Controller name="captureRequestEvents" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow label="Asset events" description="Asset lifecycle, assignment, and retirement.">
+          <Controller name="captureAssetEvents" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow label="Approval events" description="Approval requests, decisions, and expirations.">
+          <Controller name="captureApprovalEvents" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow label="Team events" description="Team creation, updates, and membership changes.">
+          <Controller name="captureTeamEvents" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        <SettingsSwitchRow label="Customer events" description="Portal registrations, customer logins, and profile changes.">
+          <Controller name="captureCustomerEvents" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
         <SettingsSwitchRow label="Settings changes" description="Any modification to system settings.">
           <Controller name="captureSettingsChanges" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
-        <SettingsSwitchRow label="User management" description="User creation, deletion, role changes.">
+        <SettingsSwitchRow label="User &amp; role management" description="User creation/deletion, role changes, role definition edits and permission changes.">
           <Controller name="captureUserManagement" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />

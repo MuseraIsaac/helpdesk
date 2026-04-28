@@ -85,25 +85,99 @@ const boolParam = z
   .transform((v) => v === "true")
   .optional();
 
+// Accept a comma-separated string, a repeated param (array), or a single value;
+// split and validate each element against the allowed enum values.
+function csvEnum<T extends readonly [string, ...string[]]>(vals: T) {
+  return z.preprocess((v) => {
+    if (v == null) return undefined;
+    const arr = Array.isArray(v)
+      ? v.flatMap((s) => String(s).split(","))
+      : typeof v === "string"
+      ? v.split(",")
+      : [String(v)];
+    const filtered = arr.map((s) => s.trim()).filter(Boolean);
+    return filtered.length ? filtered : undefined;
+  }, z.array(z.enum(vals as unknown as [string, ...string[]])).optional());
+}
+
+// Comma-separated list of arbitrary strings (used for IDs / mixed values)
+const csvStrings = z.preprocess((v) => {
+  if (v == null) return undefined;
+  const arr = Array.isArray(v)
+    ? v.flatMap((s) => String(s).split(","))
+    : typeof v === "string"
+    ? v.split(",")
+    : [String(v)];
+  const filtered = arr.map((s) => s.trim()).filter(Boolean);
+  return filtered.length ? filtered : undefined;
+}, z.array(z.string()).optional());
+
+// Comma-separated list of positive integers
+const csvIntIds = z.preprocess((v) => {
+  if (v == null) return undefined;
+  const arr = Array.isArray(v)
+    ? v.flatMap((s) => String(s).split(","))
+    : typeof v === "string"
+    ? v.split(",")
+    : [String(v)];
+  const ids = arr.map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
+  return ids.length ? ids : undefined;
+}, z.array(z.number().int().positive()).optional());
+
+// Comma-separated list of team IDs OR the literal "none" (each entry can be either)
+const csvTeamIds = z.preprocess((v) => {
+  if (v == null) return undefined;
+  const arr = Array.isArray(v)
+    ? v.flatMap((s) => String(s).split(","))
+    : typeof v === "string"
+    ? v.split(",")
+    : [String(v)];
+  const out: (number | "none")[] = [];
+  for (const raw of arr) {
+    const t = raw.trim();
+    if (!t) continue;
+    if (t === "none") out.push("none");
+    else {
+      const n = Number(t);
+      if (Number.isInteger(n) && n > 0) out.push(n);
+    }
+  }
+  return out.length ? out : undefined;
+}, z.array(z.union([z.number().int().positive(), z.literal("none")])).optional());
+
 export const ticketListQuerySchema = z.object({
   sortBy: z.enum(sortableColumns).default("createdAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
-  status: z.enum(agentTicketStatuses).optional(),
-  ticketType: z.enum(ticketTypes).optional(),
-  category: z.enum(ticketCategories).optional(),
-  priority: z.enum(ticketPriorities).optional(),
-  severity: z.enum(ticketSeverities).optional(),
+  /** Multi-value: built-in agent statuses */
+  status: csvEnum(agentTicketStatuses),
+  /** Multi-value: built-in ticket types */
+  ticketType: csvEnum(ticketTypes),
+  category: csvEnum(ticketCategories),
+  priority: csvEnum(ticketPriorities),
+  severity: csvEnum(ticketSeverities),
   search: z.string().optional(),
   /** true = only escalated tickets */
   escalated: boolParam,
   /** true = only tickets assigned to the authenticated user */
   assignedToMe: boolParam,
-  /** Filter by team ID; "none" matches tickets with no team */
-  teamId: z.union([z.coerce.number().int().positive(), z.literal("none")]).optional(),
-  /** Filter by custom status ID */
-  customStatusId: z.coerce.number().int().positive().optional(),
-  /** Filter by custom ticket type ID */
-  customTicketTypeId: z.coerce.number().int().positive().optional(),
+  /** Multi-value: team IDs; "none" matches tickets with no team */
+  teamId: csvTeamIds,
+  /** Multi-value: custom status IDs */
+  customStatusId: csvIntIds,
+  /** Multi-value: custom ticket type IDs */
+  customTicketTypeId: csvIntIds,
+  /** Filter by impact level */
+  impact: csvEnum(ticketImpacts),
+  /** Filter by urgency level */
+  urgency: csvEnum(ticketUrgencies),
+  /** Filter by intake channel */
+  source: csvEnum(["email", "portal", "agent"] as const),
+  /** Multi-value: filter by specific assigned agents (user IDs) */
+  assignedToId: csvStrings,
+  /** true = only tickets with no agent assigned */
+  unassigned: boolParam,
+  /** true = only SLA-breached tickets; false = only non-breached */
+  slaBreached: boolParam,
   /** Predefined compound views — overrides some individual filters */
   view: z.enum(ticketViews).optional(),
   page: z.coerce.number().int().min(1).default(1),

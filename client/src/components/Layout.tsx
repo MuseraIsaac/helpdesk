@@ -19,6 +19,16 @@ import { Settings, ChevronLeft, ChevronRight, Menu, X, Search, LogOut } from "lu
 
 // ── Sidebar collapse — persisted to localStorage ──────────────────────────────
 
+/**
+ * Routes that benefit from edge-to-edge layout — large data tables and grids
+ * where the default 1200px container leaves visible empty gutters.
+ */
+function isFullWidthRoute(pathname: string): boolean {
+  // /tickets list view (but NOT /tickets/123 detail or /tickets/new)
+  if (pathname === "/tickets" || pathname === "/tickets/") return true;
+  return false;
+}
+
 function useSidebarCollapsed() {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem("sidebar-collapsed") === "true"; }
@@ -416,7 +426,14 @@ export default function Layout() {
           <ProfileMenu onSignOut={handleSignOut} />
         </header>
 
-        <main className="flex-1 px-6 py-8 max-w-[1200px] w-full mx-auto animate-in-page">
+        <main
+          className={[
+            "flex-1 px-6 py-8 w-full mx-auto animate-in-page",
+            // Pages that need every available pixel (large data tables, kanban boards, etc.)
+            // opt out of the default centered max-width container.
+            isFullWidthRoute(pathname) ? "" : "max-w-[1200px]",
+          ].join(" ")}
+        >
           <Outlet />
         </main>
       </div>

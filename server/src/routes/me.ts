@@ -9,6 +9,7 @@ import {
 } from "core/schemas/preferences.ts";
 import prisma from "../db";
 import { getSection } from "../lib/settings";
+import { permissionsForRole } from "../lib/role-cache";
 
 const router = Router();
 
@@ -49,7 +50,7 @@ router.get("/ticket-scope", requireAuth, async (req, res) => {
   });
 });
 
-// GET /api/me — current user + their preferences
+// GET /api/me — current user + their preferences + effective permissions
 router.get("/", requireAuth, async (req, res) => {
   const user = await prisma.user.findUniqueOrThrow({
     where: { id: req.user.id },
@@ -60,9 +61,12 @@ router.get("/", requireAuth, async (req, res) => {
       role: true,
       createdAt: true,
       preference: true,
+      roleRef: { select: { name: true, color: true } },
     },
   });
-  res.json({ user });
+  // Effective permissions reflect any admin edits to the user's role.
+  const permissions = await permissionsForRole(user.role);
+  res.json({ user: { ...user, permissions } });
 });
 
 // PATCH /api/me/profile — update name + profile extras

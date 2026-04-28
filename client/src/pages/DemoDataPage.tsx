@@ -361,12 +361,13 @@ function DeleteBatchDialog({
   onConfirmed: (id: number, force: boolean) => void;
 }) {
   const [confirmText, setConfirmText] = useState("");
-  const { data: preview, isLoading, isError } = useQuery({
+  const { data: preview, isLoading, isError, error: previewError } = useQuery({
     queryKey:  ["demo-preview", batchId],
     queryFn:   () => api.previewBatch(batchId!),
     enabled:   batchId !== null,
     staleTime: 0,
     gcTime:    0,
+    retry:     1,
   });
 
   const open  = batchId !== null;
@@ -401,8 +402,18 @@ function DeleteBatchDialog({
             </div>
           )}
           {isError && (
-            <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive">
-              Failed to load live counts. You can still proceed with deletion — the system will remove all tracked IDs.
+            <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 space-y-1.5">
+              <p className="text-sm font-semibold text-destructive">Failed to load live record counts</p>
+              {previewError && (
+                <p className="text-xs text-destructive/80 font-mono break-all">
+                  {(previewError as { response?: { data?: { error?: string } } })?.response?.data?.error
+                    ?? (previewError as Error)?.message
+                    ?? "Unknown error — check server logs for details."}
+                </p>
+              )}
+              <p className="text-xs text-destructive/70">
+                You can still proceed — the deletion will remove all tracked IDs regardless.
+              </p>
             </div>
           )}
 

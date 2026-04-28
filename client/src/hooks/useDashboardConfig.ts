@@ -45,6 +45,8 @@ export function useDashboardConfig() {
   const { data, isLoading } = useQuery<DashboardsResponse>({
     queryKey: DASHBOARDS_QUERY_KEY,
     queryFn: async () => (await axios.get("/api/dashboards")).data,
+    // Dashboard layouts change infrequently — avoid refetch storms on every mount/focus
+    staleTime: 10 * 60_000,
   });
 
   const allDashboards = useMemo<StoredDashboard[]>(() => {

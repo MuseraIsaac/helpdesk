@@ -31,6 +31,19 @@ const FEATURES = [
   { icon: BarChart2, text: "Real-time analytics and customisable dashboards" },
 ] as const;
 
+// ── Google "G" mark — multi-color official logo ──────────────────────────────
+
+function GoogleIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden>
+      <path fill="#4285F4" d="M22.5 12.3c0-.8-.1-1.5-.2-2.2H12v4.3h5.9c-.2 1.4-1 2.5-2.1 3.3v2.7h3.4c2-1.8 3.1-4.6 3.1-8z" />
+      <path fill="#34A853" d="M12 23c2.8 0 5.2-.9 6.9-2.5l-3.4-2.7c-.9.6-2.1 1-3.5 1-2.7 0-5-1.8-5.8-4.3H2.6v2.7C4.3 20.7 7.9 23 12 23z" />
+      <path fill="#FBBC05" d="M6.2 14.5c-.2-.6-.3-1.3-.3-1.9s.1-1.3.3-1.9V8H2.6C1.9 9.4 1.5 11 1.5 12.6s.4 3.2 1.1 4.6l3.6-2.7z" />
+      <path fill="#EA4335" d="M12 6.4c1.5 0 2.9.5 3.9 1.5l3-2.9C17.2 3.4 14.8 2.5 12 2.5 7.9 2.5 4.3 4.8 2.6 8l3.6 2.7C7 8.2 9.3 6.4 12 6.4z" />
+    </svg>
+  );
+}
+
 // ── Decorative SVG grid ───────────────────────────────────────────────────────
 
 function GridPattern() {
@@ -116,6 +129,18 @@ export default function LoginPage() {
     if (error) { setServerError(error.message ?? "Login failed"); return; }
     navigate("/", { replace: true });
   };
+
+  async function handleGoogleSignIn() {
+    setServerError("");
+    // Anchor the callback to the SPA origin so the OAuth round-trip lands on
+    // the React client (e.g. http://localhost:5173/) and not on the Express
+    // API host (which would 404).
+    const { error } = await signIn.social({
+      provider:    "google",
+      callbackURL: `${window.location.origin}/`,
+    });
+    if (error) setServerError(error.message ?? "Google sign-in failed");
+  }
 
   return (
     <div className="min-h-screen flex" style={panelVars}>
@@ -224,6 +249,31 @@ export default function LoginPage() {
               <span>{serverError}</span>
             </div>
           )}
+
+          {/* Google sign-in */}
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            className="w-full h-11 font-medium gap-2 mb-4"
+            onClick={handleGoogleSignIn}
+            disabled={isSubmitting}
+          >
+            <GoogleIcon />
+            Continue with Google
+          </Button>
+
+          {/* Divider */}
+          <div className="relative my-5">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-border/60" />
+            </div>
+            <div className="relative flex justify-center">
+              <span className="bg-background px-3 text-[11px] uppercase tracking-widest text-muted-foreground/70">
+                or sign in with email
+              </span>
+            </div>
+          </div>
 
           {/* Form */}
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">

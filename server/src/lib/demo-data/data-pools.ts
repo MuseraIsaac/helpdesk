@@ -295,19 +295,467 @@ export const MACRO_POOL = [
   { title: "Duplicate Ticket — Closing",           body: "Hi {{customer_name}},\n\nWe've found that your ticket (#{{ticket_id}}) is a duplicate of an existing open ticket.\n\nWe're closing this ticket and your issue is being tracked under #[ORIGINAL TICKET]. You will receive all updates there.\n\nApologies for any confusion.\n\n{{agent_name}}" },
 ];
 
-// ── Catalog items ─────────────────────────────────────────────────────────────
+// ── Catalog categories ────────────────────────────────────────────────────────
 
-export const CATALOG_ITEM_POOL = [
-  { name: "New Employee Onboarding",       description: "Complete IT setup for new hires: laptop, accounts, software, and access grants.",          teamIdx: 0 },
-  { name: "VPN Access Request",            description: "Request remote access VPN credentials for working from home or travelling.",                  teamIdx: 2 },
-  { name: "Software Licence Request",      description: "Request a licence for approved business software. Include name and business justification.",  teamIdx: 0 },
-  { name: "Hardware Equipment Request",    description: "Request new or replacement hardware: laptops, monitors, keyboards, docking stations.",        teamIdx: 1 },
-  { name: "Application Access Request",    description: "Request access to an internal or third-party application with role assignment.",              teamIdx: 2 },
-  { name: "Cloud Resource Provisioning",   description: "Request AWS/Azure cloud resources (EC2, S3, RDS, VMs) for project or operational needs.",     teamIdx: 3 },
-  { name: "Employee Exit IT Checklist",    description: "IT offboarding tasks: account suspension, device recovery, and licence revocation.",          teamIdx: 0 },
-  { name: "Security Awareness Training",   description: "Enrol in mandatory cybersecurity awareness training modules.",                                teamIdx: 2 },
-  { name: "Office Relocation IT Support",  description: "Schedule IT support for office move: network, phones, AV equipment setup.",                  teamIdx: 1 },
-  { name: "Database Access Request",       description: "Request read or read-write access to a named database schema with DBA review.",               teamIdx: 4 },
+interface CatalogCategorySpec {
+  slug: string;
+  name: string;
+  description: string;
+}
+
+export const CATALOG_CATEGORY_POOL: CatalogCategorySpec[] = [
+  { slug: "hardware",        name: "Hardware",         description: "Laptops, monitors, peripherals, and other physical equipment requests." },
+  { slug: "software",        name: "Software",         description: "Application licences, software installations, and developer tools." },
+  { slug: "access",          name: "Access & Identity", description: "VPN, SSO, application permissions, role assignments, and MFA." },
+  { slug: "cloud",           name: "Cloud & Infrastructure", description: "AWS, Azure, GCP resource provisioning and database access." },
+  { slug: "hr-onboarding",   name: "Employee Lifecycle", description: "Onboarding, offboarding, role changes, and HR-related IT tasks." },
+  { slug: "facilities",      name: "Facilities & AV",  description: "Meeting room AV, printers, telephony, and office IT support." },
+  { slug: "security",        name: "Security & Compliance", description: "Phishing reports, security training, audit access, and compliance requests." },
+  { slug: "communications",  name: "Communications",   description: "Mailing lists, distribution groups, Slack/Teams workspace requests." },
+];
+
+// ── Catalog items ─────────────────────────────────────────────────────────────
+//
+// Rich demo data for the Service Catalog. Each item ships with:
+//   - shortDescription: one-line summary shown on cards
+//   - icon: emoji shown alongside the name
+//   - categorySlug: groups the item under a CatalogCategory
+//   - requestorInstructions: notes shown to requester before submission
+//   - requiresApproval: whether the catalog-level approval flow is wired up
+//   - formSchema: dynamic form fields collected at submission time
+//   - teamIdx: index into ctx.teamIds for fulfillment routing
+
+interface CatalogFormFieldOption { label: string; value: string }
+interface CatalogFormField {
+  id:           string;
+  type:         "text" | "textarea" | "number" | "email" | "select" | "multiselect" | "checkbox" | "date";
+  label:        string;
+  required:     boolean;
+  placeholder?: string;
+  helpText?:    string;
+  options?:     CatalogFormFieldOption[];
+  min?:         number;
+  max?:         number;
+  defaultValue?: string | number | boolean | string[];
+}
+
+interface CatalogItemSpec {
+  name:                  string;
+  icon:                  string;
+  categorySlug:          string;
+  teamIdx:               number;
+  requiresApproval:      boolean;
+  shortDescription:      string;
+  description:           string;
+  requestorInstructions: string;
+  formSchema:            CatalogFormField[];
+}
+
+export const CATALOG_ITEM_POOL: CatalogItemSpec[] = [
+  // ── Hardware ────────────────────────────────────────────────────────────────
+  {
+    name: "Hardware Equipment Request", icon: "💻", categorySlug: "hardware", teamIdx: 1, requiresApproval: true,
+    shortDescription: "Request new or replacement laptops, monitors, peripherals, or docking stations.",
+    description: "Use this form to request any new or replacement company hardware. Manager approval is required for purchases over $500. Standard requests are typically fulfilled within 5 business days.",
+    requestorInstructions: "Please attach a business case for non-standard items. Standard catalog: ThinkPad X1 Carbon, Dell P2722H 27\" monitor, Logitech MX Master 3.",
+    formSchema: [
+      { id: "device_type",   type: "select",   label: "Device type",        required: true,  options: [
+        { label: "Laptop",   value: "laptop" }, { label: "Desktop", value: "desktop" },
+        { label: "Monitor",  value: "monitor" }, { label: "Keyboard", value: "keyboard" },
+        { label: "Mouse",    value: "mouse" },   { label: "Docking station", value: "dock" },
+        { label: "Headset",  value: "headset" }, { label: "Other",    value: "other" },
+      ] },
+      { id: "preferred_model", type: "text",   label: "Preferred model",    required: false, placeholder: "e.g. ThinkPad X1 Carbon Gen 11" },
+      { id: "justification",   type: "textarea", label: "Business justification", required: true, placeholder: "Why is this needed?" },
+      { id: "delivery_office", type: "select", label: "Delivery office",    required: true,  options: [
+        { label: "London HQ",  value: "london" },
+        { label: "Manchester", value: "manchester" },
+        { label: "Remote (ship to home)", value: "remote" },
+      ] },
+    ],
+  },
+  {
+    name: "Standing Desk Request", icon: "🪑", categorySlug: "hardware", teamIdx: 1, requiresApproval: true,
+    shortDescription: "Request an ergonomic sit/stand desk based on a medical or wellness recommendation.",
+    description: "Sit/stand desks are provided based on a medical recommendation or as part of our wellness programme. Manager and HR approval is required.",
+    requestorInstructions: "Attach the physiotherapist or occupational health note if you have one. Approvals can take up to 3 business days.",
+    formSchema: [
+      { id: "has_medical_note", type: "checkbox", label: "I have a medical or occupational health note",  required: false },
+      { id: "preferred_size",   type: "select",   label: "Desk size", required: true, options: [
+        { label: "120 × 60 cm", value: "small" },
+        { label: "140 × 70 cm", value: "medium" },
+        { label: "160 × 80 cm", value: "large" },
+      ] },
+      { id: "delivery_address", type: "textarea", label: "Delivery address", required: true },
+    ],
+  },
+  {
+    name: "Mobile Phone Request", icon: "📱", categorySlug: "hardware", teamIdx: 1, requiresApproval: true,
+    shortDescription: "Request a corporate mobile phone with monthly data allowance.",
+    description: "Available to roles requiring out-of-hours availability or frequent client engagement. Standard handsets: iPhone 15, Samsung Galaxy S24.",
+    requestorInstructions: "Director-level approval is required. Average handover time is 5 business days.",
+    formSchema: [
+      { id: "handset",     type: "select", label: "Preferred handset", required: true, options: [
+        { label: "iPhone 15 (128 GB)", value: "iphone15" },
+        { label: "Samsung Galaxy S24", value: "galaxys24" },
+      ] },
+      { id: "data_plan",   type: "select", label: "Data plan", required: true, options: [
+        { label: "5 GB / month",  value: "5gb" },
+        { label: "20 GB / month", value: "20gb" },
+        { label: "Unlimited (international travel)", value: "unlimited" },
+      ] },
+      { id: "justification", type: "textarea", label: "Justification", required: true },
+    ],
+  },
+
+  // ── Software ────────────────────────────────────────────────────────────────
+  {
+    name: "Software Licence Request", icon: "📦", categorySlug: "software", teamIdx: 0, requiresApproval: true,
+    shortDescription: "Request a licence for approved business software with manager sign-off.",
+    description: "Use for any commercial software that requires a paid licence (Adobe, Microsoft 365 add-ons, JetBrains, etc.). Open-source tools should use the Tooling Request workflow.",
+    requestorInstructions: "Provide a business justification — these requests go through the licence governance review.",
+    formSchema: [
+      { id: "software_name", type: "text",     label: "Software name",         required: true,  placeholder: "e.g. Adobe Acrobat Pro" },
+      { id: "vendor",        type: "text",     label: "Vendor",                required: false },
+      { id: "users_count",   type: "number",   label: "Number of users",       required: true, min: 1, max: 1000, defaultValue: 1 },
+      { id: "duration",      type: "select",   label: "Subscription length",   required: true, options: [
+        { label: "Monthly",    value: "monthly" },
+        { label: "Annual",     value: "annual" },
+        { label: "Perpetual",  value: "perpetual" },
+      ] },
+      { id: "justification", type: "textarea", label: "Business justification", required: true },
+    ],
+  },
+  {
+    name: "Adobe Creative Cloud Access", icon: "🎨", categorySlug: "software", teamIdx: 0, requiresApproval: true,
+    shortDescription: "Add Adobe Creative Cloud (Photoshop, Illustrator, InDesign, Premiere) to your account.",
+    description: "Provided to design, marketing, and content teams. Single licence covers the full Creative Cloud suite.",
+    requestorInstructions: "Annual cost is charged to your department's budget. Manager approval required.",
+    formSchema: [
+      { id: "apps_needed", type: "multiselect", label: "Apps you'll use most",  required: true, options: [
+        { label: "Photoshop",  value: "photoshop" },
+        { label: "Illustrator", value: "illustrator" },
+        { label: "InDesign",   value: "indesign" },
+        { label: "Premiere Pro", value: "premiere" },
+        { label: "After Effects", value: "after_effects" },
+        { label: "Acrobat Pro", value: "acrobat" },
+      ] },
+      { id: "purpose",     type: "textarea", label: "What will you use this for?", required: true },
+    ],
+  },
+  {
+    name: "JetBrains IDE Licence", icon: "🛠️", categorySlug: "software", teamIdx: 3, requiresApproval: false,
+    shortDescription: "All Products Pack subscription for engineering staff.",
+    description: "Provides access to IntelliJ IDEA, WebStorm, PyCharm, GoLand, RubyMine, DataGrip, and the full JetBrains family.",
+    requestorInstructions: "Available to all engineering team members. Auto-approved.",
+    formSchema: [
+      { id: "primary_ide", type: "select", label: "Primary IDE", required: true, options: [
+        { label: "IntelliJ IDEA Ultimate", value: "intellij" },
+        { label: "WebStorm",               value: "webstorm" },
+        { label: "PyCharm Professional",   value: "pycharm" },
+        { label: "GoLand",                 value: "goland" },
+        { label: "DataGrip",               value: "datagrip" },
+      ] },
+    ],
+  },
+
+  // ── Access & Identity ───────────────────────────────────────────────────────
+  {
+    name: "VPN Access Request", icon: "🔐", categorySlug: "access", teamIdx: 2, requiresApproval: false,
+    shortDescription: "Request remote-access VPN credentials for working from home or while travelling.",
+    description: "Issues a Cisco AnyConnect / OpenVPN profile bound to your corporate identity. MFA is enforced.",
+    requestorInstructions: "Auto-approved for permanent staff. Contractors require manager approval.",
+    formSchema: [
+      { id: "duration",    type: "select",   label: "Access duration",      required: true, options: [
+        { label: "30 days",  value: "30d" },
+        { label: "90 days",  value: "90d" },
+        { label: "Permanent (employee)", value: "permanent" },
+      ] },
+      { id: "device_type", type: "select",   label: "Device", required: true, options: [
+        { label: "Corporate laptop", value: "corp_laptop" },
+        { label: "Personal laptop (BYOD)", value: "byod" },
+        { label: "Mobile phone",     value: "mobile" },
+      ] },
+      { id: "country",     type: "text",     label: "Primary country of access", required: false },
+    ],
+  },
+  {
+    name: "Application Access Request", icon: "🔑", categorySlug: "access", teamIdx: 2, requiresApproval: true,
+    shortDescription: "Request access to an internal or third-party application with role assignment.",
+    description: "Use this for any SaaS application or internal system that requires a named user account.",
+    requestorInstructions: "Application owner approval will be requested automatically.",
+    formSchema: [
+      { id: "application", type: "text",     label: "Application name",      required: true, placeholder: "e.g. Salesforce, Workday" },
+      { id: "role",        type: "select",   label: "Required role",          required: true, options: [
+        { label: "Read-only",  value: "read" },
+        { label: "Standard user", value: "user" },
+        { label: "Administrator", value: "admin" },
+      ] },
+      { id: "duration",    type: "select",   label: "Duration",                required: true, options: [
+        { label: "Permanent (until offboarding)", value: "permanent" },
+        { label: "30 days",  value: "30d" },
+        { label: "90 days",  value: "90d" },
+      ] },
+      { id: "justification", type: "textarea", label: "Why do you need this access?", required: true },
+    ],
+  },
+  {
+    name: "MFA Reset / New Device", icon: "🔓", categorySlug: "access", teamIdx: 2, requiresApproval: false,
+    shortDescription: "Reset multi-factor authentication after losing or replacing a phone.",
+    description: "Used when you've changed phones, lost your authenticator app, or need to re-enrol an MFA device.",
+    requestorInstructions: "Identity verification is required before reset. Avg. turnaround: 1 business hour.",
+    formSchema: [
+      { id: "reason", type: "select", label: "Reason", required: true, options: [
+        { label: "New phone / device",       value: "new_device" },
+        { label: "Lost or stolen phone",      value: "lost" },
+        { label: "Authenticator app removed", value: "app_removed" },
+        { label: "Account locked out",        value: "locked_out" },
+      ] },
+      { id: "alternate_contact", type: "text", label: "Alternate contact (phone or email)", required: true },
+    ],
+  },
+  {
+    name: "Database Access Request", icon: "🗄️", categorySlug: "access", teamIdx: 4, requiresApproval: true,
+    shortDescription: "Request read or read/write access to a named database schema, with DBA review.",
+    description: "All production database access requires manager and DBA approval. Read-only access to staging is granted automatically.",
+    requestorInstructions: "Production access requires audit logging to be enabled on your account.",
+    formSchema: [
+      { id: "environment", type: "select",   label: "Environment", required: true, options: [
+        { label: "Staging",     value: "staging" },
+        { label: "Production",  value: "production" },
+      ] },
+      { id: "database",    type: "text",     label: "Database name",      required: true, placeholder: "e.g. analytics_warehouse" },
+      { id: "schema",      type: "text",     label: "Schema",             required: false },
+      { id: "access_level", type: "select",  label: "Access level",       required: true, options: [
+        { label: "Read-only",  value: "read" },
+        { label: "Read/write", value: "rw" },
+      ] },
+      { id: "justification", type: "textarea", label: "Justification", required: true },
+    ],
+  },
+
+  // ── Cloud & Infrastructure ──────────────────────────────────────────────────
+  {
+    name: "Cloud Resource Provisioning", icon: "☁️", categorySlug: "cloud", teamIdx: 3, requiresApproval: true,
+    shortDescription: "Request AWS / Azure / GCP resources (EC2, S3, RDS, VMs) for project or operational needs.",
+    description: "All cloud resource requests are reviewed by the Platform team. Tagging and cost-centre allocation are mandatory.",
+    requestorInstructions: "Provide a project code and expected lifecycle. Resources without owners are decommissioned after 30 days of idle time.",
+    formSchema: [
+      { id: "cloud_provider", type: "select",   label: "Cloud provider", required: true, options: [
+        { label: "AWS",   value: "aws" },
+        { label: "Azure", value: "azure" },
+        { label: "GCP",   value: "gcp" },
+      ] },
+      { id: "resource_type",  type: "select",   label: "Resource type", required: true, options: [
+        { label: "Virtual machine / EC2", value: "vm" },
+        { label: "Object storage (S3)",   value: "object_storage" },
+        { label: "Managed database",       value: "managed_db" },
+        { label: "Kubernetes cluster",      value: "k8s" },
+        { label: "Serverless function",     value: "serverless" },
+      ] },
+      { id: "environment",    type: "select",   label: "Environment", required: true, options: [
+        { label: "Development", value: "dev" },
+        { label: "Staging",      value: "staging" },
+        { label: "Production",   value: "prod" },
+      ] },
+      { id: "project_code",   type: "text",     label: "Project / cost-centre code", required: true },
+      { id: "specs",          type: "textarea", label: "Specs / sizing", required: true, placeholder: "e.g. 2 vCPUs, 8 GB RAM, 100 GB SSD" },
+    ],
+  },
+  {
+    name: "GitHub Enterprise Access", icon: "🐙", categorySlug: "cloud", teamIdx: 3, requiresApproval: false,
+    shortDescription: "Add your account to the corporate GitHub Enterprise organisation.",
+    description: "Provides access to internal repositories, GitHub Copilot, and Actions runners.",
+    requestorInstructions: "Auto-approved for engineering, design, and product roles.",
+    formSchema: [
+      { id: "github_username", type: "text", label: "GitHub username", required: true },
+      { id: "team",            type: "text", label: "Team you'll be working with", required: true },
+      { id: "needs_copilot",   type: "checkbox", label: "Enable GitHub Copilot for this account", required: false },
+    ],
+  },
+
+  // ── Employee Lifecycle ──────────────────────────────────────────────────────
+  {
+    name: "New Employee Onboarding", icon: "👋", categorySlug: "hr-onboarding", teamIdx: 0, requiresApproval: false,
+    shortDescription: "Complete IT setup for new hires: laptop, accounts, software, and access grants.",
+    description: "Submit at least 5 business days before the new hire's start date. We will provision the laptop, M365 accounts, default software bundle, and arrange Day-1 induction.",
+    requestorInstructions: "HR managers should complete this on behalf of the hiring manager. Use the bulk option for cohorts of 3+ joiners.",
+    formSchema: [
+      { id: "new_hire_name",  type: "text",     label: "New hire's full name", required: true },
+      { id: "new_hire_email", type: "email",    label: "Personal email (for credentials handover)", required: true },
+      { id: "start_date",     type: "date",     label: "Start date", required: true },
+      { id: "role_title",     type: "text",     label: "Role / job title", required: true },
+      { id: "department",     type: "select",   label: "Department", required: true, options: [
+        { label: "Engineering",  value: "engineering" },
+        { label: "Product",      value: "product" },
+        { label: "Sales",        value: "sales" },
+        { label: "Marketing",    value: "marketing" },
+        { label: "Customer Success", value: "cs" },
+        { label: "Finance",      value: "finance" },
+        { label: "People & Culture", value: "people" },
+        { label: "Operations",   value: "operations" },
+      ] },
+      { id: "office_location", type: "select",  label: "Primary office", required: true, options: [
+        { label: "London",      value: "london" },
+        { label: "Manchester",  value: "manchester" },
+        { label: "Remote",      value: "remote" },
+      ] },
+      { id: "manager_email",  type: "email",    label: "Reporting manager's email", required: true },
+    ],
+  },
+  {
+    name: "Employee Exit IT Checklist", icon: "👋", categorySlug: "hr-onboarding", teamIdx: 0, requiresApproval: false,
+    shortDescription: "IT offboarding tasks: account suspension, device recovery, and licence revocation.",
+    description: "Triggered automatically by Workday on the leaver's last day, but can also be raised manually if needed.",
+    requestorInstructions: "Submit at least 24 hours before the last working day so all access can be revoked at end-of-business.",
+    formSchema: [
+      { id: "employee_name", type: "text", label: "Employee name", required: true },
+      { id: "last_day",      type: "date", label: "Last working day", required: true },
+      { id: "device_return", type: "select", label: "How will the device be returned?", required: true, options: [
+        { label: "Drop off in office",   value: "office_drop" },
+        { label: "Courier collection",   value: "courier" },
+        { label: "Already returned",      value: "returned" },
+      ] },
+      { id: "data_handover", type: "textarea", label: "Data / mailbox handover instructions", required: false },
+    ],
+  },
+  {
+    name: "Internal Role Change", icon: "🔄", categorySlug: "hr-onboarding", teamIdx: 0, requiresApproval: true,
+    shortDescription: "Update access, group memberships, and licences after an internal move or promotion.",
+    description: "Use this when an employee changes team, role, or location and needs their access updated to match.",
+    requestorInstructions: "Both the current and new manager will be asked to approve.",
+    formSchema: [
+      { id: "employee_name", type: "text", label: "Employee name", required: true },
+      { id: "old_team",      type: "text", label: "Old team",      required: true },
+      { id: "new_team",      type: "text", label: "New team",      required: true },
+      { id: "effective_date", type: "date", label: "Effective date", required: true },
+      { id: "remove_old_access", type: "checkbox", label: "Remove access associated with the old team", required: false, defaultValue: true },
+    ],
+  },
+
+  // ── Facilities & AV ─────────────────────────────────────────────────────────
+  {
+    name: "Office Relocation IT Support", icon: "🏢", categorySlug: "facilities", teamIdx: 1, requiresApproval: false,
+    shortDescription: "Schedule IT support for an office move: network, phones, AV equipment setup.",
+    description: "Covers cabling, network drops, telephony, conference room AV, and printer relocation. We will conduct a site visit before the move.",
+    requestorInstructions: "Submit at least 2 weeks before the move date.",
+    formSchema: [
+      { id: "from_location", type: "text", label: "Moving from",  required: true },
+      { id: "to_location",   type: "text", label: "Moving to",    required: true },
+      { id: "move_date",     type: "date", label: "Planned move date", required: true },
+      { id: "user_count",    type: "number", label: "Approximate number of users affected", required: true, min: 1 },
+    ],
+  },
+  {
+    name: "Meeting Room AV Issue", icon: "📺", categorySlug: "facilities", teamIdx: 1, requiresApproval: false,
+    shortDescription: "Report an issue with a meeting-room TV, video bar, microphone, or HDMI/USB-C connector.",
+    description: "Standard SLA is 2 business hours during office hours.",
+    requestorInstructions: "If the meeting is starting in less than 30 minutes, please call the IT desk directly.",
+    formSchema: [
+      { id: "room_name", type: "text", label: "Room name", required: true, placeholder: "e.g. Apollo, 4th Floor" },
+      { id: "issue",     type: "textarea", label: "What's not working?", required: true },
+      { id: "urgency",   type: "select", label: "When is this needed?", required: true, options: [
+        { label: "Within 30 minutes", value: "now" },
+        { label: "Today",             value: "today" },
+        { label: "This week",         value: "week" },
+      ] },
+    ],
+  },
+  {
+    name: "Printer Issue", icon: "🖨️", categorySlug: "facilities", teamIdx: 1, requiresApproval: false,
+    shortDescription: "Toner, paper jam, offline status, or a request for a new printer.",
+    description: "Standard managed-print fleet covers all floors. Self-service supplies are kept in the supply cupboard on each floor.",
+    requestorInstructions: "Check the printer's display panel for error codes before submitting.",
+    formSchema: [
+      { id: "printer_id", type: "text", label: "Printer name or ID", required: true, placeholder: "e.g. PR-LON-04" },
+      { id: "issue_type", type: "select", label: "Issue type", required: true, options: [
+        { label: "Out of toner",   value: "toner" },
+        { label: "Paper jam",      value: "jam" },
+        { label: "Showing offline", value: "offline" },
+        { label: "Print quality",   value: "quality" },
+        { label: "Other",           value: "other" },
+      ] },
+      { id: "details",    type: "textarea", label: "Details", required: false },
+    ],
+  },
+
+  // ── Security & Compliance ───────────────────────────────────────────────────
+  {
+    name: "Security Awareness Training", icon: "🛡️", categorySlug: "security", teamIdx: 2, requiresApproval: false,
+    shortDescription: "Enrol in mandatory cybersecurity awareness training modules.",
+    description: "All employees must complete the annual Security Awareness curriculum within 30 days of joining.",
+    requestorInstructions: "Auto-approved. You will receive an email with the training portal link within 1 business day.",
+    formSchema: [
+      { id: "track", type: "select", label: "Training track", required: true, options: [
+        { label: "General staff",  value: "general" },
+        { label: "Engineers",      value: "engineering" },
+        { label: "Finance / payment handling", value: "finance" },
+        { label: "Customer support", value: "support" },
+      ] },
+    ],
+  },
+  {
+    name: "Report a Phishing Email", icon: "🎣", categorySlug: "security", teamIdx: 2, requiresApproval: false,
+    shortDescription: "Report a suspicious email or possible phishing attempt to the security team.",
+    description: "We triage all reports within 1 business hour and will block any malicious sender at the gateway.",
+    requestorInstructions: "Forward the email as an attachment if you can — that preserves all the headers we need to investigate.",
+    formSchema: [
+      { id: "sender",    type: "email",    label: "Sender email address",    required: true },
+      { id: "subject",   type: "text",     label: "Email subject line",        required: true },
+      { id: "clicked",   type: "checkbox", label: "I clicked a link or replied to this email", required: false },
+      { id: "details",   type: "textarea", label: "Anything else we should know?", required: false },
+    ],
+  },
+  {
+    name: "Audit Log Export Request", icon: "📋", categorySlug: "security", teamIdx: 2, requiresApproval: true,
+    shortDescription: "Export audit-log data for an internal or external compliance audit.",
+    description: "Audit log exports are limited to admins and the compliance team. All exports are themselves logged.",
+    requestorInstructions: "Provide the audit reference number and the time window required.",
+    formSchema: [
+      { id: "audit_ref", type: "text", label: "Audit reference",          required: true },
+      { id: "from_date", type: "date", label: "From date",                 required: true },
+      { id: "to_date",   type: "date", label: "To date",                    required: true },
+      { id: "format",    type: "select", label: "Export format", required: true, options: [
+        { label: "CSV",  value: "csv" },
+        { label: "JSON", value: "json" },
+      ] },
+    ],
+  },
+
+  // ── Communications ──────────────────────────────────────────────────────────
+  {
+    name: "Distribution List Request", icon: "📧", categorySlug: "communications", teamIdx: 0, requiresApproval: false,
+    shortDescription: "Create a new email distribution list or modify membership of an existing one.",
+    description: "Distribution lists are kept in M365. Owners are notified of any membership changes.",
+    requestorInstructions: "Provide the list name and intended owner. Lists with more than 50 members require an owner from the People team.",
+    formSchema: [
+      { id: "action",   type: "select",   label: "Action", required: true, options: [
+        { label: "Create new list",     value: "create" },
+        { label: "Add member(s)",        value: "add" },
+        { label: "Remove member(s)",     value: "remove" },
+        { label: "Delete list",          value: "delete" },
+      ] },
+      { id: "list_email", type: "email",  label: "List email address", required: true, placeholder: "e.g. team-platform@company.com" },
+      { id: "members",   type: "textarea", label: "Members (one email per line)", required: false },
+      { id: "owner",     type: "email",    label: "List owner",              required: false },
+    ],
+  },
+  {
+    name: "Slack Channel / Workspace Request", icon: "💬", categorySlug: "communications", teamIdx: 0, requiresApproval: false,
+    shortDescription: "Create a new Slack channel, archive an old one, or invite a guest.",
+    description: "Channel naming convention: `#team-<team>` for team channels, `#proj-<project>` for project channels.",
+    requestorInstructions: "Guest invites require manager approval and are auto-revoked after 90 days.",
+    formSchema: [
+      { id: "request_type", type: "select", label: "Request type", required: true, options: [
+        { label: "New channel",     value: "channel" },
+        { label: "Archive channel",  value: "archive" },
+        { label: "Invite guest",     value: "guest" },
+      ] },
+      { id: "channel_name", type: "text",    label: "Channel name", required: false, placeholder: "#proj-alpha" },
+      { id: "purpose",      type: "textarea", label: "Channel purpose", required: false },
+      { id: "guest_email",  type: "email",   label: "Guest email",      required: false },
+    ],
+  },
 ];
 
 // ── Ticket pool ───────────────────────────────────────────────────────────────

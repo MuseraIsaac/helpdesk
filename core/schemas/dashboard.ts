@@ -41,6 +41,12 @@ export const WIDGET_IDS = [
   "request_fulfillment",
   "problem_recurrence",
   "approval_turnaround",
+  // ── Change Management ─────────────────────────
+  "change_analytics",
+  // ── Assets & CMDB ────────────────────────────
+  "asset_health",
+  // ── Knowledge Base ───────────────────────────
+  "kb_insights",
 ] as const;
 
 export type WidgetId = (typeof WIDGET_IDS)[number];
@@ -68,6 +74,12 @@ export const WIDGET_META: Record<WidgetId, { label: string; description: string 
   request_fulfillment: { label: "Request Fulfillment",       description: "Service request volumes, avg fulfillment time, and top catalog items" },
   problem_recurrence:  { label: "Problem Recurrence",        description: "Problem status, known errors, and recurring-incident clusters" },
   approval_turnaround: { label: "Approval Turnaround",       description: "Approval queue size, avg decision time, and oldest pending items" },
+  // Change Management
+  change_analytics:    { label: "Change Analytics",          description: "Change volume, success rate, emergency changes, and breakdown by type, state, and risk" },
+  // Assets & CMDB
+  asset_health:        { label: "Asset Health",              description: "Asset inventory totals — active, in stock, under maintenance — with type and status distribution" },
+  // Knowledge Base
+  kb_insights:         { label: "Knowledge Base Insights",   description: "KB search volume, zero-result rate, and top search terms" },
 };
 
 /** Human-readable presentation type shown in the widget picker */
@@ -90,6 +102,9 @@ export const WIDGET_PRESENTATION: Record<WidgetId, string> = {
   request_fulfillment: "stat + table",
   problem_recurrence:  "stat + progress",
   approval_turnaround: "stat + table",
+  change_analytics:    "stat + donut chart",
+  asset_health:        "stat + donut chart",
+  kb_insights:         "stat + table",
 };
 
 /** Widget groups for the widget picker UI */
@@ -109,6 +124,18 @@ export const WIDGET_CATEGORIES: { label: string; ids: WidgetId[] }[] = [
   {
     label: "ITSM Modules",
     ids: ["incident_analytics", "request_fulfillment", "problem_recurrence", "approval_turnaround"],
+  },
+  {
+    label: "Change Management",
+    ids: ["change_analytics"],
+  },
+  {
+    label: "Assets & CMDB",
+    ids: ["asset_health"],
+  },
+  {
+    label: "Knowledge Base",
+    ids: ["kb_insights"],
   },
 ];
 
@@ -143,6 +170,9 @@ export const WIDGET_LAYOUT_DEFAULTS: Record<
   request_fulfillment: { x: 0, w:  6, h: 6, minW: 4,  minH: 4 },
   problem_recurrence:  { x: 6, w:  6, h: 6, minW: 4,  minH: 4 },
   approval_turnaround: { x: 0, w:  6, h: 6, minW: 4,  minH: 4 },
+  change_analytics:    { x: 0, w: 12, h: 8, minW: 6,  minH: 5 },
+  asset_health:        { x: 0, w: 12, h: 8, minW: 6,  minH: 5 },
+  kb_insights:         { x: 0, w:  6, h: 6, minW: 4,  minH: 4 },
 };
 
 // ── Widget appearance / customisation ────────────────────────────────────────
@@ -264,5 +294,9 @@ export const SYSTEM_DEFAULT_CONFIG: DashboardConfigData = {
     { id: "request_fulfillment", visible: false, order: 15, x: 0, w:  6, h: 6 },
     { id: "problem_recurrence",  visible: false, order: 16, x: 6, w:  6, h: 6 },
     { id: "approval_turnaround", visible: false, order: 17, x: 0, w:  6, h: 6 },
+    // New modules (off by default)
+    { id: "change_analytics",    visible: false, order: 18, x: 0, w: 12, h: 8 },
+    { id: "asset_health",        visible: false, order: 19, x: 0, w: 12, h: 8 },
+    { id: "kb_insights",         visible: false, order: 20, x: 0, w:  6, h: 6 },
   ],
 };

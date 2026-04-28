@@ -41,7 +41,7 @@ export default function PortalLayout() {
 
       {/* ── Sticky header ────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border/60 shadow-sm">
-        <div className="max-w-[1100px] mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+        <div className="max-w-[1280px] mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
 
           {/* Brand */}
           <Link to="/portal/tickets" className="flex items-center gap-2.5 shrink-0 group">
@@ -180,13 +180,13 @@ export default function PortalLayout() {
       </header>
 
       {/* ── Page content ─────────────────────────────────────────────────── */}
-      <main className="flex-1 max-w-[900px] w-full mx-auto px-4 sm:px-6 py-8">
+      <main className="flex-1 max-w-[1280px] w-full mx-auto px-4 sm:px-6 py-8">
         <Outlet />
       </main>
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className="border-t border-border/40 bg-background/50">
-        <div className="max-w-[900px] mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4 flex-wrap">
+        <div className="max-w-[1280px] mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4 flex-wrap">
           <p className="text-[11px] text-muted-foreground/50">
             © {new Date().getFullYear()} {companyName}. All rights reserved.
           </p>

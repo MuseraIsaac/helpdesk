@@ -23,6 +23,12 @@ interface PublicBranding {
   agentLoginHighlight:  string;
   agentLoginTagline:    string;
   agentLoginBadge:      string;
+  // Service desk contacts
+  serviceDeskEmail:     string;
+  serviceDeskPhone:     string;
+  serviceDeskHours:     string;
+  emergencyContact:     string;
+  serviceDeskLocation:  string;
 }
 
 export function useBranding() {

@@ -39,6 +39,7 @@ import { detectChangeConflicts } from "../lib/change-conflicts";
 import { notify } from "../lib/notify";
 import { notifyEntityFollowers } from "../lib/notify-entity-followers";
 import { fireChangeEvent } from "../lib/event-bus";
+import { logSystemAudit } from "../lib/audit";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -301,6 +302,11 @@ router.post(
         action:   "change.created",
         meta:     { changeNumber, title: change.title },
       },
+    });
+
+    void logSystemAudit(req.user.id, "change.created", {
+      entityType: "change", entityId: change.id, entityNumber: changeNumber,
+      entityTitle: change.title, changeType: change.changeType, risk: change.risk,
     });
 
     // Fire change.created event for event_workflow rules
@@ -622,6 +628,33 @@ router.patch(
       };
       const trigger = stateTriggerMap[data.state] as any;
       if (trigger) fireChangeEvent(trigger, id, req.user.id, { state: existing.state });
+    }
+
+    // ── Global audit log entries ───────────────────────────────────────────
+    const cBase = { entityType: "change", entityId: id, entityNumber: updated.changeNumber, entityTitle: updated.title };
+    if (data.state && data.state !== existing.state) {
+      void logSystemAudit(req.user.id, "change.status_changed", { ...cBase, from: existing.state, to: data.state });
+      const stateMap: Record<string, "change.submitted" | "change.approved" | "change.rejected" | "change.scheduled" | "change.started" | "change.completed" | "change.cancelled"> = {
+        submitted:   "change.submitted",
+        authorized:  "change.approved",
+        rejected:    "change.rejected",
+        scheduled:   "change.scheduled",
+        implement:   "change.started",
+        implemented: "change.completed",
+        cancelled:   "change.cancelled",
+      };
+      const named = stateMap[data.state];
+      if (named) void logSystemAudit(req.user.id, named, cBase);
+    }
+    if (data.assignedToId !== undefined && data.assignedToId !== existing.assignedToId) {
+      void logSystemAudit(req.user.id, "change.assigned", {
+        ...cBase,
+        from: existing.assignedTo ? { id: existing.assignedTo.id, name: existing.assignedTo.name } : null,
+        to: data.assignedToId ?? null,
+      });
+    }
+    if (data.rollbackUsed !== undefined && data.rollbackUsed === true) {
+      void logSystemAudit(req.user.id, "change.rolled_back", cBase);
     }
 
     // Notify followers on state change (fire-and-forget)
@@ -1102,7 +1135,7 @@ router.post("/:id/tasks", requireAuth, requirePermission("changes.update"), asyn
   const id = parseId(req.params.id);
   if (!id) { res.status(400).json({ error: "Invalid change ID" }); return; }
 
-  const change = await prisma.change.findUnique({ where: { id, deletedAt: null }, select: { id: true, state: true } });
+  const change = await prisma.change.findFirst({ where: { id, deletedAt: null }, select: { id: true, state: true } });
   if (!change) { res.status(404).json({ error: "Change not found" }); return; }
 
   const body = validate(createTaskSchema, req.body, res);
@@ -1124,6 +1157,13 @@ router.post("/:id/tasks", requireAuth, requirePermission("changes.update"), asyn
 
   await prisma.changeEvent.create({
     data: { changeId: id, actorId: req.user.id, action: "task.created", meta: { taskId: task.id, title: task.title } },
+  });
+
+  const chg = await prisma.change.findUnique({ where: { id }, select: { changeNumber: true, title: true } });
+  void logSystemAudit(req.user.id, "change.task_created", {
+    entityType: "change", entityId: id,
+    entityNumber: chg?.changeNumber ?? `CHG-${id}`, entityTitle: chg?.title ?? "",
+    taskId: task.id, taskTitle: task.title,
   });
 
   res.status(201).json({ task });
@@ -1160,6 +1200,15 @@ router.patch("/:id/tasks/:taskId", requireAuth, requirePermission("changes.updat
     data: { changeId: id, actorId: req.user.id, action: "task.updated", meta: { taskId, title: updated.title, status: updated.status } },
   });
 
+  if (completedNow) {
+    const chg2 = await prisma.change.findUnique({ where: { id }, select: { changeNumber: true, title: true } });
+    void logSystemAudit(req.user.id, "change.task_completed", {
+      entityType: "change", entityId: id,
+      entityNumber: chg2?.changeNumber ?? `CHG-${id}`, entityTitle: chg2?.title ?? "",
+      taskId, taskTitle: updated.title,
+    });
+  }
+
   res.json({ task: updated });
 });
 
@@ -1175,6 +1224,13 @@ router.delete("/:id/tasks/:taskId", requireAuth, requirePermission("changes.upda
 
   await prisma.changeEvent.create({
     data: { changeId: id, actorId: req.user.id, action: "task.deleted", meta: { taskId, title: task.title } },
+  });
+
+  const chg3 = await prisma.change.findUnique({ where: { id }, select: { changeNumber: true, title: true } });
+  void logSystemAudit(req.user.id, "change.task_deleted", {
+    entityType: "change", entityId: id,
+    entityNumber: chg3?.changeNumber ?? `CHG-${id}`, entityTitle: chg3?.title ?? "",
+    taskId, taskTitle: task.title,
   });
 
   res.json({ ok: true });

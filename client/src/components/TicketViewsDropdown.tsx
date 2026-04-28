@@ -300,9 +300,9 @@ export default function TicketViewsDropdown({
         label: v.name,
         description: [
           v.config.filters?.assignedToMe ? "Assigned to me" : null,
-          v.config.filters?.status        ? `Status: ${v.config.filters.status}` : null,
+          v.config.filters?.status?.length ? `Status: ${v.config.filters.status.length === 1 ? v.config.filters.status[0] : `${v.config.filters.status.length} values`}` : null,
           v.config.filters?.priority      ? `Priority: ${v.config.filters.priority}` : null,
-          v.config.filters?.teamId !== undefined ? "Team filtered" : null,
+          v.config.filters?.teamId?.length ? "Team filtered" : null,
         ].filter(Boolean).join(" · ") || "No filter preset",
         emoji:     v.emoji,
         isDefault: v.isDefault,
@@ -317,7 +317,7 @@ export default function TicketViewsDropdown({
         label: v.name,
         description: [
           v.config.filters?.assignedToMe ? "Assigned to me" : null,
-          v.config.filters?.status        ? `Status: ${v.config.filters.status}` : null,
+          v.config.filters?.status?.length ? `Status: ${v.config.filters.status.length === 1 ? v.config.filters.status[0] : `${v.config.filters.status.length} values`}` : null,
           v.config.filters?.priority      ? `Priority: ${v.config.filters.priority}` : null,
         ].filter(Boolean).join(" · ") || "Shared view",
         emoji: v.emoji,

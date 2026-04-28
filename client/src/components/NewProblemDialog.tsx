@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useForm, Controller } from "react-hook-form";
+import LinkedChangeSelect from "./LinkedChangeSelect";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import axios from "axios";
@@ -294,11 +295,16 @@ export default function NewProblemDialog({
 
           {/* Linked change ref */}
           <div className="space-y-1.5">
-            <Label htmlFor="linkedChangeRef">Linked Change Reference</Label>
-            <Input
-              id="linkedChangeRef"
-              placeholder="e.g. CHG-0042"
-              {...register("linkedChangeRef")}
+            <Label>Linked Change Reference</Label>
+            <Controller
+              name="linkedChangeRef"
+              control={control}
+              render={({ field }) => (
+                <LinkedChangeSelect
+                  value={field.value ?? null}
+                  onChange={(v) => field.onChange(v ?? "")}
+                />
+              )}
             />
           </div>
 

@@ -28,6 +28,7 @@ import { useFormConfig } from "@/hooks/useFormConfig";
 import { useCustomFields } from "@/hooks/useCustomFields";
 import DynamicCustomFields from "@/components/DynamicCustomFields";
 import OrganizationSelect from "@/components/OrganizationSelect";
+import LinkedChangeSelect from "@/components/LinkedChangeSelect";
 import { AlertCircle, Save, X, LinkIcon, Search, Database } from "lucide-react";
 
 interface Agent    { id: string; name: string }
@@ -317,7 +318,16 @@ export default function NewProblemPage() {
             {cfg.visible("linkedChangeRef") && (
               <div className="space-y-1.5">
                 <FieldLabel required={cfg.required("linkedChangeRef")}>{cfg.label("linkedChangeRef")}</FieldLabel>
-                <Input {...register("linkedChangeRef")} placeholder={cfg.placeholder("linkedChangeRef")} />
+                <Controller
+                  name="linkedChangeRef"
+                  control={control}
+                  render={({ field }) => (
+                    <LinkedChangeSelect
+                      value={field.value ?? null}
+                      onChange={(v) => field.onChange(v ?? "")}
+                    />
+                  )}
+                />
               </div>
             )}
           </div>

@@ -298,31 +298,97 @@ router.get("/", requireAuth, async (req, res) => {
     };
   } else {
     // Standard filter path
-    if (query.customStatusId) {
-      where.customStatusId = query.customStatusId;
-    } else if (query.status) {
-      where.status = query.status;
+    // Status: built-in statuses OR custom statuses can be combined via OR
+    const statusClauses: Prisma.TicketWhereInput[] = [];
+    if (query.status?.length) {
+      statusClauses.push({
+        status: query.status.length === 1
+          ? (query.status[0] as any)
+          : { in: query.status as any[] },
+      });
+    }
+    if (query.customStatusId?.length) {
+      statusClauses.push({
+        customStatusId: query.customStatusId.length === 1
+          ? query.customStatusId[0]
+          : { in: query.customStatusId },
+      });
+    }
+    if (statusClauses.length === 1) {
+      Object.assign(where, statusClauses[0]);
+    } else if (statusClauses.length > 1) {
+      where.OR = ([] as Prisma.TicketWhereInput[]).concat(where.OR ?? []).concat(statusClauses);
     } else {
       where.status = { in: ["open", "in_progress", "resolved", "closed"] };
     }
-    if (query.ticketType)         where.ticketType         = query.ticketType;
-    if (query.customTicketTypeId) where.customTicketTypeId = query.customTicketTypeId;
-    if (query.category) where.category = query.category;
-    if (query.priority) where.priority = query.priority;
-    if (query.severity) where.severity = query.severity;
+
+    // Ticket type: built-in types OR custom type IDs combined via OR
+    const typeClauses: Prisma.TicketWhereInput[] = [];
+    if (query.ticketType?.length) {
+      typeClauses.push({
+        ticketType: query.ticketType.length === 1
+          ? (query.ticketType[0] as any)
+          : { in: query.ticketType as any[] },
+      });
+    }
+    if (query.customTicketTypeId?.length) {
+      typeClauses.push({
+        customTicketTypeId: query.customTicketTypeId.length === 1
+          ? query.customTicketTypeId[0]
+          : { in: query.customTicketTypeId },
+      });
+    }
+    if (typeClauses.length === 1) {
+      Object.assign(where, typeClauses[0]);
+    } else if (typeClauses.length > 1) {
+      where.AND = ([] as Prisma.TicketWhereInput[])
+        .concat(where.AND ?? [])
+        .concat([{ OR: typeClauses }]);
+    }
+
+    if (query.category?.length) where.category = query.category.length === 1 ? query.category[0] as any : { in: query.category as any[] };
+    if (query.priority?.length) where.priority = query.priority.length === 1 ? query.priority[0] as any : { in: query.priority as any[] };
+    if (query.severity?.length) where.severity = query.severity.length === 1 ? query.severity[0] as any : { in: query.severity as any[] };
     if (query.escalated !== undefined) where.isEscalated = query.escalated;
-    if (query.assignedToMe) where.assignedToId = req.user.id;
+
+    // Assignee: assignedToMe / unassigned override; otherwise treat as multi-value
+    if (query.assignedToMe) {
+      where.assignedToId = req.user.id;
+    } else if (query.unassigned) {
+      where.assignedToId = null;
+    } else if (query.assignedToId?.length) {
+      where.assignedToId = query.assignedToId.length === 1
+        ? query.assignedToId[0]
+        : { in: query.assignedToId };
+    }
+
+    if (query.impact?.length)   where.impact  = query.impact.length  === 1 ? query.impact[0]  as any : { in: query.impact  as any[] };
+    if (query.urgency?.length)  where.urgency = query.urgency.length === 1 ? query.urgency[0] as any : { in: query.urgency as any[] };
+    if (query.source?.length)   where.source  = query.source.length  === 1 ? query.source[0]  as any : { in: query.source  as any[] };
+    if (query.slaBreached !== undefined) where.slaBreached = query.slaBreached;
 
     if (query.search) {
-      where.OR = [
+      where.OR = ([] as Prisma.TicketWhereInput[]).concat(where.OR ?? []).concat([
         { ticketNumber: { contains: query.search, mode: "insensitive" } },
-        { subject: { contains: query.search, mode: "insensitive" } },
-        { senderName: { contains: query.search, mode: "insensitive" } },
-        { senderEmail: { contains: query.search, mode: "insensitive" } },
-      ];
+        { subject:      { contains: query.search, mode: "insensitive" } },
+        { senderName:   { contains: query.search, mode: "insensitive" } },
+        { senderEmail:  { contains: query.search, mode: "insensitive" } },
+      ]);
     }
-    if (query.teamId !== undefined) {
-      where.teamId = query.teamId === "none" ? null : query.teamId;
+
+    // Team: combine numeric IDs and the "none" sentinel into a single OR
+    if (query.teamId?.length) {
+      const ids   = query.teamId.filter((v): v is number => typeof v === "number");
+      const hasNone = query.teamId.includes("none");
+      const clauses: Prisma.TicketWhereInput[] = [];
+      if (ids.length) clauses.push({ teamId: ids.length === 1 ? ids[0] : { in: ids } });
+      if (hasNone)    clauses.push({ teamId: null });
+      if (clauses.length === 1) Object.assign(where, clauses[0]);
+      else if (clauses.length > 1) {
+        where.AND = ([] as Prisma.TicketWhereInput[])
+          .concat(where.AND ?? [])
+          .concat([{ OR: clauses }]);
+      }
     }
   }
 
@@ -346,11 +412,14 @@ router.get("/", requireAuth, async (req, res) => {
         const userTeamIds = userRecord.teamMemberships.map((m) => m.teamId);
         if (userTeamIds.length > 0) {
           // Intersect with any explicit teamId filter the client sent
-          if (query.teamId !== undefined && query.teamId !== "none") {
-            const requested = query.teamId as number;
-            where.teamId = userTeamIds.includes(requested)
-              ? requested
-              : { in: [] }; // requested team not in scope → empty result set
+          const requestedTeamIds = (query.teamId ?? []).filter(
+            (v): v is number => typeof v === "number",
+          );
+          if (requestedTeamIds.length > 0) {
+            const allowed = requestedTeamIds.filter((id) => userTeamIds.includes(id));
+            where.teamId = allowed.length === 0
+              ? { in: [] }                                  // none in scope → empty result
+              : allowed.length === 1 ? allowed[0] : { in: allowed };
           } else {
             where.teamId = { in: userTeamIds };
           }

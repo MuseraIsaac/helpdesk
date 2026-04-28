@@ -73,17 +73,14 @@ import {
   BookmarkPlus,
   ChevronsUpDown,
   Check,
-  Flame,
   CalendarClock,
   Bell,
   X,
   Plus,
   Loader2,
   Trash2,
-  MoreHorizontal,
   SkipForward,
   Play,
-  BookTemplate,
 } from "lucide-react";
 
 // ── SearchableSelect ──────────────────────────────────────────────────────────
@@ -515,8 +512,7 @@ function TaskRow({
   agents: { id: string; name: string }[];
 }) {
   const [editOpen, setEditOpen] = useState(false);
-  const [noteOpen, setNoteOpen] = useState(false);
-  const [note, setNote] = useState(task.completionNote ?? "");
+  const note = task.completionNote ?? "";
   const qc = useQueryClient();
 
   const statusMutation = useMutation({
@@ -810,15 +806,15 @@ function EditChangeDialog({ changeId, change, open, onOpenChange, onSaved }: Edi
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium">Change Type</Label>
-                  <SearchableSelect value={changeType} onValueChange={setChangeType} options={CHANGE_TYPE_OPTIONS} placeholder="Type…" triggerClassName="h-8 text-xs" />
+                  <SearchableSelect value={changeType} onValueChange={(v) => setChangeType(v as typeof changeType)} options={CHANGE_TYPE_OPTIONS} placeholder="Type…" triggerClassName="h-8 text-xs" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium">Risk Level</Label>
-                  <SearchableSelect value={risk} onValueChange={setRisk} options={CHANGE_RISK_OPTIONS} placeholder="Risk…" triggerClassName="h-8 text-xs" />
+                  <SearchableSelect value={risk} onValueChange={(v) => setRisk(v as typeof risk)} options={CHANGE_RISK_OPTIONS} placeholder="Risk…" triggerClassName="h-8 text-xs" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium">Priority</Label>
-                  <SearchableSelect value={priority} onValueChange={setPriority} options={PRIORITY_OPTIONS} placeholder="Priority…" triggerClassName="h-8 text-xs" />
+                  <SearchableSelect value={priority} onValueChange={(v) => setPriority(v as typeof priority)} options={PRIORITY_OPTIONS} placeholder="Priority…" triggerClassName="h-8 text-xs" />
                 </div>
               </div>
 
@@ -1194,7 +1190,7 @@ export default function ChangeDetailPage() {
       {/* ── Header ── */}
       <div className="border-b bg-background shadow-sm shrink-0">
         <div className="px-6 pt-3 pb-0">
-          <BackLink to="/changes" label="All Changes" />
+          <BackLink to="/changes">All Changes</BackLink>
         </div>
 
         {isLoading && (

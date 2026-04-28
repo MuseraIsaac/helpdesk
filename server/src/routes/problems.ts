@@ -17,6 +17,7 @@ import {
 } from "core/constants/problem-status.ts";
 import { logProblemEvent } from "../lib/problem-events";
 import { logIncidentEvent } from "../lib/incident-events";
+import { logSystemAudit } from "../lib/audit";
 import { notifyMentions } from "../lib/mentions";
 import { notifyEntityFollowers } from "../lib/notify-entity-followers";
 import { generateTicketNumber } from "../lib/ticket-number";
@@ -341,6 +342,11 @@ router.post(
       linkedIncidentCount: data.linkedIncidentIds.length,
     });
 
+    void logSystemAudit(req.user.id, "problem.created", {
+      entityType: "problem", entityId: problem.id, entityNumber: problem.problemNumber,
+      entityTitle: data.title, priority: data.priority,
+    });
+
     if (data.linkedIncidentIds.length > 0) {
       await logProblemEvent(problem.id, req.user.id, "problem.incidents_linked", {
         incidentIds: data.linkedIncidentIds,
@@ -535,6 +541,33 @@ router.patch(
 
     await Promise.all(auditTasks);
 
+    // ── Global audit log entries ───────────────────────────────────────────
+    const base = { entityType: "problem", entityId: id, entityNumber: updated.problemNumber, entityTitle: updated.title };
+    if (data.status && data.status !== current.status) {
+      void logSystemAudit(req.user.id, "problem.status_changed", { ...base, from: current.status, to: data.status });
+      if (data.status === "resolved") void logSystemAudit(req.user.id, "problem.resolved", base);
+      if (data.status === "closed")   void logSystemAudit(req.user.id, "problem.closed",   base);
+    }
+    if (data.priority && data.priority !== current.priority) {
+      void logSystemAudit(req.user.id, "problem.priority_changed", { ...base, from: current.priority, to: data.priority });
+    }
+    if ("assignedToId" in data && data.assignedToId !== current.assignedToId) {
+      void logSystemAudit(req.user.id, "problem.assigned", { ...base, from: current.assignedToId ?? null, to: data.assignedToId ?? null });
+    }
+    if (data.rootCause !== undefined && data.rootCause !== null) {
+      void logSystemAudit(req.user.id, "problem.root_cause_updated", base);
+    }
+    if (data.workaround !== undefined && data.workaround !== null) {
+      void logSystemAudit(req.user.id, "problem.workaround_updated", base);
+    }
+    if (data.pirCompletedAt !== undefined && data.pirCompletedAt !== null) {
+      void logSystemAudit(req.user.id, "problem.pir_completed", base);
+    }
+    if (data.status && !current.isKnownError &&
+        ["known_error", "change_required", "resolved", "closed"].includes(data.status)) {
+      void logSystemAudit(req.user.id, "problem.known_error_flagged", base);
+    }
+
     // Notify followers on status change (fire-and-forget)
     if (data.status && data.status !== current.status) {
       void notifyEntityFollowers({
@@ -629,6 +662,19 @@ router.post(
       incidentNumber: incident.incidentNumber,
     });
 
+    // Fetch problem number for global audit
+    const prob = await prisma.problem.findUnique({ where: { id }, select: { problemNumber: true, title: true } });
+    void logSystemAudit(req.user.id, "problem.linked_incident", {
+      entityType: "problem", entityId: id,
+      entityNumber: prob?.problemNumber ?? `PRB-${id}`, entityTitle: prob?.title ?? "",
+      linkedIncidentId: incident.id, linkedIncidentNumber: incident.incidentNumber,
+    });
+    void logSystemAudit(req.user.id, "incident.linked_problem", {
+      entityType: "incident", entityId: incident.id,
+      entityNumber: incident.incidentNumber, entityTitle: incident.title,
+      linkedProblemId: id, linkedProblemNumber: prob?.problemNumber ?? `PRB-${id}`,
+    });
+
     res.status(201).json({ ok: true, incidentId: incident.id });
   }
 );
@@ -700,6 +746,13 @@ router.post(
     await logProblemEvent(id, req.user.id, "problem.ticket_linked", {
       ticketId: ticket.id,
       ticketNumber: ticket.ticketNumber,
+    });
+
+    const prob2 = await prisma.problem.findUnique({ where: { id }, select: { problemNumber: true, title: true } });
+    void logSystemAudit(req.user.id, "problem.linked_ticket", {
+      entityType: "problem", entityId: id,
+      entityNumber: prob2?.problemNumber ?? `PRB-${id}`, entityTitle: prob2?.title ?? "",
+      linkedTicketId: ticket.id, linkedTicketNumber: ticket.ticketNumber,
     });
 
     res.status(201).json({ ok: true, ticketId: ticket.id });

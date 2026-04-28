@@ -1,18 +1,16 @@
 /**
  * DashboardCustomizer
  *
- * A Dialog that lets users:
- *   – Reorder and toggle dashboard widget visibility
- *   – Set the default time period and layout density
- *   – Name, describe, and set visibility (personal / team / shared)
- *   – Save (creates a new personal dashboard or updates existing)
- *   – Manage saved dashboards (switch active, clone, delete)
- *
- * Two tabs:
- *   Customize – edit the current draft config (period, density, widgets, metadata)
- *   Dashboards – browse and manage saved configs
+ * Redesigned settings dialog for the dashboard:
+ *  – Fetches the real team list from /api/teams (fixes the "share to team" bug
+ *    where only teams that already had a shared dashboard appeared)
+ *  – Searchable team picker (SearchableSelect)
+ *  – Polished, grouped widget list with category badges
+ *  – Cleaner visual hierarchy throughout
  */
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import {
   Dialog,
   DialogContent,
@@ -27,30 +25,18 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import SearchableSelect from "@/components/SearchableSelect";
 import ErrorAlert from "@/components/ErrorAlert";
 import {
-  ArrowUp,
-  ArrowDown,
-  Trash2,
-  Check,
-  Star,
-  RotateCcw,
-  Globe,
-  Copy,
-  Users,
-  User,
-  Loader2,
+  ArrowUp, ArrowDown, Trash2, Check, Star,
+  RotateCcw, Globe, Copy, Users, User, Loader2,
+  LayoutGrid, Eye, EyeOff, Lock, CircleDot,
 } from "lucide-react";
 import {
   WIDGET_IDS,
   WIDGET_META,
+  WIDGET_CATEGORIES,
+  WIDGET_PRESENTATION,
   SYSTEM_DEFAULT_CONFIG,
   type DashboardConfigData,
   type WidgetId,
@@ -83,6 +69,8 @@ export interface SaveOpts {
 
 type Period = 7 | 30 | 90;
 
+interface TeamOption { id: number; name: string; color: string | null }
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function normalizeConfig(config: DashboardConfigData): DashboardConfigData {
@@ -98,36 +86,134 @@ function normalizeConfig(config: DashboardConfigData): DashboardConfigData {
   return { ...config, widgets };
 }
 
+// Category label → accent color mapping for widget badges
+const CATEGORY_COLORS: Record<string, string> = {
+  "Service Desk":    "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+  "Quality & SLA":   "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
+  "Teams & Agents":  "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300",
+  "ITSM Modules":    "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
+  "Change Management": "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+  "Assets & CMDB":   "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300",
+  "Knowledge Base":  "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300",
+};
+
+function widgetCategory(id: WidgetId): string {
+  return WIDGET_CATEGORIES.find(c => c.ids.includes(id))?.label ?? "Other";
+}
+
 // ── Widget list item ──────────────────────────────────────────────────────────
+
+type WidgetActionPhase =
+  | "adding"   | "added"
+  | "removing" | "removed"
+  | "moving"   | "moved";
 
 function WidgetRow({
   id, visible, isFirst, isLast, onToggle, onMoveUp, onMoveDown,
+  recentAction,
 }: {
   id: WidgetId; visible: boolean; isFirst: boolean; isLast: boolean;
   onToggle: () => void; onMoveUp: () => void; onMoveDown: () => void;
+  /** Two-phase action label: in-progress ("Adding…") then completed ("Added"). */
+  recentAction: WidgetActionPhase | null;
 }) {
-  const meta = WIDGET_META[id];
+  const meta     = WIDGET_META[id];
+  const category = widgetCategory(id);
+  const catColor = CATEGORY_COLORS[category] ?? "bg-muted text-muted-foreground";
+  const pres     = WIDGET_PRESENTATION[id];
+
+  // Map phase → ring tint (covers both in-progress and completed states)
+  const ringClass =
+    recentAction === "adding"   || recentAction === "added"   ? "ring-2 ring-emerald-500/40 bg-emerald-500/5" :
+    recentAction === "removing" || recentAction === "removed" ? "ring-2 ring-amber-500/40  bg-amber-500/5"   :
+    recentAction === "moving"   || recentAction === "moved"   ? "ring-2 ring-primary/40    bg-primary/5"     : "";
+
+  // Make the entire row a button (except the move arrows) so the click
+  // target is the full strip and not just the small On/Off pill at the
+  // right edge — the most common report was "I clicked but nothing happened".
   return (
-    <div className="flex items-center gap-3 py-2.5">
-      <div className="flex flex-col gap-0.5 shrink-0">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onToggle}
+      onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); onToggle(); } }}
+      aria-pressed={visible}
+      aria-label={`${visible ? "Hide" : "Show"} ${meta.label}`}
+      className={[
+        "relative flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer select-none transition-all duration-300",
+        "hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        visible ? "bg-background" : "bg-muted/20",
+        ringClass,
+      ].filter(Boolean).join(" ")}>
+      {/* Move arrows — own click handlers; stop propagation so they don't toggle the row */}
+      <div className="flex flex-col gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
         <button type="button" onClick={onMoveUp} disabled={isFirst}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+          className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-muted disabled:opacity-0 transition-colors"
           aria-label={`Move ${meta.label} up`}>
           <ArrowUp className="h-3 w-3" />
         </button>
         <button type="button" onClick={onMoveDown} disabled={isLast}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+          className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-muted disabled:opacity-0 transition-colors"
           aria-label={`Move ${meta.label} down`}>
           <ArrowDown className="h-3 w-3" />
         </button>
       </div>
+
+      {/* Content */}
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium leading-none ${!visible ? "text-muted-foreground" : ""}`}>
-          {meta.label}
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className={`text-sm font-medium leading-none ${!visible ? "text-muted-foreground" : ""}`}>
+            {meta.label}
+          </p>
+          <span className={`inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-full ${catColor}`}>
+            {category}
+          </span>
+          <span className="text-[10px] text-muted-foreground/60 hidden sm:inline">{pres}</span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed line-clamp-1">
+          {meta.description}
         </p>
-        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{meta.description}</p>
       </div>
-      <Switch checked={visible} onCheckedChange={onToggle} aria-label={`${visible ? "Hide" : "Show"} ${meta.label}`} />
+
+      {/* On/Off pill — still its own button (and still toggles via onClick),
+          but visually it's now an indicator since the whole row is clickable. */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        className={[
+          "shrink-0 flex items-center gap-1 text-xs font-medium rounded-full px-2.5 py-1 transition-all border",
+          visible
+            ? "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
+            : "bg-muted/60 text-muted-foreground border-border/60 hover:bg-muted",
+        ].join(" ")}
+        aria-label={`${visible ? "Hide" : "Show"} ${meta.label}`}
+      >
+        {visible
+          ? <><Eye className="h-3 w-3" />On</>
+          : <><EyeOff className="h-3 w-3" />Off</>
+        }
+      </button>
+
+      {/* Two-phase transient chip: spinner + "Adding…" first, then a check
+          + "Added" once the local mutation has settled. Same pattern for
+          remove and move. pointer-events-none so it never eats clicks. */}
+      {recentAction && (
+        <span
+          className={[
+            "pointer-events-none absolute right-2 -top-2 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider border shadow-sm animate-in fade-in slide-in-from-top-1",
+            (recentAction === "adding" || recentAction === "added")     && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+            (recentAction === "removing" || recentAction === "removed") && "bg-amber-500/15   text-amber-700  dark:text-amber-300  border-amber-500/30",
+            (recentAction === "moving" || recentAction === "moved")     && "bg-primary/15     text-primary                            border-primary/30",
+          ].filter(Boolean).join(" ")}
+        >
+          {recentAction === "adding"   && <><Loader2 className="h-2.5 w-2.5 animate-spin" />Adding…</>}
+          {recentAction === "added"    && <><Check    className="h-2.5 w-2.5" />Added</>}
+          {recentAction === "removing" && <><Loader2 className="h-2.5 w-2.5 animate-spin" />Removing…</>}
+          {recentAction === "removed"  && <><Check    className="h-2.5 w-2.5" />Removed</>}
+          {recentAction === "moving"   && <><Loader2 className="h-2.5 w-2.5 animate-spin" />Moving…</>}
+          {recentAction === "moved"    && <><Check    className="h-2.5 w-2.5" />Moved</>}
+        </span>
+      )}
     </div>
   );
 }
@@ -151,6 +237,16 @@ export default function DashboardCustomizer({
   const { data: session } = useSession();
   const isElevated = session?.user?.role === "admin" || session?.user?.role === "supervisor";
 
+  // ── Fetch real team list from API ──────────────────────────────────────────
+  // Previously only teams with existing team-visible dashboards were shown,
+  // which meant the dropdown was empty if no dashboard had been shared yet.
+  const { data: teamsData } = useQuery<{ teams: TeamOption[] }>({
+    queryKey: ["teams-for-share"],
+    queryFn:  () => axios.get<{ teams: TeamOption[] }>("/api/teams").then(r => r.data),
+    staleTime: 2 * 60_000,
+    enabled: open,
+  });
+
   const [tab, setTab] = useState<"customize" | "dashboards">("customize");
   const [name, setName] = useState(() => activeDashboard?.name ?? "My Dashboard");
   const [description, setDescription] = useState(() => activeDashboard?.description ?? "");
@@ -165,19 +261,65 @@ export default function DashboardCustomizer({
 
   const sortedWidgets = [...draft.widgets].sort((a, b) => a.order - b.order);
 
-  // Collect all teams from team-visible dashboards for the team picker
-  const availableTeams = dashboardList
-    ? [
-        ...dashboardList.personal
-          .filter(d => d.visibilityTeam)
-          .map(d => d.visibilityTeam!),
-        ...dashboardList.teamVisible
-          .filter(d => d.visibilityTeam)
-          .map(d => d.visibilityTeam!),
-      ].filter((t, i, arr) => arr.findIndex(x => x.id === t.id) === i)
-    : [];
+  // Build team options for the searchable select
+  const teamOptions = useMemo(() => {
+    const raw = teamsData?.teams ?? [];
+    return [
+      { value: "none", label: "Only me" },
+      ...raw.map(t => ({
+        value: String(t.id),
+        label: t.name,
+        prefix: t.color
+          ? <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+          : <Users className="h-3 w-3 text-muted-foreground" />,
+      })),
+    ];
+  }, [teamsData]);
+
+  // Visible / hidden counts
+  const visibleCount = sortedWidgets.filter(w => w.visible).length;
 
   // ── Widget mutation helpers ────────────────────────────────────────────────
+
+  // Per-widget two-phase action chip:
+  //   "Adding…"   (spinner) ~350ms → "Added"   (check) ~1100ms → cleared
+  //   "Removing…" (spinner) ~350ms → "Removed" (check) ~1100ms → cleared
+  //   "Moving…"   (spinner) ~250ms → "Moved"   (check) ~900ms  → cleared
+  // The spinner phase is a UX cue — the local state mutation itself is
+  // synchronous, but the brief "in-flight" feel makes clicks feel real and
+  // confirms the action registered before the visible row state changes.
+  const [recentAction, setRecentAction] = useState<Record<string, WidgetActionPhase>>({});
+  const recentTimers = useRef<Record<string, ReturnType<typeof setTimeout>[]>>({});
+
+  const flagRecent = useCallback((id: string, kind: "add" | "remove" | "move") => {
+    // Cancel any in-flight phase chain for this widget
+    (recentTimers.current[id] ?? []).forEach(clearTimeout);
+    recentTimers.current[id] = [];
+
+    const startPhase: WidgetActionPhase  = kind === "add" ? "adding"   : kind === "remove" ? "removing" : "moving";
+    const finishPhase: WidgetActionPhase = kind === "add" ? "added"    : kind === "remove" ? "removed"  : "moved";
+    const startMs = kind === "move" ? 250 : 350;
+    const totalMs = kind === "move" ? 1150 : 1450;
+
+    setRecentAction(prev => ({ ...prev, [id]: startPhase }));
+
+    recentTimers.current[id]!.push(setTimeout(() => {
+      setRecentAction(prev => ({ ...prev, [id]: finishPhase }));
+    }, startMs));
+
+    recentTimers.current[id]!.push(setTimeout(() => {
+      setRecentAction(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }, totalMs));
+  }, []);
+
+  // Cleanup pending timers on unmount
+  useEffect(() => () => {
+    Object.values(recentTimers.current).flat().forEach(clearTimeout);
+  }, []);
 
   const updateWidgets = useCallback(
     (fn: (widgets: typeof sortedWidgets) => typeof sortedWidgets) => {
@@ -191,18 +333,51 @@ export default function DashboardCustomizer({
   );
 
   function toggleWidget(id: WidgetId) {
+    const current = sortedWidgets.find(w => w.id === id);
+    flagRecent(id, current?.visible ? "remove" : "add");
     updateWidgets(ws => ws.map(w => w.id === id ? { ...w, visible: !w.visible } : w));
   }
 
   function moveWidget(idx: number, direction: -1 | 1) {
     const newIdx = idx + direction;
     if (newIdx < 0 || newIdx >= sortedWidgets.length) return;
+    const movedId = sortedWidgets[idx]?.id;
+    if (movedId) flagRecent(movedId, "move");
     updateWidgets(ws => {
       const next = [...ws];
       [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
       return next;
     });
   }
+
+  // ── Dirty detection ────────────────────────────────────────────────────────
+  // Compare draft against the saved baseline so we can show an "Unsaved
+  // changes" pill — the toggle/move actions only mutate local state, so
+  // without this signal the user has no idea that pressing Save is needed.
+  const baselineKey = useMemo(
+    () => JSON.stringify({
+      widgets: [...activeConfig.widgets]
+        .sort((a, b) => a.order - b.order)
+        .map(w => ({ id: w.id, visible: w.visible, order: w.order })),
+      compact: (activeConfig as { compact?: boolean }).compact,
+    }),
+    [activeConfig],
+  );
+  const draftKey = useMemo(
+    () => JSON.stringify({
+      widgets: [...draft.widgets]
+        .sort((a, b) => a.order - b.order)
+        .map(w => ({ id: w.id, visible: w.visible, order: w.order })),
+      compact: (draft as { compact?: boolean }).compact,
+    }),
+    [draft],
+  );
+  const isDirty =
+    baselineKey !== draftKey ||
+    name !== (activeDashboard?.name ?? "My Dashboard") ||
+    description !== (activeDashboard?.description ?? "") ||
+    isShared !== (activeDashboard?.isShared ?? false) ||
+    visibilityTeamId !== (activeDashboard?.visibilityTeamId ?? null);
 
   function resetToDefault() {
     setDraft(normalizeConfig(SYSTEM_DEFAULT_CONFIG));
@@ -223,166 +398,196 @@ export default function DashboardCustomizer({
   const isOnSystemDefault = activeDashboard === null;
   const defaultId = dashboardList?.defaultDashboardId ?? null;
 
-  // Visibility label for the Dashboards tab
   function visibilityBadge(d: StoredDashboard) {
-    if (d.isShared)              return <Badge variant="secondary" className="text-[10px] h-4 gap-0.5"><Globe className="h-2.5 w-2.5" />Shared</Badge>;
-    if (d.visibilityTeamId)      return <Badge variant="outline" className="text-[10px] h-4 gap-0.5"><Users className="h-2.5 w-2.5" />{d.visibilityTeam?.name ?? "Team"}</Badge>;
+    if (d.isShared)         return <Badge variant="secondary" className="text-[10px] h-4 gap-0.5"><Globe className="h-2.5 w-2.5" />Shared</Badge>;
+    if (d.visibilityTeamId) return <Badge variant="outline"   className="text-[10px] h-4 gap-0.5"><Users className="h-2.5 w-2.5" />{d.visibilityTeam?.name ?? "Team"}</Badge>;
     return <Badge variant="outline" className="text-[10px] h-4 gap-0.5"><User className="h-2.5 w-2.5" />Personal</Badge>;
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col gap-0 p-0">
-        <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
-          <DialogTitle>Dashboard Settings</DialogTitle>
+      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
+        <DialogHeader className="px-6 pt-5 pb-3 shrink-0 border-b bg-muted/30">
+          <div className="flex items-center gap-2.5">
+            <div className="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+              <LayoutGrid className="h-4 w-4 text-primary" />
+            </div>
+            <DialogTitle className="text-base font-semibold">Dashboard Settings</DialogTitle>
+          </div>
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={v => setTab(v as typeof tab)} className="flex-1 flex flex-col min-h-0">
-          <TabsList className="mx-6 mb-2 shrink-0 w-auto self-start">
-            <TabsTrigger value="customize">Customize</TabsTrigger>
-            <TabsTrigger value="dashboards">My Dashboards</TabsTrigger>
+          <TabsList className="mx-6 mt-3 mb-1 shrink-0 w-auto self-start h-8">
+            <TabsTrigger value="customize" className="text-xs h-7">Customize</TabsTrigger>
+            <TabsTrigger value="dashboards" className="text-xs h-7">My Dashboards</TabsTrigger>
           </TabsList>
 
           {/* ── Customize tab ─────────────────────────────────────────────── */}
-          <TabsContent value="customize" className="flex-1 overflow-y-auto px-6 space-y-5 mt-0">
+          <TabsContent value="customize" className="flex-1 overflow-y-auto px-6 space-y-5 mt-2 pb-2">
 
-            {/* Name */}
-            <div className="space-y-1.5">
-              <Label htmlFor="dashboard-name" className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Dashboard Name
-              </Label>
-              <Input
-                id="dashboard-name"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="My Dashboard"
-                maxLength={100}
-              />
-              {isOnSystemDefault && (
-                <p className="text-xs text-muted-foreground">Saving will create a new personal dashboard.</p>
-              )}
-            </div>
-
-            {/* Description */}
-            <div className="space-y-1.5">
-              <Label htmlFor="dashboard-desc" className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Description <span className="font-normal text-muted-foreground/60">(optional)</span>
-              </Label>
-              <Textarea
-                id="dashboard-desc"
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                placeholder="What is this dashboard for?"
-                className="text-sm min-h-[60px] resize-none"
-                maxLength={500}
-              />
+            {/* Name + description */}
+            <div className="space-y-3 rounded-xl border bg-card p-4">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Identity</p>
+              <div className="space-y-1.5">
+                <Label htmlFor="dashboard-name" className="text-xs font-medium">Dashboard name</Label>
+                <Input
+                  id="dashboard-name"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="My Dashboard"
+                  maxLength={100}
+                  className="h-8 text-sm"
+                />
+                {isOnSystemDefault && (
+                  <p className="text-[11px] text-muted-foreground">Saving will create a new personal dashboard.</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="dashboard-desc" className="text-xs font-medium">
+                  Description <span className="font-normal text-muted-foreground/60">(optional)</span>
+                </Label>
+                <Textarea
+                  id="dashboard-desc"
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  placeholder="What is this dashboard for?"
+                  className="text-sm min-h-[52px] resize-none"
+                  maxLength={500}
+                />
+              </div>
             </div>
 
             {/* Visibility */}
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Visibility
-              </Label>
-              <div className="space-y-2">
-                {/* Team scope */}
-                <div className="space-y-1.5">
-                  <p className="text-xs text-muted-foreground">Share with a team</p>
-                  <Select
-                    value={visibilityTeamId ? String(visibilityTeamId) : "none"}
-                    onValueChange={v => setVisibilityTeamId(v === "none" ? null : Number(v))}
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none" className="text-xs">Only me</SelectItem>
-                      {availableTeams.map(t => (
-                        <SelectItem key={t.id} value={String(t.id)} className="text-xs">
-                          {t.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+            <div className="space-y-3 rounded-xl border bg-card p-4">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Visibility</p>
 
-                {/* Org-wide sharing (elevated only) */}
-                {isElevated && (
-                  <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-                    <div>
-                      <p className="text-sm font-medium">Share with everyone</p>
-                      <p className="text-xs text-muted-foreground">All users in the organisation can see this dashboard.</p>
-                    </div>
-                    <Switch
-                      checked={isShared}
-                      onCheckedChange={v => { setIsShared(v); if (v) setVisibilityTeamId(null); }}
-                    />
-                  </div>
+              {/* Team scope */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium flex items-center gap-1.5">
+                  <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                  Share with a team
+                </Label>
+                <SearchableSelect
+                  options={teamOptions}
+                  value={visibilityTeamId ? String(visibilityTeamId) : "none"}
+                  onChange={v => setVisibilityTeamId(v === "none" ? null : Number(v))}
+                  placeholder="Only me"
+                  searchPlaceholder="Search teams…"
+                  className="h-8 text-sm"
+                  disabled={isShared}
+                />
+                {visibilityTeamId && (
+                  <p className="text-[11px] text-muted-foreground">
+                    All members of this team can view and use this dashboard.
+                  </p>
                 )}
               </div>
+
+              {/* Org-wide sharing (elevated only) */}
+              {isElevated ? (
+                <div className={[
+                  "flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 transition-colors",
+                  isShared ? "border-primary/30 bg-primary/5" : "border-border",
+                ].join(" ")}>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium leading-none">Share with everyone</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">All users in the organisation can see this.</p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={isShared}
+                    onCheckedChange={v => { setIsShared(v); if (v) setVisibilityTeamId(null); }}
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2.5 rounded-lg border border-border/60 px-3 py-2.5 opacity-60">
+                  <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <p className="text-xs text-muted-foreground">Org-wide sharing requires admin or supervisor role.</p>
+                </div>
+              )}
             </div>
 
-            <Separator />
+            {/* Time range + density */}
+            <div className="space-y-3 rounded-xl border bg-card p-4">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Defaults</p>
 
-            {/* Time range */}
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Default Time Range
-              </p>
-              <div className="flex gap-2">
-                {([7, 30, 90] as Period[]).map(p => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setDraft(d => ({ ...d, period: p }))}
-                    className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
-                      draft.period === p
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-background text-muted-foreground hover:text-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {p}d
-                  </button>
-                ))}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Default time range</Label>
+                <div className="flex gap-1.5">
+                  {([7, 30, 90] as Period[]).map(p => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setDraft(d => ({ ...d, period: p }))}
+                      className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition-all ${
+                        draft.period === p
+                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                          : "bg-background text-muted-foreground hover:text-foreground hover:bg-muted border-border"
+                      }`}
+                    >
+                      {p}d
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Layout density</Label>
+                <div className="flex gap-1.5">
+                  {(["comfortable", "compact"] as const).map(d => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setDraft(prev => ({ ...prev, density: d }))}
+                      className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium capitalize transition-all ${
+                        draft.density === d
+                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                          : "bg-background text-muted-foreground hover:text-foreground hover:bg-muted border-border"
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Compact reduces row height and spacing between widgets.
+                </p>
               </div>
             </div>
-
-            {/* Density */}
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Layout Density
-              </p>
-              <div className="flex gap-2">
-                {(["comfortable", "compact"] as const).map(d => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setDraft(prev => ({ ...prev, density: d }))}
-                    className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-medium capitalize transition-colors ${
-                      draft.density === d
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-background text-muted-foreground hover:text-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {d}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Compact reduces spacing between sections and shrinks metric values.
-              </p>
-            </div>
-
-            <Separator />
 
             {/* Widget list */}
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                Widgets
+            <div className="space-y-2 rounded-xl border bg-card p-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Widgets</p>
+                <div className="flex items-center gap-2">
+                  {/* Unsaved-changes pill — pulses while saving, steady while dirty */}
+                  {isSaving ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
+                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                      Saving…
+                    </span>
+                  ) : isDirty ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
+                      <CircleDot className="h-2.5 w-2.5 animate-pulse" />
+                      Unsaved changes
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
+                      <Check className="h-2.5 w-2.5" />
+                      Saved
+                    </span>
+                  )}
+                  <span className="text-[11px] text-muted-foreground tabular-nums">
+                    {visibleCount} of {sortedWidgets.length} visible
+                  </span>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Toggle visibility and reorder using the arrows. Changes are queued — click <span className="font-medium text-foreground">Save Changes</span> to apply.
               </p>
-              <p className="text-xs text-muted-foreground mb-3">
-                Toggle visibility and reorder using the arrows.
-              </p>
-              <div className="divide-y">
+              <div className="space-y-0.5 mt-1">
                 {sortedWidgets.map((w, idx) => (
                   <WidgetRow
                     key={w.id}
@@ -393,26 +598,27 @@ export default function DashboardCustomizer({
                     onToggle={() => toggleWidget(w.id)}
                     onMoveUp={() => moveWidget(idx, -1)}
                     onMoveDown={() => moveWidget(idx, 1)}
+                    recentAction={recentAction[w.id] ?? null}
                   />
                 ))}
               </div>
             </div>
 
-            <div className="pb-4">
+            <div className="pb-2">
               <button type="button" onClick={resetToDefault}
                 className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
                 <RotateCcw className="h-3 w-3" />
-                Reset to system defaults
+                Reset everything to system defaults
               </button>
             </div>
           </TabsContent>
 
           {/* ── Dashboards tab ─────────────────────────────────────────────── */}
-          <TabsContent value="dashboards" className="flex-1 overflow-y-auto px-6 mt-0 space-y-4">
+          <TabsContent value="dashboards" className="flex-1 overflow-y-auto px-6 mt-2 pb-2 space-y-4">
 
             {/* System default */}
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">System Default</p>
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">System Default</p>
               <DashboardRow
                 name="Overview (Default)"
                 isActive={isOnSystemDefault}
@@ -423,10 +629,9 @@ export default function DashboardCustomizer({
               />
             </div>
 
-            {/* Personal dashboards */}
             {dashboardList && dashboardList.personal.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">My Dashboards</p>
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">My Dashboards</p>
                 <div className="space-y-1">
                   {dashboardList.personal.map(d => (
                     <DashboardRow
@@ -446,10 +651,9 @@ export default function DashboardCustomizer({
               </div>
             )}
 
-            {/* Team dashboards */}
             {dashboardList && dashboardList.teamVisible.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Team Dashboards</p>
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Team Dashboards</p>
                 <div className="space-y-1">
                   {dashboardList.teamVisible.map(d => (
                     <DashboardRow
@@ -476,10 +680,9 @@ export default function DashboardCustomizer({
               </div>
             )}
 
-            {/* Shared dashboards */}
             {dashboardList && dashboardList.shared.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Shared by Admins</p>
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Shared by Admins</p>
                 <div className="space-y-1">
                   {dashboardList.shared.map(d => (
                     <DashboardRow
@@ -501,29 +704,35 @@ export default function DashboardCustomizer({
             )}
 
             {dashboardList?.personal.length === 0 && dashboardList?.shared.length === 0 && dashboardList?.teamVisible.length === 0 && (
-              <p className="text-sm text-muted-foreground py-6 text-center">
-                No saved dashboards yet. Use the Customize tab to create one.
-              </p>
+              <div className="flex flex-col items-center justify-center py-12 text-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-muted flex items-center justify-center">
+                  <LayoutGrid className="h-5 w-5 text-muted-foreground/50" />
+                </div>
+                <p className="text-sm font-medium text-muted-foreground">No saved dashboards yet</p>
+                <p className="text-xs text-muted-foreground/70 max-w-[220px]">
+                  Use the Customize tab to name and save your current layout.
+                </p>
+              </div>
             )}
           </TabsContent>
         </Tabs>
 
         {/* ── Footer ──────────────────────────────────────────────────────── */}
-        <div className="shrink-0 px-6 pb-6 pt-4 border-t space-y-3">
+        <div className="shrink-0 px-6 pb-5 pt-4 border-t bg-muted/20 space-y-3">
           {saveError && <ErrorAlert error={saveError} fallback="Failed to save dashboard" />}
           {tab === "customize" && (
             <div className="flex justify-between gap-2">
-              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+              <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={isSaving}>
                 Cancel
               </Button>
-              <Button onClick={handleSave} disabled={isSaving} className="gap-1.5">
+              <Button size="sm" onClick={handleSave} disabled={isSaving} className="gap-1.5 min-w-[100px]">
                 {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 {isSaving ? "Saving…" : activeDashboard ? "Save Changes" : "Save & Apply"}
               </Button>
             </div>
           )}
           {tab === "dashboards" && (
-            <Button variant="outline" className="w-full" onClick={() => onOpenChange(false)}>
+            <Button variant="outline" size="sm" className="w-full" onClick={() => onOpenChange(false)}>
               Done
             </Button>
           )}
@@ -551,13 +760,16 @@ function DashboardRow({
   isCloning?: boolean;
 }) {
   return (
-    <div className={`flex items-center gap-3 rounded-lg px-3 py-2.5 border transition-colors ${
-      isActive ? "bg-muted/60 border-border" : "border-transparent hover:bg-muted/30"
-    }`}>
+    <div className={[
+      "flex items-center gap-3 rounded-lg px-3 py-2.5 border transition-all",
+      isActive
+        ? "bg-primary/5 border-primary/20 shadow-sm"
+        : "border-transparent hover:bg-muted/40 hover:border-border/60",
+    ].join(" ")}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap">
           {icon}
-          <span className="text-sm font-medium truncate">{name}</span>
+          <span className={`text-sm font-medium truncate ${isActive ? "text-primary" : ""}`}>{name}</span>
           {isDefault && <Star className="h-3 w-3 fill-yellow-400 text-yellow-400 shrink-0" />}
           {badge}
         </div>
@@ -567,32 +779,26 @@ function DashboardRow({
       </div>
 
       <div className="flex items-center gap-1 shrink-0">
-        {!isActive && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={onSetDefault}>
+        {!isActive ? (
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2" onClick={onSetDefault}>
             <Check className="h-3 w-3" />
             Use
           </Button>
+        ) : (
+          <span className="text-[11px] font-medium text-primary/70 px-1.5">Active</span>
         )}
-        {isActive && <span className="text-xs text-muted-foreground px-2">Active</span>}
         {onClone && (
           <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={onClone}
-            disabled={isCloning}
-            title="Clone dashboard"
+            variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={onClone} disabled={isCloning} title="Clone dashboard"
           >
             {isCloning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
           </Button>
         )}
         {onDelete && (
           <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-destructive"
-            onClick={onDelete}
-            aria-label={`Delete ${name}`}
+            variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            onClick={onDelete} aria-label={`Delete ${name}`}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>

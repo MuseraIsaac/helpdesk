@@ -29,7 +29,7 @@ import {
   take, pick, daysAgo, hoursAgo, pad, jitter,
   USER_POOL, TEAM_POOL, ORG_POOL, CUSTOMER_POOL,
   KB_CATEGORY_POOL, KB_ARTICLE_POOL,
-  MACRO_POOL, CATALOG_ITEM_POOL,
+  MACRO_POOL, CATALOG_ITEM_POOL, CATALOG_CATEGORY_POOL,
   TICKET_POOL, INCIDENT_POOL, REQUEST_POOL,
   PROBLEM_POOL, CHANGE_POOL, ASSET_POOL, CI_POOL,
 } from "./data-pools";
@@ -192,14 +192,64 @@ async function generateCatalog(ctx: GeneratorContext, batchId: number, progress:
   });
   ctx.cabGroupIds.push(cab.id);
 
-  // Catalog items
-  for (const spec of take(CATALOG_ITEM_POOL, ctx.params.catalog)) {
-    const teamId = ctx.teamIds[spec.teamIdx % ctx.teamIds.length];
-    const item = await prisma.catalogItem.create({ data: { name: spec.name, description: spec.description, isActive: true, fulfillmentTeamId: teamId, createdById: ctx.adminId } });
+  // Pick the catalog items first so we only create the categories that are
+  // actually referenced — keeps the demo dataset clean and predictable.
+  const itemSpecs = take(CATALOG_ITEM_POOL, ctx.params.catalog);
+  const referencedSlugs = new Set(itemSpecs.map((s) => s.categorySlug));
+
+  // Catalog categories (ordered by appearance in the pool so positions are stable)
+  const categoryIdBySlug = new Map<string, number>();
+  let position = 0;
+  for (const cat of CATALOG_CATEGORY_POOL) {
+    if (!referencedSlugs.has(cat.slug)) continue;
+    const created = await prisma.catalogCategory.create({
+      data: {
+        name:        cat.name,
+        slug:        cat.slug,
+        description: cat.description,
+        isActive:    true,
+        position:    position++,
+      },
+    });
+    ctx.catalogCategoryIds.push(created.id);
+    categoryIdBySlug.set(cat.slug, created.id);
+  }
+
+  // Catalog items with rich fields: icon, shortDescription, instructions,
+  // approval flag, and a dynamic form schema.
+  let itemPosition = 0;
+  for (const spec of itemSpecs) {
+    const teamId   = ctx.teamIds[spec.teamIdx % Math.max(ctx.teamIds.length, 1)];
+    const approverIds = spec.requiresApproval && ctx.supervisorIds.length
+      ? ctx.supervisorIds.slice(0, 1)
+      : [];
+    const item = await prisma.catalogItem.create({
+      data: {
+        name:                  spec.name,
+        shortDescription:      spec.shortDescription,
+        description:           spec.description,
+        requestorInstructions: spec.requestorInstructions,
+        icon:                  spec.icon,
+        categoryId:            categoryIdBySlug.get(spec.categorySlug) ?? null,
+        fulfillmentTeamId:     teamId,
+        requiresApproval:      spec.requiresApproval,
+        approvalMode:          "all",
+        approverIds,
+        formSchema:            spec.formSchema as unknown as object,
+        position:              itemPosition++,
+        isActive:              true,
+        createdById:           ctx.adminId,
+      },
+    });
     ctx.catalogItemIds.push(item.id);
   }
 
-  await markModuleDone(batchId, "catalog", ctx.cabGroupIds.length + ctx.catalogItemIds.length, progress);
+  await markModuleDone(
+    batchId,
+    "catalog",
+    ctx.cabGroupIds.length + ctx.catalogCategoryIds.length + ctx.catalogItemIds.length,
+    progress,
+  );
 }
 
 // ── Tickets ───────────────────────────────────────────────────────────────────

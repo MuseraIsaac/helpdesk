@@ -3,6 +3,7 @@ import { requireAuth } from "../middleware/require-auth";
 import { requireAdmin } from "../middleware/require-admin";
 import { getSection } from "../lib/settings";
 import prisma from "../db";
+import type { Prisma } from "../generated/prisma/client";
 
 const router = Router();
 
@@ -79,22 +80,70 @@ router.get(
   async (req, res) => {
     const page     = Math.max(1, Number(req.query.page)     || 1);
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 50));
-    const action   = req.query.action as string | undefined;
 
-    const where = action ? { action: { contains: action } } : {};
+    // Build filter
+    const where: Prisma.AuditEventWhereInput = {};
+
+    // Legacy substring match (kept for backward-compat)
+    const actionSubstr = req.query.action as string | undefined;
+    if (actionSubstr) where.action = { contains: actionSubstr, mode: "insensitive" };
+
+    // Exact multi-action filter (new)
+    const actionsParam = req.query.actions;
+    if (actionsParam) {
+      const list = (Array.isArray(actionsParam) ? actionsParam : [actionsParam]) as string[];
+      if (list.length > 0) where.action = { in: list };
+    }
+
+    // Date range
+    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+    const endDate   = req.query.endDate   ? new Date(req.query.endDate   as string) : undefined;
+    if (startDate || endDate) {
+      where.createdAt = { ...(startDate ? { gte: startDate } : {}), ...(endDate ? { lte: endDate } : {}) };
+    }
+
+    // Actor filter (exact ID or name/email search)
+    const actorId     = req.query.actorId     as string | undefined;
+    const actorSearch = req.query.actorSearch as string | undefined;
+    if (actorId) {
+      where.actorId = actorId;
+    } else if (actorSearch) {
+      where.actor = {
+        OR: [
+          { name:  { contains: actorSearch, mode: "insensitive" } },
+          { email: { contains: actorSearch, mode: "insensitive" } },
+        ],
+      };
+    }
+
+    // Ticket filter
+    const ticketId     = req.query.ticketId     ? Number(req.query.ticketId) : undefined;
+    const ticketSearch = req.query.ticketSearch as string | undefined;
+    if (ticketId && !isNaN(ticketId)) {
+      where.ticketId = ticketId;
+    } else if (ticketSearch) {
+      where.ticket = {
+        OR: [
+          { ticketNumber: { contains: ticketSearch, mode: "insensitive" } },
+          { subject:      { contains: ticketSearch, mode: "insensitive" } },
+        ],
+      };
+    }
+
+    const EVENT_SELECT = {
+      id: true,
+      action: true,
+      meta: true,
+      createdAt: true,
+      ticketId: true,
+      actor:  { select: { id: true, name: true, email: true } },
+      ticket: { select: { ticketNumber: true, subject: true } },
+    } as const;
 
     const [events, total] = await Promise.all([
       prisma.auditEvent.findMany({
         where,
-        select: {
-          id: true,
-          action: true,
-          meta: true,
-          createdAt: true,
-          ticketId: true,
-          actor: { select: { id: true, name: true, email: true } },
-          ticket: { select: { ticketNumber: true, subject: true } },
-        },
+        select: EVENT_SELECT,
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize,

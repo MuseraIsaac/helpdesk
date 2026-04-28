@@ -12,6 +12,7 @@ import HelpLayout from "./components/HelpLayout";
 import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
 import UsersPage from "./pages/UsersPage";
+import RolesPage from "./pages/RolesPage";
 import MacrosPage from "./pages/MacrosPage";
 import TemplatesPage from "./pages/TemplatesPage";
 import FormBuilderPage from "./pages/FormBuilderPage";
@@ -101,6 +102,7 @@ import AssetsReport      from "./pages/reports/AssetsReport";
 import InsightsReport    from "./pages/reports/InsightsReport";
 import DemoDataPage      from "./pages/DemoDataPage";
 import TrashPage         from "./pages/TrashPage";
+import AuditLogPage      from "./pages/AuditLogPage";
 import DutyPlanPage      from "./pages/DutyPlanPage";
 import DutyPlanTeamPage  from "./pages/DutyPlanTeamPage";
 import DutyPlanDetailPage from "./pages/DutyPlanDetailPage";
@@ -206,6 +208,8 @@ function App() {
             <Route path="/admin/ticket-types" element={<TicketTypesPage />} />
             <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
             <Route path="/admin/trash" element={<TrashPage />} />
+            <Route path="/admin/audit-log" element={<AuditLogPage />} />
+            <Route path="/admin/roles" element={<RolesPage />} />
             {/* Automation Platform */}
             <Route path="/automations" element={<AutomationPlatformPage />} />
             <Route path="/automations/rules/new" element={<AutomationRuleFormPage />} />

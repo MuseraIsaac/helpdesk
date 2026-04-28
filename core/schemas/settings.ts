@@ -241,6 +241,18 @@ export const brandingSettingsSchema = z.object({
   ),
   /** Text inside the small pill badge at the top of the agent hero. */
   agentLoginBadge:      z.string().max(100).default("AI-Powered Service Management"),
+
+  // ── Service desk contacts (shown on the customer portal homepage) ─────────
+  /** Primary support email address shown to customers. */
+  serviceDeskEmail:     z.string().max(200).default(""),
+  /** Primary support phone number (free-form, e.g. "+1 (800) 123-4567"). */
+  serviceDeskPhone:     z.string().max(50).default(""),
+  /** Service hours / availability text, e.g. "Mon–Fri, 9 AM – 6 PM EST". */
+  serviceDeskHours:     z.string().max(150).default(""),
+  /** Optional after-hours / emergency contact (phone or email). */
+  emergencyContact:     z.string().max(200).default(""),
+  /** Optional location / office address. */
+  serviceDeskLocation:  z.string().max(200).default(""),
 });
 
 export const ticketsSettingsSchema = z.object({
@@ -607,6 +619,15 @@ export const auditSettingsSchema = z.object({
   // Which event categories to capture
   captureAuthEvents:           z.boolean().default(true),
   captureTicketEvents:         z.boolean().default(true),
+  // ITSM modules — one toggle per module
+  captureIncidentEvents:       z.boolean().default(true),
+  captureProblemEvents:        z.boolean().default(true),
+  captureChangeEvents:         z.boolean().default(true),
+  captureRequestEvents:        z.boolean().default(true),
+  captureAssetEvents:          z.boolean().default(true),
+  captureApprovalEvents:       z.boolean().default(true),
+  captureCustomerEvents:       z.boolean().default(false),  // portal registration / logins
+  captureTeamEvents:           z.boolean().default(true),
   captureSettingsChanges:      z.boolean().default(true),
   captureUserManagement:       z.boolean().default(true),
   captureKbEvents:             z.boolean().default(false),

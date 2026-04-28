@@ -1,7 +1,6 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { Role } from "../src/generated/prisma/client";
 import { hashPassword } from "better-auth/crypto";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 
@@ -20,6 +19,29 @@ async function main() {
 
   const now = new Date();
 
+  // ── Seed built-in roles ────────────────────────────────────────────────────
+  // The User table now has a foreign key to Role.key, so the role rows must
+  // exist before any user can be inserted. Permissions are left empty and
+  // hydrated by `loadRoles()` at boot from BUILTIN_ROLE_PERMISSIONS.
+  const BUILTIN_ROLES: Array<{
+    key: string; name: string; description: string;
+    isBuiltin: boolean; isSystem: boolean; color: string | null;
+  }> = [
+    { key: "admin",      name: "Administrator", description: "Full access to every feature, including settings and user management.", isBuiltin: true,  isSystem: false, color: "#dc2626" },
+    { key: "supervisor", name: "Supervisor",    description: "Team lead with broad ticket access and reporting privileges.",            isBuiltin: true,  isSystem: false, color: "#7c3aed" },
+    { key: "agent",      name: "Agent",         description: "Standard support agent — handles tickets within their team's scope.",     isBuiltin: true,  isSystem: false, color: "#2563eb" },
+    { key: "readonly",   name: "Read-only",     description: "View-only access; cannot modify tickets or settings.",                    isBuiltin: true,  isSystem: false, color: "#64748b" },
+    { key: "customer",   name: "Customer",      description: "Portal user — can submit tickets and view their own.",                    isBuiltin: true,  isSystem: true,  color: "#10b981" },
+  ];
+  for (const r of BUILTIN_ROLES) {
+    await prisma.role.upsert({
+      where:  { key: r.key },
+      create: { ...r, permissions: [], createdAt: now, updatedAt: now },
+      update: {}, // never overwrite admin-edited names/permissions
+    });
+  }
+  console.log(`Seeded ${BUILTIN_ROLES.length} built-in roles.`);
+
   // Seed admin user
   const existingAdmin = await prisma.user.findUnique({ where: { email } });
   if (existingAdmin) {
@@ -35,7 +57,7 @@ async function main() {
           name: "Admin",
           email,
           emailVerified: false,
-          role: Role.admin,
+          role: "admin",
           createdAt: now,
           updatedAt: now,
         },
@@ -68,7 +90,7 @@ async function main() {
         name: "AI",
         email: "ai@helpdesk.local",
         emailVerified: false,
-        role: Role.agent,
+        role: "agent",
         createdAt: now,
         updatedAt: now,
       },

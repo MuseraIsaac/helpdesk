@@ -13,12 +13,36 @@ datasource db {
   provider = "postgresql"
 }
 
-enum Role {
-  admin
-  supervisor
-  agent
-  readonly
-  customer
+/// Role definitions are now managed in the editable `Role` table below.
+/// `User.role` stores the role's `key` as a string and references `Role.key`
+/// so admins can rename roles, change their permission sets, or add new ones
+/// at runtime without a migration.
+///
+/// Built-in keys (admin, supervisor, agent, readonly, customer) are seeded
+/// at install time. Their `isBuiltin` flag prevents deletion. The `customer`
+/// role is also `isSystem` — gated by requireCustomer middleware on the
+/// portal, never exposed in the agent role-editor UI.
+model Role {
+  /// Stable string identifier — referenced by User.role. Lowercase, snake_case.
+  key         String   @id @db.VarChar(64)
+  /// Display name shown in the UI. Editable for builtin roles.
+  name        String   @db.VarChar(128)
+  /// Optional one-paragraph description shown to admins.
+  description String?
+  /// Built-in roles cannot be deleted; their `key` is locked.
+  isBuiltin   Boolean  @default(false) @map("is_builtin")
+  /// System roles (currently just `customer`) are not exposed in the editor.
+  isSystem    Boolean  @default(false) @map("is_system")
+  /// JSON array of permission keys this role grants.
+  permissions Json     @default("[]")
+  /// Optional accent color for visual distinction in the UI (hex, e.g. "#3b82f6").
+  color       String?  @db.VarChar(16)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  users       User[]   @relation("UserRole")
+
+  @@map("role")
 }
 
 enum TicketStatus {
@@ -119,7 +143,8 @@ model User {
   email         String    @unique
   emailVerified Boolean
   image            String?
-  role             Role    @default(agent)
+  role             String  @default("agent") @db.VarChar(64)
+  roleRef          Role    @relation("UserRole", fields: [role], references: [key], onUpdate: Cascade, onDelete: Restrict)
   globalTicketView Boolean @default(false)
   createdAt        DateTime
   updatedAt        DateTime
@@ -902,8 +927,9 @@ model Template {
 
 model AuditEvent {
   id        Int      @id @default(autoincrement())
-  ticketId  Int
-  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  /// Null for system-level events (auth, settings, user management, KB).
+  ticketId  Int?
+  ticket    Ticket?  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   actorId   String?
   actor     User?    @relation(fields: [actorId], references: [id])
   action    String
@@ -911,6 +937,8 @@ model AuditEvent {
   createdAt DateTime @default(now())
 
   @@index([ticketId, createdAt])
+  @@index([createdAt])          // efficient scan for system-level events (ticketId IS NULL)
+  @@index([action, createdAt])  // efficient filter-by-action queries
   @@map("audit_event")
 }
 

@@ -9,7 +9,6 @@
  */
 
 import { useState, useRef, useEffect } from "react";
-import { Link } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
@@ -51,11 +50,14 @@ interface RunResult {
 interface RunScenarioButtonProps {
   ticketId: number;
   variant?: "header" | "sidebar";
+  /** Called when the user clicks "Create new scenario automation" — opens the sheet. */
+  onOpenSheet?: (tab?: "run" | "create" | "manage") => void;
 }
 
 export default function RunScenarioButton({
   ticketId,
   variant = "sidebar",
+  onOpenSheet,
 }: RunScenarioButtonProps) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -277,21 +279,35 @@ export default function RunScenarioButton({
 
           {/* Footer — always present */}
           <Separator />
-          <div className="p-1.5">
-            <Link
-              to="/automations"
-              onClick={() => setOpen(false)}
+          <div className="p-1.5 space-y-0.5">
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onOpenSheet?.("create"); }}
               className={cn(
                 "flex items-center gap-2.5 w-full rounded-md px-2.5 py-2 text-xs transition-colors",
                 "text-muted-foreground hover:text-foreground hover:bg-accent/60",
               )}
             >
-              <div className="h-5 w-5 rounded-md bg-muted/60 flex items-center justify-center shrink-0">
-                <Plus className="h-3 w-3" />
+              <div className="h-5 w-5 rounded-md bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                <Plus className="h-3 w-3 text-amber-500" />
               </div>
               <span className="font-medium">Create new scenario automation</span>
-              <ExternalLink className="h-3 w-3 ml-auto opacity-50" />
-            </Link>
+            </button>
+            {scenarios.length > 0 && (
+              <button
+                type="button"
+                onClick={() => { setOpen(false); onOpenSheet?.("manage"); }}
+                className={cn(
+                  "flex items-center gap-2.5 w-full rounded-md px-2.5 py-2 text-xs transition-colors",
+                  "text-muted-foreground hover:text-foreground hover:bg-accent/60",
+                )}
+              >
+                <div className="h-5 w-5 rounded-md bg-muted/60 flex items-center justify-center shrink-0">
+                  <ExternalLink className="h-3 w-3" />
+                </div>
+                <span className="font-medium">Manage all scenarios</span>
+              </button>
+            )}
           </div>
         </PopoverContent>
       </Popover>

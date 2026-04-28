@@ -203,27 +203,31 @@ router.get("/volume", async (req, res) => {
     until.setHours(23, 59, 59, 999);
   }
 
-  const tickets = await prisma.ticket.findMany({
-    where: { createdAt: { gte: since, lte: until } },
-    select: { createdAt: true },
+  // Compute daily counts in SQL (via generate_series) so we don't load every
+  // ticket row over the wire just to bucket timestamps client-side.
+  const rows = await prisma.$queryRaw<{ date: string; tickets: bigint }[]>`
+    WITH days AS (
+      SELECT generate_series(
+        ${since}::timestamp,
+        ${until}::timestamp,
+        '1 day'::interval
+      )::date AS day
+    )
+    SELECT
+      TO_CHAR(d.day, 'YYYY-MM-DD') AS date,
+      COALESCE(COUNT(t.id), 0)::bigint AS tickets
+    FROM days d
+    LEFT JOIN ticket t
+      ON t."createdAt"::date = d.day
+     AND t."createdAt" >= ${since}
+     AND t."createdAt" <= ${until}
+    GROUP BY d.day
+    ORDER BY d.day
+  `;
+
+  res.json({
+    data: rows.map(r => ({ date: r.date, tickets: Number(r.tickets) })),
   });
-
-  const countsByDate = new Map<string, number>();
-  for (const t of tickets) {
-    const key = t.createdAt.toISOString().slice(0, 10);
-    countsByDate.set(key, (countsByDate.get(key) ?? 0) + 1);
-  }
-
-  // Fill every date in the window (including zero-count days)
-  const data: { date: string; tickets: number }[] = [];
-  const cursor = new Date(since);
-  while (cursor <= until) {
-    const key = cursor.toISOString().slice(0, 10);
-    data.push({ date: key, tickets: countsByDate.get(key) ?? 0 });
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  res.json({ data });
 });
 
 // ── Breakdowns ────────────────────────────────────────────────────────────────
@@ -460,8 +464,9 @@ router.get("/incidents", async (req, res) => {
     mttr: number | null;
   }
 
-  // Single-pass aggregate for the scalar KPIs
-  const [statsRows, byStatusRaw, byPriorityRaw, incidentDates] = await Promise.all([
+  // Single-pass aggregate for the scalar KPIs + daily volume — all four queries
+  // run in parallel and the daily volume is computed entirely in SQL.
+  const [statsRows, byStatusRaw, byPriorityRaw, volumeRows] = await Promise.all([
     prisma.$queryRaw<IncidentStatsRow[]>`
       SELECT
         COUNT(*)                                                              AS total,
@@ -476,16 +481,28 @@ router.get("/incidents", async (req, res) => {
     `,
     prisma.incident.groupBy({ by: ["status"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
     prisma.incident.groupBy({ by: ["priority"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
-    prisma.incident.findMany({ where: { createdAt: { gte: since, lte: until } }, select: { createdAt: true } }),
+    prisma.$queryRaw<{ date: string; count: bigint }[]>`
+      WITH days AS (
+        SELECT generate_series(
+          ${since}::timestamp,
+          ${until}::timestamp,
+          '1 day'::interval
+        )::date AS day
+      )
+      SELECT
+        TO_CHAR(d.day, 'YYYY-MM-DD') AS date,
+        COALESCE(COUNT(i.id), 0)::bigint AS count
+      FROM days d
+      LEFT JOIN incident i
+        ON i."createdAt"::date = d.day
+       AND i."createdAt" >= ${since}
+       AND i."createdAt" <= ${until}
+      GROUP BY d.day
+      ORDER BY d.day
+    `,
   ]);
 
-  // Daily volume (fill gaps)
-  const countsByDate = new Map<string, number>();
-  for (const inc of incidentDates) {
-    const key = inc.createdAt.toISOString().slice(0, 10);
-    countsByDate.set(key, (countsByDate.get(key) ?? 0) + 1);
-  }
-  const volume = fillDateRange(since, until, countsByDate, 0).map(e => ({ date: e.date, count: e.value }));
+  const volume = volumeRows.map(r => ({ date: r.date, count: Number(r.count) }));
 
   const row = statsRows[0];
   res.json({

@@ -24,6 +24,7 @@ import {
 import { ASSET_STATUSES } from "core/constants/assets.ts";
 import { computeDepreciation } from "../lib/depreciation";
 import { logAssetEvent } from "../lib/asset-events";
+import { logSystemAudit } from "../lib/audit";
 import {
   transitionAsset,
   LifecycleTransitionError,
@@ -743,6 +744,11 @@ router.post(
       name: data.name, type: data.type, status: data.status,
     });
 
+    void logSystemAudit(req.user.id, "asset.created", {
+      entityType: "asset", entityId: asset.id, entityNumber: asset.assetNumber,
+      entityTitle: asset.name, assetTag: asset.assetTag ?? undefined, type: data.type, status: data.status,
+    });
+
     res.status(201).json(normaliseDetail(asset));
   }
 );
@@ -819,6 +825,10 @@ router.patch(
     });
 
     await logAssetEvent(id, req.user.id, "asset.updated", { fields: Object.keys(data) });
+
+    const aBase = { entityType: "asset", entityId: id, entityNumber: asset.assetNumber, entityTitle: asset.name, assetTag: asset.assetTag ?? undefined };
+    void logSystemAudit(req.user.id, "asset.updated", { ...aBase, changes: Object.keys(data) });
+
     res.json(normaliseDetail(asset));
   }
 );
@@ -935,6 +945,8 @@ router.post(
     const data = validate(lifecycleTransitionSchema, req.body, res);
     if (!data) return;
 
+    const before = await prisma.asset.findUnique({ where: { id }, select: { status: true } });
+
     try {
       await transitionAsset(id, data.status as AssetStatus, req.user.id, data.reason);
     } catch (err) {
@@ -949,6 +961,13 @@ router.post(
       where: { id },
       select: ASSET_DETAIL_SELECT,
     });
+
+    const lcBase = { entityType: "asset", entityId: id, entityNumber: updated.assetNumber, entityTitle: updated.name, assetTag: updated.assetTag ?? undefined };
+    void logSystemAudit(req.user.id, "asset.status_changed", { ...lcBase, from: before?.status ?? null, to: data.status });
+    if (data.status === "retired")  void logSystemAudit(req.user.id, "asset.retired",  lcBase);
+    if (data.status === "disposed") void logSystemAudit(req.user.id, "asset.scrapped", lcBase);
+    if (data.status === "deployed" || data.status === "in_use") void logSystemAudit(req.user.id, "asset.deployed", lcBase);
+
     res.json(normaliseDetail(updated));
   }
 );
@@ -994,6 +1013,14 @@ router.post(
     });
 
     const updated = await prisma.asset.findUniqueOrThrow({ where: { id }, select: ASSET_DETAIL_SELECT });
+
+    void logSystemAudit(req.user.id, "asset.assigned", {
+      entityType: "asset", entityId: id, entityNumber: updated.assetNumber, entityTitle: updated.name,
+      assetTag: updated.assetTag ?? undefined,
+      from: asset.assignedToId ?? null,
+      to: { id: user.id, name: user.name },
+    });
+
     res.json(normaliseDetail(updated));
   }
 );
@@ -1019,6 +1046,12 @@ router.delete(
 
     await logAssetEvent(id, req.user.id, "asset.unassigned", { from: asset.assignedToId });
     const updated = await prisma.asset.findUniqueOrThrow({ where: { id }, select: ASSET_DETAIL_SELECT });
+
+    void logSystemAudit(req.user.id, "asset.unassigned", {
+      entityType: "asset", entityId: id, entityNumber: updated.assetNumber, entityTitle: updated.name,
+      assetTag: updated.assetTag ?? undefined, from: asset.assignedToId,
+    });
+
     res.json(normaliseDetail(updated));
   }
 );
@@ -1045,6 +1078,10 @@ router.put(
     await logAssetEvent(id, req.user.id, "asset.ci_linked", { ciId, ciName: ci.name, ciNumber: ci.ciNumber });
 
     const updated = await prisma.asset.findUniqueOrThrow({ where: { id }, select: ASSET_DETAIL_SELECT });
+    void logSystemAudit(req.user.id, "asset.linked_ci", {
+      entityType: "asset", entityId: id, entityNumber: updated.assetNumber, entityTitle: updated.name,
+      ciId, ciName: ci.name, ciNumber: ci.ciNumber,
+    });
     res.json(normaliseDetail(updated));
   }
 );

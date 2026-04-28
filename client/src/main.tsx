@@ -16,16 +16,10 @@ const SPLASH_MIN_MS = 1600;
 function dismissSplash() {
   const el = document.getElementById("spl");
   if (!el) return;
-  // Complete the progress bar instantly before fading out
-  const bar = el.querySelector(".spl-bar") as HTMLElement | null;
-  if (bar) {
-    bar.style.cssText = "width:100%;transition:width 0.22s ease;background:linear-gradient(90deg,#6366f1,#a855f7,#06b6d4)";
-  }
-  setTimeout(() => {
-    el.classList.add("spl-out");
-    // Remove from DOM after transition finishes so it can never block clicks
-    setTimeout(() => el.remove(), 600);
-  }, 240);
+  // Indeterminate sweeping bar — just fade the splash out; the bar continues
+  // its sweep animation until the element is removed from the DOM.
+  el.classList.add("spl-out");
+  setTimeout(() => el.remove(), 600);
 }
 
 createRoot(document.getElementById("root")!).render(

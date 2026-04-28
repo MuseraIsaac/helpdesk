@@ -3,81 +3,60 @@
  * request is in-flight. Replaces the plain "Loading..." text.
  */
 export default function AppLoader() {
+  const SIZE = 88;
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background">
 
-      {/* Spinning gradient ring + logo */}
-      <div style={{ position: "relative", width: 96, height: 96 }}>
-
-        {/* Conic ring — spins */}
-        <div style={{
-          position: "absolute",
-          inset: 0,
+      {/* Logo — gentle pulse + glow, no surrounding ring */}
+      <img
+        src="/logo.png"
+        alt=""
+        style={{
+          width: SIZE,
+          height: SIZE,
+          objectFit: "contain",
           borderRadius: "50%",
-          background: "conic-gradient(from 0deg, transparent 0deg, #6366f1 80deg, #a855f7 160deg, #06b6d4 230deg, transparent 295deg)",
-          animation: "apl-spin 1.5s linear infinite",
-        }} />
+          animation: "apl-glow 2.4s ease-in-out infinite",
+        }}
+      />
 
-        {/* Inner fill punches the ring gap */}
-        <div style={{
-          position: "absolute",
-          inset: 5,
-          borderRadius: "50%",
-          background: "var(--background)",
-        }} />
-
-        {/* Logo — gentle pulse + glow */}
-        <img
-          src="/logo.png"
-          alt=""
+      {/* Indeterminate progress bar — sweeps left-to-right repeatedly */}
+      <div
+        role="progressbar"
+        aria-label="Loading"
+        style={{
+          position: "relative",
+          marginTop: 28,
+          width: 160,
+          height: 3,
+          borderRadius: 2,
+          overflow: "hidden",
+          background: "rgba(127, 127, 127, 0.15)",
+        }}
+      >
+        <div
           style={{
             position: "absolute",
-            inset: 14,
-            width: "calc(100% - 28px)",
-            height: "calc(100% - 28px)",
-            objectFit: "contain",
-            animation: "apl-glow 2.2s ease-in-out infinite",
+            top: 0,
+            left: 0,
+            height: "100%",
+            width: "40%",
+            borderRadius: 2,
+            background: "linear-gradient(90deg, transparent 0%, #6366f1 30%, #a855f7 50%, #06b6d4 70%, transparent 100%)",
+            animation: "apl-bar 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite",
           }}
         />
       </div>
 
-      {/* Three bouncing dots */}
-      <div style={{ display: "flex", gap: 7, marginTop: 28 }}>
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            style={{
-              display: "block",
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: "currentColor",
-              animation: `apl-dot 1.3s ${i * 0.18}s ease-in-out infinite`,
-            }}
-            className="text-muted-foreground/50"
-          />
-        ))}
-      </div>
-
       <style>{`
-        @keyframes apl-spin {
-          to { transform: rotate(360deg); }
-        }
         @keyframes apl-glow {
-          0%, 100% {
-            opacity: 1;
-            transform: scale(1);
-            filter: drop-shadow(0 0 6px rgba(99,102,241,0.35));
-          }
-          50% {
-            opacity: 0.82;
-            transform: scale(0.94);
-            filter: drop-shadow(0 0 18px rgba(168,85,247,0.6));
-          }
+          0%, 100% { opacity: 1;    filter: drop-shadow(0 0 5px rgba(99,102,241,0.35)); }
+          50%      { opacity: 0.85; filter: drop-shadow(0 0 14px rgba(168,85,247,0.65)); }
         }
-        @keyframes apl-dot {
-          0%, 80%, 100% { opacity: 0.2; transform: translateY(0) scale(0.8); }
-          40%            { opacity: 1;   transform: translateY(-5px) scale(1.15); }
+        @keyframes apl-bar {
+          0%   { transform: translateX(-100%); }
+          100% { transform: translateX(400%); }
         }
       `}</style>
     </div>

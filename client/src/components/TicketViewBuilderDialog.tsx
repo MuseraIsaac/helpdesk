@@ -27,13 +27,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Filter, Columns3, Settings2, Loader2,
   Star, Users, ArrowUpDown, SlidersHorizontal,
-  CheckCircle2,
+  CheckCircle2, ChevronsUpDown, Check,
 } from "lucide-react";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
 import { agentTicketStatuses, statusLabel }     from "core/constants/ticket-status.ts";
 import { ticketTypes, ticketTypeLabel }         from "core/constants/ticket-type.ts";
-import { categoryLabel }                         from "core/constants/ticket-category.ts";
+import { ticketCategories, categoryLabel }       from "core/constants/ticket-category.ts";
 import { ticketPriorities, priorityLabel }       from "core/constants/ticket-priority.ts";
 import { ticketSeverities, severityShortLabel }  from "core/constants/ticket-severity.ts";
+import { ticketImpacts, impactLabel }            from "core/constants/ticket-impact.ts";
+import { ticketUrgencies, urgencyLabel }         from "core/constants/ticket-urgency.ts";
 import {
   COLUMN_IDS, COLUMN_META,
   SYSTEM_DEFAULT_VIEW_CONFIG,
@@ -45,11 +50,140 @@ import { useMe } from "@/hooks/useMe";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface Team { id: number; name: string; color: string; }
+interface Team   { id: number; name: string; color: string; }
+interface Agent  { id: string; name: string; }
+interface CustomStatusConfig      { id: number; label: string; color: string; isActive: boolean; }
+interface CustomTicketTypeConfig  { id: number; name: string; isActive: boolean; }
 
-interface CustomStatusConfig { id: number; label: string; color: string; isActive: boolean; }
+// ── Multi-select filter component ─────────────────────────────────────────────
+// Generic over both the option type T and an arbitrary key K so that callers
+// can store entries by id (e.g. team id) while rendering rich row content.
 
-interface CustomTicketTypeConfig { id: number; name: string; isActive: boolean; }
+function MultiSelectFilter<T, K extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+  renderLabel,
+  renderPrefix,
+  keyOf,
+  searchable,
+  searchPlaceholder,
+  emptyText,
+}: {
+  label: string;
+  options: readonly T[];
+  value: K[];
+  onChange: (val: K[]) => void;
+  renderLabel: (v: T) => string;
+  renderPrefix?: (v: T) => React.ReactNode;
+  /** Extracts the persistable key for an option (defaults to using the option as-is). */
+  keyOf?: (v: T) => K;
+  searchable?: boolean;
+  searchPlaceholder?: string;
+  emptyText?: string;
+}) {
+  const [open, setOpen]     = useState(false);
+  const [search, setSearch] = useState("");
+
+  const getKey  = keyOf ?? ((v: T) => v as unknown as K);
+  const labelOf = (k: K): string => {
+    const opt = options.find((o) => getKey(o) === k);
+    return opt ? renderLabel(opt) : String(k);
+  };
+
+  function toggle(opt: T) {
+    const k = getKey(opt);
+    onChange(value.includes(k) ? value.filter((v) => v !== k) : [...value, k]);
+  }
+
+  const filtered = searchable && search.trim()
+    ? options.filter((o) => renderLabel(o).toLowerCase().includes(search.toLowerCase()))
+    : options;
+
+  const displayText =
+    value.length === 0
+      ? `Any ${label.toLowerCase()}`
+      : value.length === 1
+      ? labelOf(value[0])
+      : `${value.length} ${label.toLowerCase()}s`;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={[
+            "h-9 w-full flex items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors",
+            "hover:bg-muted/50 focus:outline-none focus:ring-1 focus:ring-ring",
+            value.length > 0 ? "border-primary/40 bg-primary/5" : "border-input bg-background",
+          ].join(" ")}
+        >
+          <span className={value.length === 0 ? "text-muted-foreground" : "font-medium"}>
+            {displayText}
+          </span>
+          <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-2" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="p-1 w-60" align="start">
+        {searchable && (
+          <div className="px-1.5 pt-1 pb-1.5 border-b mb-1">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={searchPlaceholder ?? "Search…"}
+              className="h-7 text-xs"
+            />
+          </div>
+        )}
+        <div className="max-h-56 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-3 px-2">
+              {emptyText ?? "No matches"}
+            </p>
+          ) : filtered.map((opt) => {
+            const k = getKey(opt);
+            const selected = value.includes(k);
+            return (
+              <button
+                key={String(k)}
+                type="button"
+                onClick={() => toggle(opt)}
+                className="flex items-center gap-2.5 w-full px-2 py-1.5 text-sm rounded hover:bg-muted text-left"
+              >
+                <span className={[
+                  "h-4 w-4 rounded border-[1.5px] flex items-center justify-center shrink-0 transition-colors",
+                  selected ? "bg-primary border-primary" : "border-input",
+                ].join(" ")}>
+                  {selected && <Check className="h-2.5 w-2.5 text-primary-foreground" strokeWidth={3} />}
+                </span>
+                {renderPrefix && renderPrefix(opt)}
+                <span className="truncate">{renderLabel(opt)}</span>
+              </button>
+            );
+          })}
+        </div>
+        {value.length > 0 && (
+          <div className="border-t mt-1 pt-1">
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="w-full px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded text-left"
+            >
+              Clear selection
+            </button>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  email:  "Email",
+  portal: "Customer Portal",
+  agent:  "Agent (manual)",
+};
 
 interface Props {
   open:         boolean;
@@ -78,30 +212,57 @@ const SORT_OPTIONS = COLUMN_IDS
 function filterSummaryParts(
   filters: SavedViewFilters,
   teams: Team[],
+  agents: Agent[],
   customStatuses: CustomStatusConfig[],
   customTypes: CustomTicketTypeConfig[],
 ): string[] {
   const parts: string[] = [];
   if (filters.assignedToMe) parts.push("Assigned to me");
-  if (filters.escalated)    parts.push("Escalated");
-  if (filters.status)       parts.push(`Status: ${statusLabel[filters.status as keyof typeof statusLabel] ?? filters.status}`);
-  if (filters.customStatusId) {
-    const cs = customStatuses.find((s) => s.id === filters.customStatusId);
-    if (cs) parts.push(`Status: ${cs.label}`);
+  if (filters.unassigned)   parts.push("Agent unassigned");
+  if (filters.escalated)    parts.push("Escalated only");
+  if (filters.slaBreached)  parts.push("SLA breached");
+
+  // Status: built-in + custom combined for display
+  const statusLabels = [
+    ...(filters.status ?? []).map((s) => statusLabel[s as keyof typeof statusLabel] ?? s),
+    ...(filters.customStatusId ?? []).map((id) => customStatuses.find((cs) => cs.id === id)?.label ?? `#${id}`),
+  ];
+  if (statusLabels.length) {
+    parts.push(statusLabels.length === 1 ? `Status: ${statusLabels[0]}` : `Status: ${statusLabels.length} values`);
   }
-  if (filters.ticketType)   parts.push(`Type: ${ticketTypeLabel[filters.ticketType as keyof typeof ticketTypeLabel] ?? filters.ticketType}`);
-  if (filters.customTicketTypeId) {
-    const ct = customTypes.find((t) => t.id === filters.customTicketTypeId);
-    if (ct) parts.push(`Type: ${ct.name}`);
+
+  // Type: built-in + custom combined
+  const typeLabels = [
+    ...(filters.ticketType ?? []).map((t) => ticketTypeLabel[t as keyof typeof ticketTypeLabel] ?? t),
+    ...(filters.customTicketTypeId ?? []).map((id) => customTypes.find((ct) => ct.id === id)?.name ?? `#${id}`),
+  ];
+  if (typeLabels.length) {
+    parts.push(typeLabels.length === 1 ? `Type: ${typeLabels[0]}` : `Type: ${typeLabels.length} values`);
   }
-  if (filters.priority)     parts.push(`Priority: ${priorityLabel[filters.priority as keyof typeof priorityLabel] ?? filters.priority}`);
-  if (filters.severity)     parts.push(`Severity: ${severityShortLabel[filters.severity as keyof typeof severityShortLabel] ?? filters.severity}`);
-  if (filters.category)     parts.push(`Category: ${categoryLabel[filters.category as keyof typeof categoryLabel] ?? filters.category}`);
-  if (filters.teamId !== undefined) {
-    if (filters.teamId === "none") parts.push("No team");
-    else {
-      const team = teams.find((t) => t.id === filters.teamId);
-      parts.push(`Team: ${team?.name ?? filters.teamId}`);
+
+  if (filters.priority?.length)  parts.push(filters.priority.length === 1 ? `Priority: ${priorityLabel[filters.priority[0] as keyof typeof priorityLabel] ?? filters.priority[0]}` : `Priority: ${filters.priority.length} values`);
+  if (filters.severity?.length)  parts.push(filters.severity.length === 1 ? `Severity: ${severityShortLabel[filters.severity[0] as keyof typeof severityShortLabel] ?? filters.severity[0]}` : `Severity: ${filters.severity.length} values`);
+  if (filters.impact?.length)    parts.push(filters.impact.length   === 1 ? `Impact: ${impactLabel[filters.impact[0] as keyof typeof impactLabel] ?? filters.impact[0]}`       : `Impact: ${filters.impact.length} values`);
+  if (filters.urgency?.length)   parts.push(filters.urgency.length  === 1 ? `Urgency: ${urgencyLabel[filters.urgency[0] as keyof typeof urgencyLabel] ?? filters.urgency[0]}`  : `Urgency: ${filters.urgency.length} values`);
+  if (filters.source?.length)    parts.push(filters.source.length   === 1 ? `Source: ${SOURCE_LABELS[filters.source[0]] ?? filters.source[0]}`                                  : `Source: ${filters.source.length} values`);
+  if (filters.category?.length)  parts.push(filters.category.length === 1 ? `Category: ${categoryLabel[filters.category[0] as keyof typeof categoryLabel] ?? filters.category[0]}` : `Category: ${filters.category.length} values`);
+
+  if (filters.assignedToId?.length) {
+    if (filters.assignedToId.length === 1) {
+      const agent = agents.find((a) => a.id === filters.assignedToId![0]);
+      parts.push(`Assignee: ${agent?.name ?? "Agent"}`);
+    } else {
+      parts.push(`Assignee: ${filters.assignedToId.length} agents`);
+    }
+  }
+
+  if (filters.teamId?.length) {
+    if (filters.teamId.length === 1) {
+      const t = filters.teamId[0];
+      if (t === "none") parts.push("Team: No team");
+      else parts.push(`Team: ${teams.find((x) => x.id === t)?.name ?? t}`);
+    } else {
+      parts.push(`Team: ${filters.teamId.length} values`);
     }
   }
   return parts;
@@ -130,8 +291,15 @@ export default function TicketViewBuilderDialog({ open, onOpenChange, viewToEdit
     queryFn: () => axios.get<{ ticketTypes: CustomTicketTypeConfig[] }>("/api/ticket-types").then((r) => r.data.ticketTypes),
     staleTime: 60_000,
   });
+  const { data: agentsRaw } = useQuery({
+    queryKey: ["agents-list"],
+    queryFn: () => axios.get<{ users: Agent[] }>("/api/users").then((r) => r.data.users),
+    staleTime: 60_000,
+    enabled: open,
+  });
 
   const teams          = teamsData ?? [];
+  const agents         = agentsRaw ?? [];
   const customStatuses = (customStatusesRaw ?? []).filter((s) => s.isActive);
   const customTypes    = (customTypesRaw ?? []).filter((t) => t.isActive);
 
@@ -175,8 +343,8 @@ export default function TicketViewBuilderDialog({ open, onOpenChange, viewToEdit
 
   // ── Filter preview ────────────────────────────────────────────────────────────
   const summaryParts = useMemo(
-    () => filterSummaryParts(filters, teams, customStatuses, customTypes),
-    [filters, teams, customStatuses, customTypes],
+    () => filterSummaryParts(filters, teams, agents, customStatuses, customTypes),
+    [filters, teams, agents, customStatuses, customTypes],
   );
 
   // ── Column count ──────────────────────────────────────────────────────────────
@@ -215,7 +383,6 @@ export default function TicketViewBuilderDialog({ open, onOpenChange, viewToEdit
   const isPending = saveView.isPending || setDefaultView.isPending;
 
   // ── Filter setter helpers ─────────────────────────────────────────────────────
-  const ALL = "__all__";
   function setFilter<K extends keyof SavedViewFilters>(key: K, val: SavedViewFilters[K] | undefined) {
     setFilters((prev) => {
       const next = { ...prev };
@@ -340,190 +507,215 @@ export default function TicketViewBuilderDialog({ open, onOpenChange, viewToEdit
               </div>
             )}
 
-            {/* Toggle filters */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className={[
-                "flex items-center justify-between rounded-xl border px-4 py-3 cursor-pointer transition-colors",
-                filters.assignedToMe ? "border-primary/40 bg-primary/5" : "hover:bg-muted/30",
-              ].join(" ")}>
-                <div>
-                  <p className="text-sm font-medium">Assigned to me</p>
-                  <p className="text-xs text-muted-foreground">Only tickets assigned to you</p>
-                </div>
-                <Switch
-                  checked={!!filters.assignedToMe}
-                  onCheckedChange={(v) => setFilter("assignedToMe", v || undefined)}
-                />
-              </label>
-
-              <label className={[
-                "flex items-center justify-between rounded-xl border px-4 py-3 cursor-pointer transition-colors",
-                filters.escalated ? "border-destructive/40 bg-destructive/5" : "hover:bg-muted/30",
-              ].join(" ")}>
-                <div>
-                  <p className="text-sm font-medium">Escalated only</p>
-                  <p className="text-xs text-muted-foreground">Only escalated tickets</p>
-                </div>
-                <Switch
-                  checked={!!filters.escalated}
-                  onCheckedChange={(v) => setFilter("escalated", v || undefined)}
-                />
-              </label>
+            {/* ── Toggle filters ── */}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Quick toggles</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {[
+                  { key: "assignedToMe" as const, label: "Assigned to me",    desc: "Only tickets assigned to you",          active: !!filters.assignedToMe, color: "border-primary/40 bg-primary/5" },
+                  { key: "unassigned"   as const, label: "Agent unassigned",   desc: "Tickets with no assigned agent",        active: !!filters.unassigned,   color: "border-amber-400/40 bg-amber-50 dark:bg-amber-950/20" },
+                  { key: "escalated"    as const, label: "Escalated only",     desc: "Only escalated tickets",               active: !!filters.escalated,    color: "border-destructive/40 bg-destructive/5" },
+                  { key: "slaBreached"  as const, label: "SLA breached",       desc: "Tickets past their SLA deadline",       active: !!filters.slaBreached,  color: "border-red-400/40 bg-red-50 dark:bg-red-950/20" },
+                ].map(({ key, label, desc, active, color }) => (
+                  <label key={key} className={[
+                    "flex items-center justify-between rounded-xl border px-4 py-2.5 cursor-pointer transition-colors",
+                    active ? color : "hover:bg-muted/30",
+                  ].join(" ")}>
+                    <div>
+                      <p className="text-sm font-medium">{label}</p>
+                      <p className="text-xs text-muted-foreground">{desc}</p>
+                    </div>
+                    <Switch
+                      checked={active}
+                      onCheckedChange={(v) => {
+                        setFilter(key, v || undefined);
+                        // mutual exclusion: assignedToMe ↔ unassigned
+                        if (key === "assignedToMe" && v) setFilter("unassigned", undefined);
+                        if (key === "unassigned"   && v) { setFilter("assignedToMe", undefined); setFilter("assignedToId", undefined); }
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
             </div>
 
-            {/* Dropdown filters */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* ── Dropdown filters ── */}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Field filters</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 
-              {/* Status */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</Label>
-                <Select
-                  value={
-                    filters.customStatusId != null
-                      ? `custom_${filters.customStatusId}`
-                      : (filters.status ?? ALL)
-                  }
-                  onValueChange={(v) => {
-                    if (v === ALL) { setFilter("status", undefined); setFilter("customStatusId", undefined); }
-                    else if (v.startsWith("custom_")) { setFilter("status", undefined); setFilter("customStatusId", parseInt(v.replace("custom_",""),10) as SavedViewFilters["customStatusId"]); }
-                    else { setFilter("status", v as SavedViewFilters["status"]); setFilter("customStatusId", undefined); }
-                  }}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Any status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>Any status</SelectItem>
-                    {agentTicketStatuses.map((s) => (
-                      <SelectItem key={s} value={s}>{statusLabel[s]}</SelectItem>
-                    ))}
-                    {customStatuses.map((cs) => (
-                      <SelectItem key={`custom_${cs.id}`} value={`custom_${cs.id}`}>{cs.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                {/* Status — multi-select combining built-in + custom statuses */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Status</Label>
+                  <MultiSelectFilter<{ key: string; label: string; isCustom: boolean }, string>
+                    label="Status"
+                    options={[
+                      ...agentTicketStatuses.map((s) => ({ key: s, label: statusLabel[s], isCustom: false })),
+                      ...customStatuses.map((cs) => ({ key: `custom_${cs.id}`, label: cs.label, isCustom: true })),
+                    ]}
+                    value={[
+                      ...((filters.status ?? []) as string[]),
+                      ...((filters.customStatusId ?? []).map((id) => `custom_${id}`)),
+                    ]}
+                    keyOf={(o) => o.key}
+                    renderLabel={(o) => o.label}
+                    onChange={(keys) => {
+                      const builtIns = keys.filter((k) => !k.startsWith("custom_"));
+                      const customs  = keys.filter((k) => k.startsWith("custom_")).map((k) => Number(k.replace("custom_", "")));
+                      setFilter("status", builtIns.length ? (builtIns as SavedViewFilters["status"]) : undefined);
+                      setFilter("customStatusId", customs.length ? customs : undefined);
+                    }}
+                  />
+                </div>
 
-              {/* Ticket Type */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</Label>
-                <Select
-                  value={
-                    filters.customTicketTypeId != null
-                      ? `custom_${filters.customTicketTypeId}`
-                      : (filters.ticketType ?? ALL)
-                  }
-                  onValueChange={(v) => {
-                    if (v === ALL) { setFilter("ticketType", undefined); setFilter("customTicketTypeId", undefined); }
-                    else if (v.startsWith("custom_")) { setFilter("ticketType", undefined); setFilter("customTicketTypeId", parseInt(v.replace("custom_",""),10) as SavedViewFilters["customTicketTypeId"]); }
-                    else { setFilter("ticketType", v as SavedViewFilters["ticketType"]); setFilter("customTicketTypeId", undefined); }
-                  }}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Any type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>Any type</SelectItem>
-                    {ticketTypes.map((t) => (
-                      <SelectItem key={t} value={t}>{ticketTypeLabel[t]}</SelectItem>
-                    ))}
-                    {customTypes.map((ct) => (
-                      <SelectItem key={`custom_${ct.id}`} value={`custom_${ct.id}`}>{ct.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                {/* Ticket Type — multi-select combining built-in + custom types */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Type</Label>
+                  <MultiSelectFilter<{ key: string; label: string; isCustom: boolean }, string>
+                    label="Type"
+                    options={[
+                      ...ticketTypes.map((t) => ({ key: t, label: ticketTypeLabel[t], isCustom: false })),
+                      ...customTypes.map((ct) => ({ key: `custom_${ct.id}`, label: ct.name, isCustom: true })),
+                    ]}
+                    value={[
+                      ...((filters.ticketType ?? []) as string[]),
+                      ...((filters.customTicketTypeId ?? []).map((id) => `custom_${id}`)),
+                    ]}
+                    keyOf={(o) => o.key}
+                    renderLabel={(o) => o.label}
+                    onChange={(keys) => {
+                      const builtIns = keys.filter((k) => !k.startsWith("custom_"));
+                      const customs  = keys.filter((k) => k.startsWith("custom_")).map((k) => Number(k.replace("custom_", "")));
+                      setFilter("ticketType", builtIns.length ? (builtIns as SavedViewFilters["ticketType"]) : undefined);
+                      setFilter("customTicketTypeId", customs.length ? customs : undefined);
+                    }}
+                  />
+                </div>
 
-              {/* Priority */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Priority</Label>
-                <Select
-                  value={filters.priority ?? ALL}
-                  onValueChange={(v) => setFilter("priority", v === ALL ? undefined : v as SavedViewFilters["priority"])}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Any priority" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>Any priority</SelectItem>
-                    {ticketPriorities.map((p) => (
-                      <SelectItem key={p} value={p}>{priorityLabel[p]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                {/* Priority */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Priority</Label>
+                  <MultiSelectFilter
+                    label="Priority"
+                    options={ticketPriorities}
+                    value={filters.priority ?? []}
+                    onChange={(v) => setFilter("priority", v.length ? v : undefined)}
+                    renderLabel={(p) => priorityLabel[p] ?? p}
+                  />
+                </div>
 
-              {/* Severity */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Severity</Label>
-                <Select
-                  value={filters.severity ?? ALL}
-                  onValueChange={(v) => setFilter("severity", v === ALL ? undefined : v as SavedViewFilters["severity"])}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Any severity" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>Any severity</SelectItem>
-                    {ticketSeverities.map((s) => (
-                      <SelectItem key={s} value={s}>{severityShortLabel[s]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                {/* Severity */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Severity</Label>
+                  <MultiSelectFilter
+                    label="Severity"
+                    options={ticketSeverities}
+                    value={filters.severity ?? []}
+                    onChange={(v) => setFilter("severity", v.length ? v : undefined)}
+                    renderLabel={(s) => severityShortLabel[s] ?? s}
+                  />
+                </div>
 
-              {/* Category */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Category</Label>
-                <Select
-                  value={filters.category ?? ALL}
-                  onValueChange={(v) => setFilter("category", v === ALL ? undefined : v as SavedViewFilters["category"])}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Any category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>Any category</SelectItem>
-                    <SelectItem value="general_question">{categoryLabel.general_question}</SelectItem>
-                    <SelectItem value="technical_question">{categoryLabel.technical_question}</SelectItem>
-                    <SelectItem value="refund_request">{categoryLabel.refund_request}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                {/* Impact */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Impact</Label>
+                  <MultiSelectFilter
+                    label="Impact"
+                    options={ticketImpacts}
+                    value={filters.impact ?? []}
+                    onChange={(v) => setFilter("impact", v.length ? v : undefined)}
+                    renderLabel={(i) => impactLabel[i] ?? i}
+                  />
+                </div>
 
-              {/* Team */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Team</Label>
-                <Select
-                  value={filters.teamId !== undefined ? String(filters.teamId) : ALL}
-                  onValueChange={(v) => {
-                    if (v === ALL) setFilter("teamId", undefined);
-                    else if (v === "none") setFilter("teamId", "none");
-                    else setFilter("teamId", Number(v) as SavedViewFilters["teamId"]);
-                  }}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Any team" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>Any team</SelectItem>
-                    <SelectItem value="none">No team assigned</SelectItem>
-                    {teams.map((t) => (
-                      <SelectItem key={t.id} value={String(t.id)}>
-                        <span className="flex items-center gap-1.5">
-                          <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
-                          {t.name}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Urgency */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Urgency</Label>
+                  <MultiSelectFilter
+                    label="Urgency"
+                    options={ticketUrgencies}
+                    value={filters.urgency ?? []}
+                    onChange={(v) => setFilter("urgency", v.length ? v : undefined)}
+                    renderLabel={(u) => urgencyLabel[u] ?? u}
+                  />
+                </div>
+
+                {/* Category */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Category</Label>
+                  <MultiSelectFilter
+                    label="Category"
+                    options={ticketCategories}
+                    value={filters.category ?? []}
+                    onChange={(v) => setFilter("category", v.length ? v : undefined)}
+                    renderLabel={(c) => categoryLabel[c] ?? c}
+                  />
+                </div>
+
+                {/* Source / Channel */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Source / Channel</Label>
+                  <MultiSelectFilter
+                    label="Source"
+                    options={Object.keys(SOURCE_LABELS) as ("email" | "portal" | "agent")[]}
+                    value={filters.source ?? []}
+                    onChange={(v) => setFilter("source", v.length ? v : undefined)}
+                    renderLabel={(s) => SOURCE_LABELS[s] ?? s}
+                  />
+                </div>
+
+                {/* Team — multi-select including a "No team" sentinel */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Team</Label>
+                  <MultiSelectFilter<{ id: number | "none"; name: string; color: string }, string>
+                    label="Team"
+                    options={[
+                      { id: "none" as const, name: "No team assigned", color: "#94a3b8" },
+                      ...teams.map((t) => ({ id: t.id, name: t.name, color: t.color || "#64748b" })),
+                    ]}
+                    value={(filters.teamId ?? []).map((v) => String(v))}
+                    keyOf={(o) => String(o.id)}
+                    renderLabel={(o) => o.name}
+                    renderPrefix={(o) => (
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: o.color }} />
+                    )}
+                    onChange={(keys) => {
+                      const next: (number | "none")[] = keys.map((k) => (k === "none" ? "none" : Number(k)));
+                      setFilter("teamId", next.length ? next : undefined);
+                    }}
+                  />
+                </div>
+
+                {/* Assignee — multi-select agent picker */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Assignee</Label>
+                  <MultiSelectFilter<Agent, string>
+                    label="Assignee"
+                    options={agents}
+                    value={filters.assignedToId ?? []}
+                    keyOf={(a) => a.id}
+                    renderLabel={(a) => a.name}
+                    searchable
+                    searchPlaceholder="Search agents…"
+                    emptyText="No agents match"
+                    onChange={(ids) => {
+                      setFilter("assignedToId", ids.length ? ids : undefined);
+                      if (ids.length) {
+                        setFilter("unassigned", undefined);
+                        setFilter("assignedToMe", undefined);
+                      }
+                    }}
+                  />
+                  {(filters.unassigned || filters.assignedToMe) && (filters.assignedToId ?? []).length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">Hidden by the toggle above — clear it to pick specific agents.</p>
+                  )}
+                </div>
               </div>
             </div>
 
             {summaryParts.length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-4">
-                No filters set — this view will show all tickets. Add filters above to narrow results.
+                No filters set — this view will show all tickets matching your access. Add filters above to narrow results.
               </p>
             )}
           </TabsContent>

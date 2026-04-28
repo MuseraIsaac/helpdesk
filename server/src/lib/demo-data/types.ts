@@ -139,21 +139,21 @@ export interface SizeParams {
 export const SIZE_PARAMS: Record<GeneratorSize, SizeParams> = {
   small: {
     users: 6, teams: 2, orgs: 2, customers: 6,
-    kbCats: 2, kbArts: 6, macros: 4, catalog: 3,
+    kbCats: 2, kbArts: 6, macros: 4, catalog: 8,
     tickets: 8, incidents: 6, requests: 6, problems: 3,
     changes: 4, assets: 8, ci: 4,
     saas: 8, licenses: 6, ticketTypes: 5, ticketStatuses: 5,
   },
   medium: {
     users: 10, teams: 4, orgs: 5, customers: 12,
-    kbCats: 4, kbArts: 12, macros: 8, catalog: 6,
+    kbCats: 4, kbArts: 12, macros: 8, catalog: 16,
     tickets: 15, incidents: 10, requests: 10, problems: 5,
     changes: 8, assets: 15, ci: 8,
     saas: 14, licenses: 10, ticketTypes: 7, ticketStatuses: 7,
   },
   large: {
     users: 15, teams: 6, orgs: 8, customers: 22,
-    kbCats: 5, kbArts: 20, macros: 12, catalog: 10,
+    kbCats: 5, kbArts: 20, macros: 12, catalog: 24,
     tickets: 30, incidents: 20, requests: 20, problems: 10,
     changes: 15, assets: 28, ci: 14,
     saas: 20, licenses: 18, ticketTypes: 10, ticketStatuses: 10,
@@ -187,6 +187,7 @@ export interface GeneratorContext {
   kbArticleIds:   number[];
   macroIds:       number[];
   // Service layer
+  catalogCategoryIds: number[];
   catalogItemIds: number[];
   cabGroupIds:    number[];
   // Operations
@@ -219,7 +220,7 @@ export function emptyContext(adminId: string, size: GeneratorSize): GeneratorCon
     userIds: [], supervisorIds: [], agentIds: [],
     teamIds: [], orgIds: [], customerIds: [],
     kbCategoryIds: [], kbArticleIds: [],
-    macroIds: [], catalogItemIds: [], cabGroupIds: [],
+    macroIds: [], catalogCategoryIds: [], catalogItemIds: [], cabGroupIds: [],
     ticketIds: [], incidentIds: [], requestIds: [],
     problemIds: [], changeIds: [], assetIds: [], ciIds: [],
     noteIds: [], replyIds: [], csatRatingIds: [],
@@ -255,6 +256,7 @@ export interface RecordIds {
   kbArticleIds:       number[];
   macroIds:           number[];
   cabGroupIds:        number[];
+  catalogCategoryIds: number[];
   catalogItemIds:     number[];
   ticketIds:          number[];
   incidentIds:        number[];
@@ -285,6 +287,7 @@ export function contextToRecordIds(ctx: GeneratorContext): RecordIds {
     kbArticleIds:       ctx.kbArticleIds,
     macroIds:           ctx.macroIds,
     cabGroupIds:        ctx.cabGroupIds,
+    catalogCategoryIds: ctx.catalogCategoryIds,
     catalogItemIds:     ctx.catalogItemIds,
     ticketIds:          ctx.ticketIds,
     incidentIds:        ctx.incidentIds,

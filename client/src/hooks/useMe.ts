@@ -37,6 +37,11 @@ export function useMe() {
       const { data } = await axios.get("/api/me");
       return data;
     },
+    // The /api/me payload changes only when the user updates their profile,
+    // preferences, or an admin changes their role. All of those code paths
+    // invalidate the "me" query directly, so caching aggressively here
+    // prevents redundant fetches on every page mount.
+    staleTime: 5 * 60 * 1000,
   });
 }
 

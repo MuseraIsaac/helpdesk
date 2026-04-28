@@ -79,7 +79,7 @@ describe("UsersPage", () => {
     });
   });
 
-  it("should render an empty table body when there are no users", async () => {
+  it("should render an empty state when there are no users", async () => {
     mockedAxios.get.mockResolvedValue({ data: { users: [] } });
     renderWithQuery(<UsersPage />);
 
@@ -88,7 +88,7 @@ describe("UsersPage", () => {
     });
 
     expect(screen.getByRole("table")).toBeInTheDocument();
-    expect(screen.getAllByRole("row")).toHaveLength(1); // header row only
+    expect(screen.getByText("No users yet.")).toBeInTheDocument();
   });
 
   it("should call axios.get with /api/users", async () => {

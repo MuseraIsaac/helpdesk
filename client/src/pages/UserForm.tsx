@@ -1,17 +1,29 @@
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   createUserSchema,
   updateUserSchema,
-  assignableRoles,
   type CreateUserInput,
   type UpdateUserInput,
 } from "core/schemas/users";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { AlertTriangle } from "lucide-react";
+import { Role } from "core/constants/role.ts";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
 
@@ -27,9 +39,31 @@ interface UserFormProps {
   onSuccess: () => void;
 }
 
+interface RoleOption {
+  key: string;
+  name: string;
+  isSystem: boolean;
+}
+
 export default function UserForm({ user, onSuccess }: UserFormProps) {
   const isEdit = !!user;
   const queryClient = useQueryClient();
+  const [pendingPayload, setPendingPayload] = useState<CreateUserInput | UpdateUserInput | null>(null);
+
+  // Fetch live role list — includes any custom roles created in the role editor.
+  const { data: rolesData } = useQuery({
+    queryKey: ["roles-assignable"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ roles: RoleOption[] }>("/api/roles");
+      return data.roles.filter((r) => !r.isSystem);
+    },
+  });
+  const assignable: RoleOption[] = rolesData ?? [
+    { key: "admin",      name: "Admin",      isSystem: false },
+    { key: "supervisor", name: "Supervisor", isSystem: false },
+    { key: "agent",      name: "Agent",      isSystem: false },
+    { key: "readonly",   name: "Read-only",  isSystem: false },
+  ];
 
   const form = useForm<CreateUserInput | UpdateUserInput>({
     resolver: zodResolver(isEdit ? updateUserSchema : createUserSchema),
@@ -58,9 +92,23 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
     },
   });
 
+  const onSubmit = (data: CreateUserInput | UpdateUserInput) => {
+    const isCustomerToInternal =
+      isEdit &&
+      user?.role === Role.customer &&
+      data.role &&
+      data.role !== Role.customer;
+    if (isCustomerToInternal) {
+      setPendingPayload(data);
+      return;
+    }
+    mutation.mutate(data);
+  };
+
   return (
+    <>
     <form
-      onSubmit={form.handleSubmit((data) => mutation.mutate(data))}
+      onSubmit={form.handleSubmit(onSubmit)}
       className="space-y-4"
       autoComplete="off"
     >
@@ -111,9 +159,9 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
           className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           {...form.register("role")}
         >
-          {assignableRoles.map((r) => (
-            <option key={r} value={r}>
-              {r.charAt(0).toUpperCase() + r.slice(1)}
+          {assignable.map((r) => (
+            <option key={r.key} value={r.key}>
+              {r.name}
             </option>
           ))}
         </select>
@@ -135,5 +183,47 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
         </Button>
       </div>
     </form>
+    <AlertDialog
+      open={pendingPayload !== null}
+      onOpenChange={(open) => { if (!open) setPendingPayload(null); }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-amber-500" />
+            Promote customer to internal role?
+          </AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-2">
+              <p>
+                You're about to change <span className="font-medium text-foreground">{user?.name}</span> from
+                a <span className="font-medium text-foreground">customer</span> to{" "}
+                <span className="font-medium text-foreground">{pendingPayload?.role}</span>.
+              </p>
+              <p>
+                Internal roles can view and manage tickets across the helpdesk. The user will lose
+                customer-portal limitations and gain access to staff-only features. Make sure this is
+                intentional.
+              </p>
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              if (pendingPayload) {
+                mutation.mutate(pendingPayload);
+                setPendingPayload(null);
+              }
+            }}
+            className="bg-amber-600 text-white hover:bg-amber-600/90"
+          >
+            Yes, change role
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

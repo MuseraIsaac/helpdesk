@@ -8,6 +8,7 @@ import {
   updateTeamSchema,
   setTeamMembersSchema,
 } from "core/schemas/teams.ts";
+import { logSystemAudit } from "../lib/audit";
 import prisma from "../db";
 
 const router = Router();
@@ -125,6 +126,10 @@ router.post("/", requirePermission("teams.manage"), async (req, res) => {
     select: { id: true, name: true, description: true, color: true, email: true, createdAt: true, updatedAt: true },
   });
 
+  void logSystemAudit(req.user.id, "team.created", {
+    entityType: "team", entityId: team.id, entityNumber: `TEAM-${team.id}`, entityTitle: team.name,
+  });
+
   res.status(201).json({ team });
 });
 
@@ -175,6 +180,11 @@ router.patch("/:id", requirePermission("teams.manage"), async (req, res) => {
     select: { id: true, name: true, description: true, color: true, email: true, createdAt: true, updatedAt: true },
   });
 
+  void logSystemAudit(req.user.id, "team.updated", {
+    entityType: "team", entityId: id, entityNumber: `TEAM-${id}`, entityTitle: updated.name,
+    changes: Object.keys(data),
+  });
+
   res.json({ team: updated });
 });
 
@@ -196,6 +206,10 @@ router.delete("/:id", requirePermission("teams.manage"), async (req, res) => {
 
   // Tickets will have teamId set to NULL via onDelete: SetNull
   await prisma.team.delete({ where: { id } });
+
+  void logSystemAudit(req.user.id, "team.deleted", {
+    entityType: "team", entityId: id, entityNumber: `TEAM-${id}`, entityTitle: team.name,
+  });
 
   res.status(204).send();
 });
@@ -251,6 +265,17 @@ router.put("/:id/members", requirePermission("teams.manage"), async (req, res) =
     }
   }
 
+  // Capture current membership for diff
+  const currentMembers = await prisma.teamMember.findMany({
+    where: { teamId: id },
+    select: { userId: true },
+  });
+  const currentIds = new Set(currentMembers.map((m) => m.userId));
+  const newIds     = new Set(data.memberIds);
+
+  const added   = data.memberIds.filter((uid) => !currentIds.has(uid));
+  const removed = [...currentIds].filter((uid) => !newIds.has(uid));
+
   // Replace membership atomically
   await prisma.$transaction([
     prisma.teamMember.deleteMany({ where: { teamId: id } }),
@@ -268,6 +293,10 @@ router.put("/:id/members", requirePermission("teams.manage"), async (req, res) =
     include: { user: { select: { id: true, name: true, email: true, role: true } } },
     orderBy: { user: { name: "asc" } },
   });
+
+  const tBase = { entityType: "team", entityId: id, entityNumber: `TEAM-${id}`, entityTitle: team.name };
+  for (const uid of added)   void logSystemAudit(req.user.id, "team.member_added",   { ...tBase, memberId: uid });
+  for (const uid of removed) void logSystemAudit(req.user.id, "team.member_removed", { ...tBase, memberId: uid });
 
   res.json({ members: members.map((m) => m.user) });
 });

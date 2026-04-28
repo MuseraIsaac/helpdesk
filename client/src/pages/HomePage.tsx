@@ -126,6 +126,7 @@ import {
   Magnet,
   Move,
   Palette,
+  Loader2,
 } from "lucide-react";
 import {
   Popover,
@@ -437,6 +438,35 @@ interface TopOpenTickets {
     assigneeName: string;
     daysOpen: number;
   }[];
+}
+
+interface ChangeAnalytics {
+  total: number;
+  failed: number;
+  emergency: number;
+  successRate: number | null;
+  avgApprovalSec: number | null;
+  byState: { state: string; count: number }[];
+  byType:  { type:  string; count: number }[];
+  byRisk:  { risk:  string; count: number }[];
+}
+
+interface AssetHealth {
+  total:    number;
+  active:   number;
+  in_stock: number;
+  deployed: number;
+  in_use:   number;
+  maint:    number;
+  byStatus: { status: string; count: number }[];
+  byType:   { type:   string; count: number }[];
+}
+
+interface KbInsights {
+  totalSearches: number;
+  uniqueQueries: number;
+  zeroResultRate: number | null;
+  topQueries: { query: string; count: number; zeroResultsCount: number }[];
 }
 
 // ── Chart configs ─────────────────────────────────────────────────────────────
@@ -843,18 +873,58 @@ function RatingDistribution({ distribution, total }: { distribution: Record<numb
 // ── Widget Picker Dialog ──────────────────────────────────────────────────────
 // Shown in edit mode; lets users add/remove widgets from the dashboard.
 
+type WidgetPhase = "adding" | "added" | "removing" | "removed";
+
 function WidgetPickerDialog({
   open,
   onOpenChange,
   widgets,
   onToggle,
+  isSaving,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   widgets: WidgetConfig[];
   onToggle: (id: WidgetId) => void;
+  /** True while the most recent toggle save is in flight. */
+  isSaving: boolean;
 }) {
   const visibleIds = new Set(widgets.filter(w => w.visible).map(w => w.id));
+
+  // Per-widget animated phase: "adding" / "removing" while the save is in
+  // flight, then "added" / "removed" briefly to confirm success. Cleared
+  // automatically. Ensures every click in this picker has a visible response
+  // — the bug you saw ("clicking does nothing") was a missing entry in the
+  // saved config combined with no UI feedback for the click itself.
+  const [phase, setPhase] = useState<Record<string, WidgetPhase>>({});
+  const inflight = useRef<{ id: WidgetId; intent: "adding" | "removing" } | null>(null);
+  const timers   = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
+
+  // When isSaving transitions from true → false, the in-flight toggle just
+  // resolved — flip its phase to the "done" variant for ~1s, then clear.
+  const wasSaving = useRef(false);
+  useEffect(() => {
+    if (wasSaving.current && !isSaving && inflight.current) {
+      const { id, intent } = inflight.current;
+      setPhase(p => ({ ...p, [id]: intent === "adding" ? "added" : "removed" }));
+      const t = setTimeout(() => {
+        setPhase(p => { const n = { ...p }; delete n[id]; return n; });
+      }, 1100);
+      timers.current.push(t);
+      inflight.current = null;
+    }
+    wasSaving.current = isSaving;
+  }, [isSaving]);
+
+  function handleClick(id: WidgetId) {
+    const isOn = visibleIds.has(id);
+    const intent: "adding" | "removing" = isOn ? "removing" : "adding";
+    inflight.current = { id, intent };
+    setPhase(p => ({ ...p, [id]: intent }));
+    onToggle(id);
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -865,7 +935,7 @@ function WidgetPickerDialog({
             Widget Library
           </DialogTitle>
           <p className="text-sm text-muted-foreground">
-            Toggle widgets on or off. Changes take effect when you save the layout.
+            Click any widget to add it to your dashboard. Changes save automatically.
           </p>
         </DialogHeader>
         <div className="space-y-6 mt-2">
@@ -878,22 +948,35 @@ function WidgetPickerDialog({
                 {cat.ids.map(id => {
                   const meta    = WIDGET_META[id];
                   const isOn    = visibleIds.has(id);
+                  const ph      = phase[id];
+                  const busy    = ph === "adding" || ph === "removing";
+
+                  // Phase → ring + chip styling
+                  const ringClass =
+                    ph === "adding"   || ph === "added"   ? "ring-2 ring-emerald-500/40 bg-emerald-500/5" :
+                    ph === "removing" || ph === "removed" ? "ring-2 ring-amber-500/40  bg-amber-500/5"   : "";
+
                   return (
                     <button
                       key={id}
                       type="button"
-                      onClick={() => onToggle(id)}
+                      onClick={() => handleClick(id)}
+                      disabled={busy}
                       className={[
-                        "flex items-start gap-3 p-3 rounded-lg border text-left transition-all",
+                        "relative flex items-start gap-3 p-3 rounded-lg border text-left transition-all",
                         isOn
                           ? "border-primary/40 bg-primary/5 ring-1 ring-primary/20"
                           : "border-border hover:border-primary/30 hover:bg-muted/40",
-                      ].join(" ")}
+                        ringClass,
+                        busy && "opacity-90",
+                      ].filter(Boolean).join(" ")}
                     >
                       <div className={`mt-0.5 h-6 w-6 rounded-md flex items-center justify-center shrink-0 ${isOn ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                        {isOn
-                          ? <Check className="h-3.5 w-3.5" />
-                          : <Plus className="h-3.5 w-3.5 text-muted-foreground" />}
+                        {busy
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : isOn
+                            ? <Check className="h-3.5 w-3.5" />
+                            : <Plus className="h-3.5 w-3.5 text-muted-foreground" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className={`text-sm font-medium leading-tight ${isOn ? "text-primary" : "text-foreground"}`}>
@@ -906,6 +989,22 @@ function WidgetPickerDialog({
                           {WIDGET_PRESENTATION[id]}
                         </span>
                       </div>
+
+                      {/* Two-phase chip — Adding…/Added on add, Removing…/Removed on remove */}
+                      {ph && (
+                        <span
+                          className={[
+                            "pointer-events-none absolute right-2 top-2 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider border shadow-sm animate-in fade-in slide-in-from-top-1",
+                            (ph === "adding"   || ph === "added")   && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+                            (ph === "removing" || ph === "removed") && "bg-amber-500/15   text-amber-700  dark:text-amber-300  border-amber-500/30",
+                          ].filter(Boolean).join(" ")}
+                        >
+                          {ph === "adding"   && <><Loader2 className="h-2.5 w-2.5 animate-spin" />Adding…</>}
+                          {ph === "added"    && <><Check    className="h-2.5 w-2.5" />Added</>}
+                          {ph === "removing" && <><Loader2 className="h-2.5 w-2.5 animate-spin" />Removing…</>}
+                          {ph === "removed"  && <><Check    className="h-2.5 w-2.5" />Removed</>}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -1195,106 +1294,173 @@ export default function HomePage() {
   // Period-based endpoints get from/to too; they should ignore unknown params gracefully.
   const periodParams = `from=${from}&to=${to}`;
 
+  // ── Performance: only fetch data for widgets the user is actually viewing ────
+  // Each widget toggles its query via `enabled`; staleTime keeps cached data fresh
+  // for 5 minutes so tab-switches and remounts don't trigger refetch storms.
+  const STALE_TIME = 5 * 60_000;
+  const visibleWidgets = useMemo(
+    () => new Set(activeConfig.widgets.filter(w => w.visible).map(w => w.id)),
+    [activeConfig.widgets],
+  );
+  const isVisible = (id: string) => visibleWidgets.has(id);
+
   const { data: overview, isLoading: overviewLoading, error: overviewError } =
     useQuery<OverviewStats>({
       queryKey: ["reports-overview", from, to],
       queryFn: async () => (await axios.get(`/api/reports/overview?${fromToParams}`)).data,
+      staleTime: STALE_TIME,
     });
 
   const { data: volume, isLoading: volumeLoading, error: volumeError } =
     useQuery<VolumeData>({
       queryKey: ["reports-volume", from, to],
       queryFn: async () => (await axios.get(`/api/reports/volume?${periodParams}`)).data,
+      enabled:   isVisible("volume"),
+      staleTime: STALE_TIME,
     });
 
   const { data: breakdowns, isLoading: breakdownsLoading } =
     useQuery<Breakdowns>({
       queryKey: ["reports-breakdowns", from, to],
       queryFn: async () => (await axios.get(`/api/reports/breakdowns?${fromToParams}`)).data,
+      enabled:   isVisible("breakdowns"),
+      staleTime: STALE_TIME,
     });
 
   const { data: agingData, isLoading: agingLoading } =
     useQuery<{ aging: AgingBucket[] }>({
       queryKey: ["reports-aging"],
       queryFn: async () => (await axios.get("/api/reports/aging")).data,
+      enabled:   isVisible("breakdowns"),  // rendered inside the breakdowns widget
+      staleTime: STALE_TIME,
     });
 
   const { data: csat, isLoading: csatLoading } =
     useQuery<CsatSummary>({
       queryKey: ["csat-summary"],
       queryFn: async () => (await axios.get("/api/csat/summary")).data,
+      enabled:   isVisible("csat"),
+      staleTime: STALE_TIME,
     });
 
   const { data: slaDim, isLoading: slaDimLoading } =
     useQuery<SlaDimData>({
       queryKey: ["reports-sla-dim", from, to],
       queryFn: async () => (await axios.get(`/api/reports/sla-by-dimension?${fromToParams}`)).data,
+      enabled:   isVisible("sla_by_dimension"),
+      staleTime: STALE_TIME,
     });
 
   const { data: incidents, isLoading: incidentsLoading } =
     useQuery<IncidentStats>({
       queryKey: ["reports-incidents", from, to],
       queryFn: async () => (await axios.get(`/api/reports/incidents?${periodParams}`)).data,
+      enabled:   isVisible("incident_analytics"),
+      staleTime: STALE_TIME,
     });
 
   const { data: requests, isLoading: requestsLoading } =
     useQuery<RequestStats>({
       queryKey: ["reports-requests", from, to],
       queryFn: async () => (await axios.get(`/api/reports/requests?${periodParams}`)).data,
+      enabled:   isVisible("request_fulfillment"),
+      staleTime: STALE_TIME,
     });
 
   const { data: problems, isLoading: problemsLoading } =
     useQuery<ProblemStats>({
       queryKey: ["reports-problems", from, to],
       queryFn: async () => (await axios.get(`/api/reports/problems?${periodParams}`)).data,
+      enabled:   isVisible("problem_recurrence"),
+      staleTime: STALE_TIME,
     });
 
   const { data: approvals, isLoading: approvalsLoading } =
     useQuery<ApprovalStats>({
       queryKey: ["reports-approvals", from, to],
       queryFn: async () => (await axios.get(`/api/reports/approvals?${periodParams}`)).data,
+      enabled:   isVisible("approval_turnaround"),
+      staleTime: STALE_TIME,
     });
 
   const { data: csatTrend, isLoading: csatTrendLoading } =
     useQuery<{ data: CsatTrendPoint[] }>({
       queryKey: ["reports-csat-trend", from, to],
       queryFn: async () => (await axios.get(`/api/reports/csat-trend?${periodParams}`)).data,
+      enabled:   isVisible("csat_trend"),
+      staleTime: STALE_TIME,
     });
 
   const { data: channelBreakdown, isLoading: channelLoading } =
     useQuery<ChannelBreakdown>({
       queryKey: ["reports-channel", from, to],
       queryFn: async () => (await axios.get(`/api/reports/channel-breakdown?${fromToParams}`)).data,
+      enabled:   isVisible("channel_breakdown"),
+      staleTime: STALE_TIME,
     });
 
   const { data: resolutionDist, isLoading: resolutionLoading } =
     useQuery<ResolutionDist>({
       queryKey: ["reports-resolution-dist", from, to],
       queryFn: async () => (await axios.get(`/api/reports/resolution-distribution?${fromToParams}`)).data,
+      enabled:   isVisible("resolution_dist"),
+      staleTime: STALE_TIME,
     });
 
   const { data: agentLeaderboard, isLoading: leaderboardLoading } =
     useQuery<AgentLeaderboard>({
       queryKey: ["reports-agent-leaderboard", from, to],
       queryFn: async () => (await axios.get(`/api/reports/agent-leaderboard?${fromToParams}`)).data,
+      enabled:   isVisible("agent_leaderboard"),
+      staleTime: STALE_TIME,
     });
 
   const { data: backlogTrend, isLoading: backlogLoading } =
     useQuery<BacklogTrend>({
       queryKey: ["reports-backlog-trend", from, to],
       queryFn: async () => (await axios.get(`/api/reports/backlog-trend?${fromToParams}`)).data,
+      enabled:   isVisible("backlog_trend"),
+      staleTime: STALE_TIME,
     });
 
   const { data: fcrData, isLoading: fcrLoading } =
     useQuery<FcrData>({
       queryKey: ["reports-fcr", from, to],
       queryFn: async () => (await axios.get(`/api/reports/fcr?${fromToParams}`)).data,
+      enabled:   isVisible("fcr_rate"),
+      staleTime: STALE_TIME,
     });
 
   const { data: topOpen, isLoading: topOpenLoading } =
     useQuery<TopOpenTickets>({
       queryKey: ["reports-top-open"],
       queryFn: async () => (await axios.get("/api/reports/top-open-tickets")).data,
+      enabled:   isVisible("top_open_tickets"),
+      staleTime: STALE_TIME,
+    });
+
+  const { data: changeAnalytics, isLoading: changeAnalyticsLoading } =
+    useQuery<ChangeAnalytics>({
+      queryKey: ["reports-changes", from, to],
+      queryFn: async () => (await axios.get(`/api/reports/changes?${periodParams}`)).data,
+      enabled:   isVisible("change_analytics"),
+      staleTime: STALE_TIME,
+    });
+
+  const { data: assetHealth, isLoading: assetHealthLoading } =
+    useQuery<AssetHealth>({
+      queryKey: ["reports-assets", from, to],
+      queryFn: async () => (await axios.get(`/api/reports/assets?${periodParams}`)).data,
+      enabled:   isVisible("asset_health"),
+      staleTime: STALE_TIME,
+    });
+
+  const { data: kbInsights, isLoading: kbInsightsLoading } =
+    useQuery<KbInsights>({
+      queryKey: ["reports-kb-insights", from, to],
+      queryFn: async () => (await axios.get(`/api/reports/kb-search-stats?${periodParams}`)).data,
+      enabled:   isVisible("kb_insights"),
+      staleTime: STALE_TIME,
     });
 
   // ── Derived variants ─────────────────────────────────────────────────────────
@@ -1527,14 +1693,25 @@ export default function HomePage() {
       setHistoryIndex(next.length - 1);
       return next;
     });
-    const newWidgets = activeConfig.widgets.map(w => w.id === id ? { ...w, visible: true } : w);
+    // If the widget already exists in config → flip visible. If not (newer
+    // widget added to the catalog after this dashboard was saved), append a
+    // fresh entry so the toggle actually takes effect.
+    const exists = activeConfig.widgets.some(w => w.id === id);
+    const maxOrder = activeConfig.widgets.reduce((m, w) => Math.max(m, w.order), -1);
+    const newWidgets = exists
+      ? activeConfig.widgets.map(w => w.id === id ? { ...w, visible: true } : w)
+      : [...activeConfig.widgets, { id, visible: true, order: maxOrder + 1 }];
     handleSaveConfig({ ...activeConfig, widgets: newWidgets }, activeDashboard?.name ?? "My Dashboard", {});
   }
 
   /** Remove a widget from the grid (marks it hidden) */
   function hideWidget(id: WidgetId) {
     setDraftLayout(prev => (prev ?? configLayout).filter(l => l.i !== id));
-    const newWidgets = activeConfig.widgets.map(w => w.id === id ? { ...w, visible: false } : w);
+    const exists = activeConfig.widgets.some(w => w.id === id);
+    const maxOrder = activeConfig.widgets.reduce((m, w) => Math.max(m, w.order), -1);
+    const newWidgets = exists
+      ? activeConfig.widgets.map(w => w.id === id ? { ...w, visible: false } : w)
+      : [...activeConfig.widgets, { id, visible: false, order: maxOrder + 1 }];
     handleSaveConfig({ ...activeConfig, widgets: newWidgets }, activeDashboard?.name ?? "My Dashboard", {});
   }
 
@@ -1542,14 +1719,17 @@ export default function HomePage() {
    * Toggle widget visibility from the widget picker.
    * Visible → hidden (removes from grid draft). Hidden → visible (appends to grid).
    * Immediately persists, same as showWidget/hideWidget.
+   *
+   * Falls back to "show" when the widget id is missing from the saved config
+   * — happens for widgets added to the catalog after this dashboard was last
+   * saved (kb_insights, asset_health, change_analytics, by_assignee, etc.).
    */
   function toggleWidgetPicker(id: WidgetId) {
     const widget = activeConfig.widgets.find(w => w.id === id);
-    if (!widget) return;
-    if (widget.visible) {
-      hideWidget(id);
-    } else {
+    if (!widget || !widget.visible) {
       showWidget(id);
+    } else {
+      hideWidget(id);
     }
   }
 
@@ -2533,6 +2713,230 @@ export default function HomePage() {
           </Card>
         );
 
+      // ── Change Analytics ─────────────────────────────────────────────────────
+      case "change_analytics": {
+        const CHANGE_STATE_COLORS: Record<string, string> = {
+          draft: "#94a3b8", submitted_for_approval: "#f59e0b", approved: "#22c55e",
+          rejected: "#ef4444", scheduled: "#3b82f6", implemented: "#10b981",
+          rolled_back: "#f97316",
+        };
+        const CHANGE_TYPE_COLORS = ["#6366f1", "#22c55e", "#f59e0b", "#14b8a6"];
+        const CHANGE_RISK_COLORS: Record<string, string> = {
+          low: "#22c55e", medium: "#f59e0b", high: "#f97316", critical: "#ef4444",
+        };
+        return (
+          <section key="change_analytics" className="space-y-4">
+            <SectionHeading>Change Analytics</SectionHeading>
+            <div className={`grid grid-cols-2 sm:grid-cols-4 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <MetricCard title="Total Changes"   value={changeAnalytics?.total}        icon={GitBranch}   loading={changeAnalyticsLoading} href="/changes" />
+              <MetricCard title="Success Rate"    value={changeAnalytics?.successRate != null ? `${changeAnalytics.successRate}%` : undefined} icon={Check} loading={changeAnalyticsLoading} variant={changeAnalytics?.successRate != null ? changeAnalytics.successRate >= 90 ? "good" : changeAnalytics.successRate >= 70 ? "warn" : "bad" : "default"} hint="Percentage of changes that were implemented without being rolled back or marked failed." />
+              <MetricCard title="Emergency"       value={changeAnalytics?.emergency}    icon={AlertTriangle} loading={changeAnalyticsLoading} variant={changeAnalytics?.emergency ? "warn" : "default"} hint="Emergency changes bypass normal approval process and carry higher risk." />
+              <MetricCard title="Avg Approval"    value={formatDuration(changeAnalytics?.avgApprovalSec)} icon={Timer} loading={changeAnalyticsLoading} hint="Average time from change submission to final CAB approval decision." />
+            </div>
+            <div className={`grid grid-cols-1 sm:grid-cols-3 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              {/* By State */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2"><Activity className="h-4 w-4 text-blue-500" />By State</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {changeAnalyticsLoading ? <Skeleton className="h-40 w-full" /> : (
+                    <div className="space-y-1.5">
+                      {(changeAnalytics?.byState ?? []).map(s => {
+                        const total = (changeAnalytics?.total ?? 0);
+                        const pct = total > 0 ? Math.round((s.count / total) * 100) : 0;
+                        const color = CHANGE_STATE_COLORS[s.state] ?? "#94a3b8";
+                        return (
+                          <div key={s.state} className="flex items-center gap-2 text-xs">
+                            <span className="w-28 truncate text-muted-foreground capitalize">{s.state.replace(/_/g, " ")}</span>
+                            <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+                            </div>
+                            <span className="tabular-nums font-medium w-6 text-right">{s.count}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              {/* By Type */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2"><Layers className="h-4 w-4 text-violet-500" />By Type</CardTitle>
+                </CardHeader>
+                <CardContent className="flex items-center justify-center">
+                  {changeAnalyticsLoading ? <Skeleton className="h-40 w-full" /> : (
+                    <ChartContainer config={{}} className="h-40 w-full">
+                      <PieChart>
+                        <Pie data={changeAnalytics?.byType ?? []} dataKey="count" nameKey="type" cx="50%" cy="50%" outerRadius={58} innerRadius={28} paddingAngle={2}>
+                          {(changeAnalytics?.byType ?? []).map((e, i) => (
+                            <Cell key={e.type} fill={CHANGE_TYPE_COLORS[i % CHANGE_TYPE_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <ChartTooltip content={<ChartTooltipContent nameKey="type" />} />
+                      </PieChart>
+                    </ChartContainer>
+                  )}
+                </CardContent>
+              </Card>
+              {/* By Risk */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-orange-500" />By Risk</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {changeAnalyticsLoading ? <Skeleton className="h-40 w-full" /> : (
+                    <div className="space-y-1.5">
+                      {(changeAnalytics?.byRisk ?? []).map(r => {
+                        const total = (changeAnalytics?.total ?? 0);
+                        const pct = total > 0 ? Math.round((r.count / total) * 100) : 0;
+                        const color = CHANGE_RISK_COLORS[r.risk] ?? "#94a3b8";
+                        return (
+                          <div key={r.risk} className="flex items-center gap-2 text-xs">
+                            <span className="w-16 truncate text-muted-foreground capitalize">{r.risk}</span>
+                            <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+                            </div>
+                            <span className="tabular-nums font-medium w-6 text-right">{r.count}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </section>
+        );
+      }
+
+      // ── Asset Health ──────────────────────────────────────────────────────────
+      case "asset_health": {
+        const ASSET_STATUS_COLORS: Record<string, string> = {
+          in_stock: "#6366f1", deployed: "#22c55e", in_use: "#10b981",
+          under_maintenance: "#f59e0b", in_repair: "#f97316",
+          decommissioned: "#94a3b8", disposed: "#cbd5e1",
+        };
+        const ASSET_TYPE_COLORS = ["#6366f1", "#22c55e", "#f59e0b", "#14b8a6", "#8b5cf6", "#f97316", "#ec4899"];
+        return (
+          <section key="asset_health" className="space-y-4">
+            <SectionHeading>Asset Health</SectionHeading>
+            <div className={`grid grid-cols-2 sm:grid-cols-4 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <MetricCard title="Total Assets"   value={assetHealth?.total}    icon={Layers}    loading={assetHealthLoading} href="/assets" />
+              <MetricCard title="Active (In Use)" value={assetHealth?.active}   icon={CheckSquare} loading={assetHealthLoading} variant="good" hint="Assets currently deployed or in use." />
+              <MetricCard title="In Stock"       value={assetHealth?.in_stock} icon={Inbox}     loading={assetHealthLoading} />
+              <MetricCard title="Under Maintenance" value={assetHealth?.maint} icon={RotateCcw} loading={assetHealthLoading} variant={assetHealth?.maint ? "warn" : "default"} hint="Assets temporarily removed from service for maintenance or repair." />
+            </div>
+            <div className={`grid grid-cols-1 sm:grid-cols-2 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              {/* By Status donut */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2"><Activity className="h-4 w-4 text-emerald-500" />By Status</CardTitle>
+                </CardHeader>
+                <CardContent className="flex items-center justify-center">
+                  {assetHealthLoading ? <Skeleton className="h-44 w-full" /> : (
+                    <ChartContainer config={{}} className="h-44 w-full">
+                      <PieChart>
+                        <Pie data={assetHealth?.byStatus ?? []} dataKey="count" nameKey="status" cx="50%" cy="50%" outerRadius={70} innerRadius={36} paddingAngle={2}>
+                          {(assetHealth?.byStatus ?? []).map(e => (
+                            <Cell key={e.status} fill={ASSET_STATUS_COLORS[e.status] ?? "#94a3b8"} />
+                          ))}
+                        </Pie>
+                        <ChartTooltip content={<ChartTooltipContent nameKey="status" />} />
+                      </PieChart>
+                    </ChartContainer>
+                  )}
+                </CardContent>
+              </Card>
+              {/* By Type */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2"><Layers className="h-4 w-4 text-cyan-500" />By Type</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {assetHealthLoading ? <Skeleton className="h-44 w-full" /> : (
+                    <div className="space-y-1.5 mt-1">
+                      {(assetHealth?.byType ?? []).slice(0, 8).map((t, i) => {
+                        const total = assetHealth?.total ?? 0;
+                        const pct = total > 0 ? Math.round((t.count / total) * 100) : 0;
+                        return (
+                          <div key={t.type} className="flex items-center gap-2 text-xs">
+                            <span className="w-28 truncate text-muted-foreground capitalize">{t.type.replace(/_/g, " ")}</span>
+                            <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: ASSET_TYPE_COLORS[i % ASSET_TYPE_COLORS.length] }} />
+                            </div>
+                            <span className="tabular-nums font-medium w-6 text-right">{t.count}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </section>
+        );
+      }
+
+      // ── KB Insights ───────────────────────────────────────────────────────────
+      case "kb_insights": {
+        return (
+          <section key="kb_insights" className="space-y-4">
+            <SectionHeading>Knowledge Base Insights</SectionHeading>
+            <div className={`grid grid-cols-2 sm:grid-cols-3 ${density === "compact" ? "gap-2" : "gap-4"}`}>
+              <MetricCard title="Total Searches"  value={kbInsights?.totalSearches}  icon={Hash}       loading={kbInsightsLoading} hint="Total number of KB searches made by customers and agents during the period." />
+              <MetricCard title="Unique Queries"  value={kbInsights?.uniqueQueries}  icon={Activity}   loading={kbInsightsLoading} hint="Number of distinct search terms used." />
+              <MetricCard
+                title="Zero-Result Rate"
+                value={kbInsights?.zeroResultRate != null ? `${kbInsights.zeroResultRate}%` : undefined}
+                icon={TrendingDown}
+                loading={kbInsightsLoading}
+                variant={kbInsights?.zeroResultRate != null ? kbInsights.zeroResultRate > 30 ? "bad" : kbInsights.zeroResultRate > 10 ? "warn" : "good" : "default"}
+                hint="Percentage of searches that returned no KB results — high rate suggests content gaps."
+              />
+            </div>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-pink-500" />
+                  Top Search Terms
+                </CardTitle>
+                <CardDescription>Most frequently searched queries this period</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {kbInsightsLoading ? (
+                  <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-7 w-full" />)}</div>
+                ) : (kbInsights?.topQueries.length ?? 0) === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">No searches recorded for this period.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Query</TableHead>
+                        <TableHead className="text-right">Searches</TableHead>
+                        <TableHead className="text-right">Zero Results</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(kbInsights?.topQueries ?? []).slice(0, 10).map(q => (
+                        <TableRow key={q.query}>
+                          <TableCell className="font-medium">{q.query}</TableCell>
+                          <TableCell className="text-right tabular-nums">{q.count}</TableCell>
+                          <TableCell className={`text-right tabular-nums ${q.zeroResultsCount > 0 ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                            {q.zeroResultsCount > 0 ? q.zeroResultsCount : "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+        );
+      }
+
       default:
         return null;
     }
@@ -2843,6 +3247,7 @@ export default function HomePage() {
             onOpenChange={setWidgetPickerOpen}
             widgets={activeConfig.widgets}
             onToggle={toggleWidgetPicker}
+            isSaving={saveDashboard.isPending}
           />
 
           {/* ── Customizer dialog ─────────────────────────────────────────── */}

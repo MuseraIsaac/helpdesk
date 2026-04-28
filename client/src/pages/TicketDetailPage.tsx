@@ -15,6 +15,7 @@ import TicketSummary from "@/components/TicketSummary";
 import AuditTimeline from "@/components/AuditTimeline";
 import CustomerHistory from "@/components/CustomerHistory";
 import RunScenarioButton from "@/components/RunScenarioButton";
+import TicketScenarioSheet from "@/components/TicketScenarioSheet";
 import PresenceIndicator from "@/components/PresenceIndicator";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
 import MergeTicketDialog from "@/components/MergeTicketDialog";
@@ -376,6 +377,8 @@ export default function TicketDetailPage() {
   const [quoteData, setQuoteData] = useState<QuoteData | null>(null);
   const [templateDialog,  setTemplateDialog]  = useState(false);
   const [mergeDialog,     setMergeDialog]     = useState(false);
+  const [scenarioSheet,   setScenarioSheet]   = useState(false);
+  const [scenarioTab,     setScenarioTab]     = useState<"run" | "create" | "manage">("run");
   const [addChildDialog,  setAddChildDialog]  = useState(false);
   const [unmergeConfirm,  setUnmergeConfirm]  = useState<number | null>(null);
   const [activityOpen,    setActivityOpen]    = useState(false);
@@ -547,7 +550,11 @@ export default function TicketDetailPage() {
                 <BookmarkPlus className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Template</span>
               </Button>
-              <RunScenarioButton ticketId={ticket.id} variant="header" />
+              <RunScenarioButton
+                ticketId={ticket.id}
+                variant="header"
+                onOpenSheet={(t) => { setScenarioTab(t ?? "run"); setScenarioSheet(true); }}
+              />
             </div>
           </div>
 
@@ -1075,6 +1082,14 @@ export default function TicketDetailPage() {
         type="ticket"
         defaultTitle={ticket.subject}
         defaultBody={ticket.body}
+      />
+
+      {/* Scenario automation sheet */}
+      <TicketScenarioSheet
+        open={scenarioSheet}
+        onClose={() => setScenarioSheet(false)}
+        ticketId={ticket.id}
+        initialTab={scenarioTab}
       />
     </div>
   );

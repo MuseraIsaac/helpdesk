@@ -104,10 +104,16 @@ router.get("/batches/:id/preview", requireAuth, requireAdmin, requireDemoEnabled
 
   const batch = await prisma.demoBatch.findUnique({ where: { id } });
   if (!batch)                     { res.status(404).json({ error: "Batch not found" }); return; }
-  if (batch.status === "deleted") { res.status(409).json({ error: "Batch is already deleted" }); return; }
+  if (batch.status === "deleted") { res.status(409).json({ error: "Batch already deleted" }); return; }
 
-  const preview = await previewBatchDeletion(id);
-  res.json({ preview });
+  try {
+    const preview = await previewBatchDeletion(id);
+    res.json({ preview });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "demo_batch.preview_failed", batchId: id, error: msg }));
+    res.status(500).json({ error: `Preview failed: ${msg}` });
+  }
 });
 
 // ── POST /api/demo-data/generate ─────────────────────────────────────────────

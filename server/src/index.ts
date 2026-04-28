@@ -7,6 +7,7 @@ import rateLimit from "express-rate-limit";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./lib/auth";
 import { requireAuth } from "./middleware/require-auth";
+import { logSystemAudit } from "./lib/audit";
 import usersRouter from "./routes/users";
 import ticketsRouter from "./routes/tickets";
 import agentsRouter from "./routes/agents";
@@ -80,7 +81,9 @@ import searchRouter from "./routes/search";
 import demoDataRouter from "./routes/demo-data";
 import trashRouter    from "./routes/trash";
 import auditLogRouter from "./routes/audit-log";
+import rolesRouter    from "./routes/roles";
 import { startQueue, stopQueue } from "./lib/queue";
+import { loadRoles } from "./lib/role-cache";
 import { bootstrapMaterializedViews } from "./lib/materialized-views";
 import { getSection } from "./lib/settings";
 import { registerApprovalHook } from "./lib/approval-hooks";
@@ -144,6 +147,39 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many requests, please try again later" },
   skip: () => !isProduction,
+});
+
+// ── Auth audit middleware ────────────────────────────────────────────────────
+// Must be registered BEFORE the Better Auth handler so res.on('finish') fires
+// after the response is sent (but still in the same request cycle).
+
+// Failed logins — fires when the sign-in endpoint returns an error status.
+app.post("/api/auth/sign-in/email", (req, res, next) => {
+  res.on("finish", () => {
+    if (res.statusCode >= 400) {
+      void logSystemAudit(null, "auth.login_failed", {
+        ip: req.ip ?? null,
+      });
+    }
+  });
+  next();
+});
+
+// Logout — read the session before Better Auth deletes it, then log after.
+app.post("/api/auth/sign-out", (req, res, next) => {
+  // Resolve the current session to capture the user ID.
+  auth.api.getSession({ headers: req.headers as unknown as Headers })
+    .then((session) => {
+      const userId = session?.user?.id ?? null;
+      res.on("finish", () => {
+        if (res.statusCode < 400) {
+          void logSystemAudit(userId, "auth.logout", { ip: req.ip ?? null });
+        }
+      });
+    })
+    .catch(() => { /* session lookup failed — proceed without logging */ })
+    .finally(() => next());
+  return;
 });
 
 // Mount Better Auth handler BEFORE express.json()
@@ -229,6 +265,7 @@ app.use("/api/search", searchRouter);
 app.use("/api/demo-data", demoDataRouter);
 app.use("/api/trash",     trashRouter);
 app.use("/api/audit-log", auditLogRouter);
+app.use("/api/roles",     rolesRouter);
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/reports", reportsShareRouter);
 app.use("/api/reports", reportsExportRouter);
@@ -268,8 +305,14 @@ Sentry.setupExpressErrorHandler(app);
 // Runs after Sentry has captured the exception. Ensures all unhandled errors (Prisma, etc.)
 // return { error: "..." } JSON instead of an HTML 500 page.
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  const anyErr = err as { status?: number; statusCode?: number; message?: string };
-  const status  = anyErr.status ?? anyErr.statusCode ?? 500;
+  const anyErr = err as { status?: unknown; statusCode?: unknown; message?: string };
+  // Some libraries (Better Auth, etc.) set `status` to a string like
+  // "INTERNAL_SERVER_ERROR" instead of a number. Express rejects non-integer
+  // codes with a TypeError, so coerce defensively here.
+  const raw = anyErr.status ?? anyErr.statusCode;
+  const status = typeof raw === "number" && Number.isInteger(raw) && raw >= 100 && raw <= 599
+    ? raw
+    : 500;
   const message =
     process.env.NODE_ENV === "production"
       ? (status < 500 ? (anyErr.message ?? "Bad request") : "Internal server error")
@@ -286,6 +329,21 @@ if (isProduction) {
   app.get("/{*path}", (_req, res) => {
     res.sendFile(path.join(clientDist, "index.html"));
   });
+} else {
+  // ── Dev-mode SPA redirect ────────────────────────────────────────────────
+  // The Vite dev server runs on a different port (default 5173) than the API
+  // (3000). Some flows — most notably Better Auth's OAuth callback — issue
+  // 302 redirects to paths like "/portal/tickets" against the API origin.
+  // Without this fallback those would 404 with "Cannot GET /...".
+  //
+  // Forward any unmatched GET to the Vite dev server, preserving query string.
+  // Cookies aren't port-scoped (RFC 6265) so the session set by Better Auth
+  // on :3000 is still visible to the SPA at :5173.
+  const viteUrl = process.env.VITE_DEV_URL || "http://localhost:5173";
+  app.get("/{*path}", (req, res, next) => {
+    if (req.path.startsWith("/api/")) return next();
+    res.redirect(307, `${viteUrl}${req.originalUrl}`);
+  });
 }
 
 if (!process.env.WEBHOOK_SECRET) {
@@ -295,6 +353,16 @@ if (!process.env.WEBHOOK_SECRET) {
 async function boot() {
   await startQueue();
   await bootstrapMaterializedViews();
+
+  // Load editable role definitions into the in-memory permission cache so
+  // `can()` / requirePermission() reflect the DB on the very first request.
+  // Failure here is non-fatal — the static built-in defaults remain active.
+  try {
+    await loadRoles();
+  } catch (err) {
+    console.error("[role-cache] Failed to load roles at boot:", err);
+    Sentry.captureException(err);
+  }
 
   const server = app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
@@ -310,6 +378,22 @@ async function boot() {
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 }
+
+// ── Global error handlers ─────────────────────────────────────────────────────
+// Prevent transient errors (especially Postgres 57P01 connection drops from
+// the remote DB's idle timeout) from crashing the process. Log them to
+// Sentry / stderr; the next query will reconnect via the pg pool.
+process.on("unhandledRejection", (reason) => {
+  Sentry.captureException(reason);
+  console.error("[unhandledRejection]", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  Sentry.captureException(error);
+  console.error("[uncaughtException]", error);
+  // Don't exit — let the pool recover. If it's a real fatal error, the
+  // health check / orchestrator will restart us.
+});
 
 boot().catch((error) => {
   Sentry.captureException(error);

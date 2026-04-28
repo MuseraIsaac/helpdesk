@@ -41,6 +41,7 @@ import {
   FlaskConical,
   Trash2,
   CalendarDays,
+  ScrollText,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { can, type Permission } from "core/constants/permission.ts";
@@ -319,10 +320,22 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: UserCog,
       },
       {
+        id: "roles",
+        to: "/admin/roles",
+        label: "Roles & Permissions",
+        icon: ShieldCheck,
+      },
+      {
         id: "macros",
         to: "/macros",
         label: "Macros",
         icon: Wrench,
+      },
+      {
+        id: "audit-log",
+        to: "/admin/audit-log",
+        label: "Audit Log",
+        icon: ScrollText,
       },
       {
         id: "trash",

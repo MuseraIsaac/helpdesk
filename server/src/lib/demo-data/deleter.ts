@@ -36,6 +36,7 @@ interface StoredRecordIds {
   kbArticleIds?:       number[];
   macroIds?:           number[];
   cabGroupIds?:        number[];
+  catalogCategoryIds?: number[];
   catalogItemIds?:     number[];
   ticketIds?:          number[];
   incidentIds?:        number[];
@@ -65,6 +66,7 @@ export interface LiveEntityCounts {
   kbCategories:       number;
   macros:             number;
   cabGroups:          number;
+  catalogCategories:  number;
   catalogItems:       number;
   tickets:            number;
   incidents:          number;
@@ -115,12 +117,15 @@ export async function previewBatchDeletion(batchId: number): Promise<BatchPrevie
   const batch = await prisma.demoBatch.findUnique({ where: { id: batchId } });
   if (!batch) throw new Error(`Batch ${batchId} not found`);
 
-  const ids = batch.recordIds as StoredRecordIds;
+  // Guard against null JSON (can happen when generation failed before the final recordIds write)
+  const ids: StoredRecordIds = (batch.recordIds != null && typeof batch.recordIds === "object" && !Array.isArray(batch.recordIds))
+    ? (batch.recordIds as StoredRecordIds)
+    : {};
 
   // Count in parallel for speed
   const [
     users, teams, orgs, customers, kbArticles, kbCategories,
-    macros, cabGroups, catalogItems,
+    macros, cabGroups, catalogCategories, catalogItems,
     tickets, incidents, serviceRequests, problems, changes,
     assets, configItems, notes, replies, csatRatings, incidentUpdates, approvals,
     saasSubscriptions, softwareLicenses, dutyPlans, ticketTypes, ticketStatuses,
@@ -133,6 +138,7 @@ export async function previewBatchDeletion(batchId: number): Promise<BatchPrevie
     ids.kbCategoryIds?.length       ? prisma.kbCategory.count({ where: { id: { in: ids.kbCategoryIds } } }) : 0,
     ids.macroIds?.length            ? prisma.macro.count({ where: { id: { in: ids.macroIds } } }) : 0,
     ids.cabGroupIds?.length         ? prisma.cabGroup.count({ where: { id: { in: ids.cabGroupIds } } }) : 0,
+    ids.catalogCategoryIds?.length  ? prisma.catalogCategory.count({ where: { id: { in: ids.catalogCategoryIds } } }) : 0,
     ids.catalogItemIds?.length      ? prisma.catalogItem.count({ where: { id: { in: ids.catalogItemIds } } }) : 0,
     ids.ticketIds?.length           ? prisma.ticket.count({ where: { id: { in: ids.ticketIds } } }) : 0,
     ids.incidentIds?.length         ? prisma.incident.count({ where: { id: { in: ids.incidentIds } } }) : 0,
@@ -155,7 +161,7 @@ export async function previewBatchDeletion(batchId: number): Promise<BatchPrevie
 
   const liveCounts: LiveEntityCounts = {
     users, teams, organisations: orgs, customers,
-    kbArticles, kbCategories, macros, cabGroups, catalogItems,
+    kbArticles, kbCategories, macros, cabGroups, catalogCategories, catalogItems,
     tickets, incidents, serviceRequests, problems, changes,
     assets, configItems,
     notes, replies, csatRatings, incidentUpdates, approvals,
@@ -165,7 +171,10 @@ export async function previewBatchDeletion(batchId: number): Promise<BatchPrevie
   const totalLive = Object.values(liveCounts).reduce((s, v) => s + v, 0);
 
   // Check for stale IDs (recorded count vs live count)
-  const recorded = Object.values(batch.recordCounts as Record<string, number>).reduce((s, v) => s + v, 0);
+  const rawCounts = (batch.recordCounts != null && typeof batch.recordCounts === "object" && !Array.isArray(batch.recordCounts))
+    ? (batch.recordCounts as Record<string, number>)
+    : {};
+  const recorded = Object.values(rawCounts).reduce((s, v) => s + v, 0);
   const hasStaleIds = totalLive < recorded;
 
   return { batchId, batchLabel: batch.label, liveCounts, totalLive, hasStaleIds };
@@ -377,6 +386,11 @@ export async function deleteDemoBatch(batchId: number, actor: DeletionActor): Pr
       const { count } = await prisma.catalogItem.deleteMany({ where: { id: { in: ids.catalogItemIds } } });
       deleted.catalogItems = count;
     }
+    // Categories must be deleted AFTER items since items reference categoryId
+    if (ids.catalogCategoryIds?.length) {
+      const { count } = await prisma.catalogCategory.deleteMany({ where: { id: { in: ids.catalogCategoryIds } } });
+      deleted.catalogCategories = count;
+    }
     if (ids.cabGroupIds?.length) {
       await prisma.cabMember.deleteMany({ where: { cabGroupId: { in: ids.cabGroupIds } } });
       const { count } = await prisma.cabGroup.deleteMany({ where: { id: { in: ids.cabGroupIds } } });
@@ -403,6 +417,10 @@ export async function deleteDemoBatch(batchId: number, actor: DeletionActor): Pr
 
     // ── 15. Users (last — many tables hold FK references to user) ────────────
     if (ids.userIds?.length) {
+      // ApprovalDecision.decidedById and ApprovalStep.approverId both reference
+      // User without cascade — must be removed before the user rows are deleted.
+      await prisma.approvalDecision.deleteMany({ where: { decidedById: { in: ids.userIds } } });
+      await prisma.approvalStep.deleteMany({ where: { approverId: { in: ids.userIds } } });
       await prisma.userPreference.deleteMany({ where: { userId: { in: ids.userIds } } });
       await prisma.account.deleteMany({ where: { userId: { in: ids.userIds } } });
       await prisma.session.deleteMany({ where: { userId: { in: ids.userIds } } });

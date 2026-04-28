@@ -7,8 +7,29 @@ import { requireAdmin } from "../middleware/require-admin";
 import { validate } from "../lib/validate";
 import prisma from "../db";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
+import { logSystemAudit } from "../lib/audit";
+import { getRole } from "../lib/role-cache";
 
 const router = Router();
+
+/**
+ * Validate that a role key resolves to a real, assignable role.
+ * Rejects unknown roles and the system-only `customer` role.
+ * Returns null on success or sends a 400 response and returns an error msg.
+ */
+async function ensureAssignableRole(role: string | undefined, res: import("express").Response): Promise<boolean> {
+  if (role === undefined) return true;
+  const found = await getRole(role);
+  if (!found) {
+    res.status(400).json({ error: `Unknown role: ${role}` });
+    return false;
+  }
+  if (found.isSystem) {
+    res.status(400).json({ error: `The "${found.name}" role cannot be assigned via the user editor.` });
+    return false;
+  }
+  return true;
+}
 
 const USER_SELECT = {
   id: true, name: true, email: true, role: true,
@@ -29,6 +50,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   if (!data) return;
 
   const { name, email, password, role } = data;
+  if (!(await ensureAssignableRole(role, res))) return;
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
@@ -47,7 +69,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
         name,
         email,
         emailVerified: false,
-        role: (role as Role) ?? Role.agent,
+        role: role ?? Role.agent,
         createdAt: now,
         updatedAt: now,
       },
@@ -70,6 +92,13 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     select: { id: true, name: true, email: true, role: true, createdAt: true },
   });
 
+  void logSystemAudit(req.user.id, "user.created", {
+    userId: userId,
+    name,
+    email,
+    role: role ?? Role.agent,
+  });
+
   res.status(201).json({ user });
 });
 
@@ -80,6 +109,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   if (!data) return;
 
   const { name, email, password, role } = data;
+  if (!(await ensureAssignableRole(role, res))) return;
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing && existing.id !== id) {
@@ -93,7 +123,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       name,
       email,
       updatedAt: new Date(),
-      ...(role !== undefined && { role: role as Role }),
+      ...(role !== undefined && { role }),
       ...(data.globalTicketView !== undefined && { globalTicketView: data.globalTicketView }),
     },
   });
@@ -109,6 +139,19 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: id },
     select: USER_SELECT,
+  });
+
+  const changes: string[] = [];
+  if (name  !== undefined) changes.push("name");
+  if (email !== undefined) changes.push("email");
+  if (role  !== undefined) changes.push("role");
+  if (data.globalTicketView !== undefined) changes.push("globalTicketView");
+  if (password)            changes.push("password");
+
+  void logSystemAudit(req.user.id, "user.updated", {
+    userId: id,
+    name: user?.name ?? "",
+    changes,
   });
 
   res.json({ user });
@@ -158,6 +201,12 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   });
 
   await prisma.session.deleteMany({ where: { userId: id } });
+
+  void logSystemAudit(req.user.id, "user.deleted", {
+    userId: id,
+    name:  user.name,
+    email: user.email,
+  });
 
   res.json({ message: "User deleted" });
 });

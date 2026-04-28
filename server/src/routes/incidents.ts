@@ -17,6 +17,7 @@ import {
   withIncidentSlaInfo,
 } from "../lib/incident-sla";
 import { logIncidentEvent } from "../lib/incident-events";
+import { logSystemAudit } from "../lib/audit";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { notify } from "../lib/notify";
 import { syncIncidentToTicket } from "../lib/ticket-sync";
@@ -240,8 +241,17 @@ router.post(
       isMajor: incident.isMajor,
     });
 
+    void logSystemAudit(req.user.id, "incident.created", {
+      entityType: "incident", entityId: incident.id, entityNumber: incident.incidentNumber,
+      entityTitle: incident.title, priority: incident.priority, isMajor: incident.isMajor,
+    });
+
     if (data.isMajor) {
       await logIncidentEvent(incident.id, req.user.id, "incident.major_declared", {});
+      void logSystemAudit(req.user.id, "incident.major_declared", {
+        entityType: "incident", entityId: incident.id, entityNumber: incident.incidentNumber,
+        entityTitle: incident.title,
+      });
     }
 
     // Evaluate escalation rules (fire-and-forget; never blocks the response)
@@ -493,6 +503,27 @@ router.patch(
 
     await Promise.all(auditTasks);
 
+    // ── Global audit log entries ───────────────────────────────────────────
+    const base = { entityType: "incident", entityId: id, entityNumber: updated.incidentNumber, entityTitle: updated.title };
+    if (data.status && data.status !== current.status) {
+      void logSystemAudit(req.user.id, "incident.status_changed", { ...base, from: current.status, to: data.status });
+      if (data.status === "resolved") void logSystemAudit(req.user.id, "incident.resolved", base);
+      if (data.status === "closed")   void logSystemAudit(req.user.id, "incident.closed",   base);
+    }
+    if (data.priority && data.priority !== current.priority) {
+      void logSystemAudit(req.user.id, "incident.priority_changed", { ...base, from: current.priority, to: data.priority });
+    }
+    if ("assignedToId" in data && data.assignedToId !== current.assignedToId) {
+      void logSystemAudit(req.user.id, "incident.assigned", {
+        ...base,
+        from: current.assignedToId ?? null,
+        to: data.assignedToId ?? null,
+      });
+    }
+    if (data.isMajor !== undefined && data.isMajor !== current.isMajor) {
+      void logSystemAudit(req.user.id, data.isMajor ? "incident.major_declared" : "incident.major_cleared", base);
+    }
+
     // Notify followers on status change (fire-and-forget)
     if (data.status && data.status !== current.status) {
       void notifyEntityFollowers({
@@ -603,6 +634,13 @@ router.post(
     await logIncidentEvent(id, req.user.id, "incident.update_added", {
       updateType: data.updateType,
       updateId: update.id,
+    });
+
+    void logSystemAudit(req.user.id, "incident.update_posted", {
+      entityType: "incident", entityId: id,
+      entityNumber: incidentMeta?.incidentNumber ?? `INC-${id}`,
+      entityTitle: incidentMeta?.title ?? "Incident",
+      updateType: data.updateType,
     });
 
     // Auto-transition: if updateType is "all_clear" and status is in_progress → resolved

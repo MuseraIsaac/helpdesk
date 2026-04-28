@@ -27,19 +27,13 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from "@/components/ui/sheet";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,11 +44,30 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Zap, Plus, Pencil, Trash2, X, Globe, Users, Lock } from "lucide-react";
 import {
-  SelectGroup,
-  SelectLabel,
-} from "@/components/ui/select";
+  Zap,
+  Plus,
+  Pencil,
+  Trash2,
+  X,
+  Globe,
+  Users,
+  Lock,
+  Sparkles,
+  Wand2,
+  ListChecks,
+  Eye,
+  GripVertical,
+  UserCircle2,
+  PenSquare,
+  ArrowRightCircle,
+  StickyNote,
+  AlertTriangle,
+} from "lucide-react";
+import SearchableSelect, {
+  type SelectOption as SSOption,
+  type SelectGroup as SSGroup,
+} from "@/components/SearchableSelect";
 import { ticketTypes, ticketTypeLabel } from "core/constants/ticket-type.ts";
 import { ticketPriorities, priorityLabel } from "core/constants/ticket-priority.ts";
 import { ticketSeverities, severityLabel } from "core/constants/ticket-severity.ts";
@@ -169,6 +182,14 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   escalate:     "Escalate",
 };
 
+const ACTION_TYPE_META: Record<string, { icon: React.ElementType; tint: string; description: string }> = {
+  update_field: { icon: PenSquare,        tint: "bg-blue-500/10 text-blue-600 dark:text-blue-400",       description: "Set a ticket or incident field to a value" },
+  assign_user:  { icon: UserCircle2,      tint: "bg-violet-500/10 text-violet-600 dark:text-violet-400", description: "Hand the ticket off to a specific agent" },
+  assign_team:  { icon: Users,            tint: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400", description: "Route the ticket to a team queue" },
+  add_note:     { icon: StickyNote,       tint: "bg-amber-500/10 text-amber-600 dark:text-amber-400",     description: "Append an internal note for agents" },
+  escalate:     { icon: ArrowRightCircle, tint: "bg-rose-500/10 text-rose-600 dark:text-rose-400",         description: "Mark the ticket escalated" },
+};
+
 const FIELD_LABEL_MAP: Record<string, string> = {
   // Incident Ticket fields
   subject: "Subject / Title", status: "Ticket Status",
@@ -232,160 +253,217 @@ function ActionEditor({ index, value, onChange, onRemove, agents, teams, customF
   const selectedDef   = selectedField ? fieldMap.get(selectedField) : undefined;
   const customGroup   = buildCustomFieldGroup(customFieldDefs);
 
+  const meta = ACTION_TYPE_META[value.type];
+  const Icon = meta?.icon ?? Zap;
+
+  // Build options for action type as a flat list with icons
+  const actionTypeOptions: SSOption[] = Object.entries(ACTION_TYPE_LABELS).map(([t, label]) => {
+    const m = ACTION_TYPE_META[t]!;
+    const I = m.icon;
+    return {
+      value: t,
+      label,
+      prefix: (
+        <span className={`h-5 w-5 inline-flex items-center justify-center rounded ${m.tint}`}>
+          <I className="h-3 w-3" />
+        </span>
+      ),
+    };
+  });
+
+  // Build grouped field options
+  const fieldGroups: SSGroup[] = [
+    ...STATIC_FIELD_GROUPS.map((g) => ({
+      label: g.label,
+      options: g.fields.map((f) => ({ value: f.value, label: f.label })),
+    })),
+    ...(customGroup.length > 0
+      ? [{ label: "Custom Fields", options: customGroup.map((f) => ({ value: f.value, label: f.label })) }]
+      : []),
+  ];
+
+  // Agent options with a "Me" shortcut at the top
+  const agentOptions: SSOption[] = [
+    {
+      value: "__me__",
+      label: "Me",
+      hint: "whoever runs this",
+      prefix: (
+        <span className="h-5 w-5 inline-flex items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Sparkles className="h-3 w-3" />
+        </span>
+      ),
+    },
+    ...agents.map((a) => ({
+      value: a.id,
+      label: a.name,
+      prefix: (
+        <span className="h-5 w-5 inline-flex items-center justify-center rounded-full bg-muted text-muted-foreground text-[10px] font-medium">
+          {a.name.charAt(0).toUpperCase()}
+        </span>
+      ),
+    })),
+  ];
+  const teamOptions: SSOption[] = teams.map((t) => ({ value: String(t.id), label: t.name }));
+  const valueOptions: SSOption[] = (selectedDef?.options ?? []).map((o) => ({ value: o.value, label: o.label }));
+
   return (
-    <div className="rounded-md border p-3 space-y-2 bg-muted/30">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">Action {index + 1}</span>
-        <button type="button" onClick={onRemove} className="text-muted-foreground hover:text-destructive transition-colors">
+    <div className="group relative rounded-lg border bg-card overflow-hidden transition-all hover:shadow-sm hover:border-foreground/20">
+      {/* Header strip */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/40">
+        <GripVertical className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
+        <span className={`h-6 w-6 inline-flex items-center justify-center rounded-md ${meta?.tint ?? "bg-muted"}`}>
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Step {index + 1}
+            </span>
+            <span className="text-xs font-medium truncate">
+              {ACTION_TYPE_LABELS[value.type] ?? "New action"}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+          aria-label="Remove action"
+        >
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      {/* Action type */}
-      <Select value={value.type} onValueChange={(type) => onChange({ type } as ScenarioAction)}>
-        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select action type" /></SelectTrigger>
-        <SelectContent>
-          {Object.entries(ACTION_TYPE_LABELS).map(([t, label]) => (
-            <SelectItem key={t} value={t}>{label}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      {/* update_field — grouped field selector + value picker */}
-      {value.type === "update_field" && (
-        <div className="space-y-2">
-          {/* Grouped field selector */}
-          <Select
-            value={selectedField || "__none__"}
-            onValueChange={(field) => onChange({ type: "update_field", field: field === "__none__" ? "" : field, value: "" } as any)}
-          >
-            <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select field…" /></SelectTrigger>
-            <SelectContent className="max-h-72">
-              {STATIC_FIELD_GROUPS.map((group) => (
-                <SelectGroup key={group.label}>
-                  <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 px-2">
-                    {group.label}
-                  </SelectLabel>
-                  {group.fields.map((f) => (
-                    <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
-                  ))}
-                </SelectGroup>
-              ))}
-              {customGroup.length > 0 && (
-                <SelectGroup>
-                  <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 px-2">
-                    Custom Fields
-                  </SelectLabel>
-                  {customGroup.map((f) => (
-                    <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
-                  ))}
-                </SelectGroup>
-              )}
-            </SelectContent>
-          </Select>
-
-          {/* Value picker for selected field */}
-          {selectedField && selectedDef && (
-            selectedDef.isText ? (
-              <Input
-                className="h-8 text-sm"
-                placeholder={`Enter ${selectedDef.label.toLowerCase()}…`}
-                value={(value as any).value ?? ""}
-                onChange={(e) => onChange({ ...value, value: e.target.value } as any)}
-              />
-            ) : (
-              <Select
-                value={(value as any).value ?? ""}
-                onValueChange={(v) => onChange({ ...value, value: v } as any)}
-              >
-                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select value…" /></SelectTrigger>
-                <SelectContent>
-                  {selectedDef.options.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )
+      <div className="p-3 space-y-2.5">
+        {/* Action type */}
+        <div className="space-y-1">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Action</span>
+          <SearchableSelect
+            options={actionTypeOptions}
+            value={value.type}
+            onChange={(type) => onChange({ type } as ScenarioAction)}
+            placeholder="Select action type"
+            searchPlaceholder="Search actions…"
+            className="h-8 text-sm"
+          />
+          {meta?.description && (
+            <p className="text-[11px] text-muted-foreground/80 pl-0.5">{meta.description}</p>
           )}
         </div>
-      )}
 
-      {/* assign_user */}
-      {value.type === "assign_user" && (
-        <Select
-          value={(value as any).agentId ?? ""}
-          onValueChange={(agentId) => {
-            if (agentId === "__me__") {
-              onChange({ type: "assign_user", agentId: "__me__", agentName: "Me (whoever runs this)" } as any);
-            } else {
-              const agent = agents.find((a) => a.id === agentId);
-              onChange({ type: "assign_user", agentId, agentName: agent?.name } as any);
-            }
-          }}
-        >
-          <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select agent…" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__me__">
-              <span className="flex items-center gap-1.5">
-                <span className="font-medium">Me</span>
-                <span className="text-muted-foreground text-[11px]">(whoever runs this scenario)</span>
-              </span>
-            </SelectItem>
-            {agents.length > 0 && <div className="mx-2 my-1 border-t" />}
-            {agents.length === 0 && <div className="px-2 py-1.5 text-xs text-muted-foreground">Loading agents…</div>}
-            {agents.map((agent) => (
-              <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
+        {/* update_field */}
+        {value.type === "update_field" && (
+          <>
+            <div className="space-y-1">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Field</span>
+              <SearchableSelect
+                groups={fieldGroups}
+                value={selectedField}
+                onChange={(field) => onChange({ type: "update_field", field, value: "" } as any)}
+                placeholder="Select field…"
+                searchPlaceholder="Search fields…"
+                className="h-8 text-sm"
+              />
+            </div>
 
-      {/* assign_team */}
-      {value.type === "assign_team" && (
-        <Select
-          value={String((value as any).teamId ?? "")}
-          onValueChange={(teamId) => {
-            const team = teams.find((t) => String(t.id) === teamId);
-            onChange({ type: "assign_team", teamId: Number(teamId), teamName: team?.name } as any);
-          }}
-        >
-          <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select team…" /></SelectTrigger>
-          <SelectContent>
-            {teams.length === 0 && <div className="px-2 py-1.5 text-xs text-muted-foreground">Loading teams…</div>}
-            {teams.map((team) => (
-              <SelectItem key={team.id} value={String(team.id)}>{team.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
+            {selectedField && selectedDef && (
+              <div className="space-y-1">
+                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Value</span>
+                {selectedDef.isText ? (
+                  <Input
+                    className="h-8 text-sm"
+                    placeholder={`Enter ${selectedDef.label.toLowerCase()}…`}
+                    value={(value as any).value ?? ""}
+                    onChange={(e) => onChange({ ...value, value: e.target.value } as any)}
+                  />
+                ) : (
+                  <SearchableSelect
+                    options={valueOptions}
+                    value={(value as any).value ?? ""}
+                    onChange={(v) => onChange({ ...value, value: v } as any)}
+                    placeholder="Select value…"
+                    searchPlaceholder="Search values…"
+                    className="h-8 text-sm"
+                  />
+                )}
+              </div>
+            )}
+          </>
+        )}
 
-      {/* add_note */}
-      {value.type === "add_note" && (
-        <div className="space-y-1.5">
-          <Textarea
-            className="text-sm min-h-[80px]"
-            placeholder="Note body…"
-            value={(value as any).body ?? ""}
-            onChange={(e) => onChange({ ...value, body: e.target.value } as any)}
-          />
-          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-            <input
-              type="checkbox"
-              checked={(value as any).isPinned ?? false}
-              onChange={(e) => onChange({ ...value, isPinned: e.target.checked } as any)}
-              className="rounded"
+        {/* assign_user */}
+        {value.type === "assign_user" && (
+          <div className="space-y-1">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Agent</span>
+            <SearchableSelect
+              options={agentOptions}
+              value={(value as any).agentId ?? ""}
+              onChange={(agentId) => {
+                if (agentId === "__me__") {
+                  onChange({ type: "assign_user", agentId: "__me__", agentName: "Me (whoever runs this)" } as any);
+                } else {
+                  const agent = agents.find((a) => a.id === agentId);
+                  onChange({ type: "assign_user", agentId, agentName: agent?.name } as any);
+                }
+              }}
+              placeholder={agents.length === 0 ? "Loading agents…" : "Select agent…"}
+              searchPlaceholder="Search agents…"
+              className="h-8 text-sm"
             />
-            Pin note in conversation
-          </label>
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* escalate */}
-      {value.type === "escalate" && (
-        <p className="text-xs text-muted-foreground">
-          Marks the ticket as escalated and logs an escalation event.
-        </p>
-      )}
+        {/* assign_team */}
+        {value.type === "assign_team" && (
+          <div className="space-y-1">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Team</span>
+            <SearchableSelect
+              options={teamOptions}
+              value={String((value as any).teamId ?? "")}
+              onChange={(teamId) => {
+                const team = teams.find((t) => String(t.id) === teamId);
+                onChange({ type: "assign_team", teamId: Number(teamId), teamName: team?.name } as any);
+              }}
+              placeholder={teams.length === 0 ? "Loading teams…" : "Select team…"}
+              searchPlaceholder="Search teams…"
+              className="h-8 text-sm"
+            />
+          </div>
+        )}
+
+        {/* add_note */}
+        {value.type === "add_note" && (
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Note</span>
+            <Textarea
+              className="text-sm min-h-[80px]"
+              placeholder="Note body…"
+              value={(value as any).body ?? ""}
+              onChange={(e) => onChange({ ...value, body: e.target.value } as any)}
+            />
+            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={(value as any).isPinned ?? false}
+                onChange={(e) => onChange({ ...value, isPinned: e.target.checked } as any)}
+                className="rounded"
+              />
+              Pin note in conversation
+            </label>
+          </div>
+        )}
+
+        {/* escalate */}
+        {value.type === "escalate" && (
+          <div className="flex items-start gap-2 rounded-md bg-rose-500/5 border border-rose-500/20 p-2.5">
+            <AlertTriangle className="h-3.5 w-3.5 text-rose-500 shrink-0 mt-0.5" />
+            <p className="text-[11px] text-muted-foreground">
+              Marks the ticket as escalated and logs an escalation event. No additional configuration needed.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -521,163 +599,312 @@ function ScenarioDialog({ open, onClose, existing }: ScenarioDialogProps) {
     onClose();
   };
 
+  const watchedColor = watch("color");
+  const watchedName  = watch("name");
+  const watchedActions = watch("actions");
+
+  const COLOR_PRESETS = [
+    "#3b82f6", "#8b5cf6", "#ec4899", "#ef4444",
+    "#f59e0b", "#10b981", "#06b6d4", "#64748b",
+  ];
+
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{existing ? "Edit Scenario" : "New Scenario"}</DialogTitle>
-        </DialogHeader>
+    <Sheet open={open} onOpenChange={(o) => !o && handleClose()}>
+      <SheetContent
+        side="right"
+        showCloseButton={false}
+        className="w-full sm:max-w-xl p-0 gap-0 flex flex-col"
+      >
+        <form
+          onSubmit={handleSubmit((d) => mutation.mutate(d))}
+          className="flex flex-col h-full"
+        >
+          {/* Cool gradient header */}
+          <SheetHeader className="relative p-0 gap-0 shrink-0">
+            <div
+              className="relative px-6 py-5 border-b overflow-hidden"
+              style={{
+                background: `linear-gradient(135deg, ${watchedColor || "#3b82f6"}15 0%, transparent 60%), linear-gradient(180deg, hsl(var(--muted))/.4 0%, transparent 100%)`,
+              }}
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_hsl(var(--primary)/0.06)_0%,_transparent_60%)] pointer-events-none" />
 
-        <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
-          {/* Name */}
-          <div className="space-y-1">
-            <Label>Name</Label>
-            <Input {...register("name")} placeholder="e.g. Escalate to Tier 2" />
-            {errors.name && <ErrorMessage message={errors.name.message} />}
-          </div>
-
-          {/* Description */}
-          <div className="space-y-1">
-            <Label>Description <span className="text-muted-foreground font-normal">(optional)</span></Label>
-            <Textarea
-              {...register("description")}
-              placeholder="Brief explanation shown to agents"
-              className="min-h-[60px] text-sm"
-            />
-          </div>
-
-          {/* Color */}
-          <div className="space-y-1">
-            <Label>Color <span className="text-muted-foreground font-normal">(optional hex, e.g. #3b82f6)</span></Label>
-            <div className="flex items-center gap-2">
-              <Input
-                {...register("color")}
-                placeholder="#3b82f6"
-                className="h-8 text-sm font-mono flex-1"
-              />
-              <Controller
-                control={control}
-                name="color"
-                render={({ field }) => (
-                  <span
-                    className="h-8 w-8 rounded border shrink-0"
-                    style={{ backgroundColor: field.value || "transparent" }}
+              <div className="relative flex items-start gap-3">
+                <div
+                  className="h-10 w-10 rounded-xl shadow-sm border flex items-center justify-center shrink-0"
+                  style={{
+                    backgroundColor: watchedColor ? `${watchedColor}20` : "hsl(var(--primary) / 0.1)",
+                    borderColor: watchedColor ? `${watchedColor}40` : undefined,
+                  }}
+                >
+                  <Wand2
+                    className="h-5 w-5"
+                    style={{ color: watchedColor || "hsl(var(--primary))" }}
                   />
-                )}
-              />
-            </div>
-            {errors.color && <ErrorMessage message={errors.color.message} />}
-          </div>
-
-          {/* Visibility */}
-          <div className="space-y-2">
-            <Label>Visibility</Label>
-            <div className="grid grid-cols-3 gap-2">
-              {(["public", "team", "private"] as ScenarioVisibility[]).map((v) => {
-                const cfg = VISIBILITY_CONFIG[v];
-                const Icon = cfg.icon;
-                const active = watchedVisibility === v;
-                return (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => { setValue("visibility", v); if (v !== "team") setValue("visibilityTeamId", undefined); }}
-                    className={`flex flex-col items-center gap-1 rounded-lg border p-3 text-xs transition-colors ${
-                      active ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground hover:border-muted-foreground/40"
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    <span className="font-medium">{cfg.label}</span>
-                    <span className="text-[10px] text-center leading-tight">
-                      {v === "public"  && "Everyone"}
-                      {v === "team"    && "Your team"}
-                      {v === "private" && "Only you"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Team selector — shown only when visibility = "team" */}
-            {watchedVisibility === "team" && (
-              <Controller
-                control={control}
-                name="visibilityTeamId"
-                render={({ field }) => (
-                  <Select
-                    value={field.value != null ? String(field.value) : ""}
-                    onValueChange={(v) => field.onChange(Number(v))}
-                  >
-                    <SelectTrigger className="h-9 text-sm">
-                      <SelectValue placeholder="Select team…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {teams.map((t) => (
-                        <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
-                      ))}
-                      {teams.length === 0 && (
-                        <div className="px-2 py-1.5 text-xs text-muted-foreground">No teams configured</div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <SheetTitle className="text-base font-semibold leading-tight">
+                    {existing ? "Edit Scenario" : "New Scenario"}
+                  </SheetTitle>
+                  <SheetDescription className="text-xs mt-0.5">
+                    {existing
+                      ? "Update the actions agents perform when running this scenario."
+                      : "Compose a one-click action sequence agents can run on any ticket."}
+                  </SheetDescription>
+                  {watchedName && (
+                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border bg-background/80 backdrop-blur px-2.5 py-0.5 text-[11px]">
+                      <span
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: watchedColor || "hsl(var(--primary))" }}
+                      />
+                      <span className="font-medium truncate max-w-[200px]">{watchedName}</span>
+                      {Array.isArray(watchedActions) && watchedActions.length > 0 && (
+                        <span className="text-muted-foreground">
+                          · {watchedActions.length} action{watchedActions.length !== 1 ? "s" : ""}
+                        </span>
                       )}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-            )}
-          </div>
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  aria-label="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </SheetHeader>
 
-          {/* Actions */}
-          <div className="space-y-2">
-            <Label>Actions</Label>
-            {errors.actions && (
-              <ErrorMessage message={(errors.actions as any).message ?? "Invalid actions"} />
-            )}
-            <div className="space-y-2">
-              {fields.map((field, idx) => (
+          {/* Scrollable body */}
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+            {/* Section: Identity */}
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Identity
+                </h3>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Name</Label>
+                <Input {...register("name")} placeholder="e.g. Escalate to Tier 2" />
+                {errors.name && <ErrorMessage message={errors.name.message} />}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">
+                  Description <span className="text-muted-foreground font-normal">· optional</span>
+                </Label>
+                <Textarea
+                  {...register("description")}
+                  placeholder="Brief explanation shown to agents"
+                  className="min-h-[60px] text-sm"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">
+                  Accent color <span className="text-muted-foreground font-normal">· optional</span>
+                </Label>
                 <Controller
-                  key={field.id}
                   control={control}
-                  name={`actions.${idx}`}
-                  render={({ field: f }) => (
-                    <ActionEditor
-                      index={idx}
-                      value={f.value as ScenarioAction}
-                      onChange={(val) => update(idx, val)}
-                      onRemove={() => remove(idx)}
-                      agents={agents}
-                      teams={teams}
-                      customFieldDefs={customFieldDefs}
+                  name="color"
+                  render={({ field }) => (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {COLOR_PRESETS.map((c) => {
+                          const active = field.value?.toLowerCase() === c.toLowerCase();
+                          return (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => field.onChange(c)}
+                              className={`relative h-7 w-7 rounded-full transition-all ${
+                                active ? "ring-2 ring-offset-2 ring-offset-background scale-110" : "hover:scale-110"
+                              }`}
+                              style={{ backgroundColor: c, ...(active ? { ["--tw-ring-color" as any]: c } : {}) }}
+                              aria-label={`Set color ${c}`}
+                            />
+                          );
+                        })}
+                        <button
+                          type="button"
+                          onClick={() => field.onChange("")}
+                          className={`h-7 w-7 rounded-full border-2 border-dashed flex items-center justify-center text-muted-foreground hover:text-foreground transition ${
+                            !field.value ? "border-foreground/40" : "border-muted-foreground/30"
+                          }`}
+                          aria-label="No color"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <Input
+                        value={field.value ?? ""}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        placeholder="#3b82f6"
+                        className="h-8 text-sm font-mono"
+                      />
+                    </div>
+                  )}
+                />
+                {errors.color && <ErrorMessage message={errors.color.message} />}
+              </div>
+            </section>
+
+            <div className="border-t" />
+
+            {/* Section: Visibility */}
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Visibility
+                </h3>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {(["public", "team", "private"] as ScenarioVisibility[]).map((v) => {
+                  const cfg = VISIBILITY_CONFIG[v];
+                  const Icon = cfg.icon;
+                  const active = watchedVisibility === v;
+                  return (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => {
+                        setValue("visibility", v);
+                        if (v !== "team") setValue("visibilityTeamId", undefined);
+                      }}
+                      className={`group relative flex flex-col items-center gap-1.5 rounded-xl border p-3 text-xs transition-all ${
+                        active
+                          ? "border-primary bg-primary/5 text-primary shadow-sm"
+                          : "text-muted-foreground hover:border-foreground/30 hover:bg-muted/40"
+                      }`}
+                    >
+                      <span
+                        className={`h-7 w-7 inline-flex items-center justify-center rounded-lg transition-colors ${
+                          active ? "bg-primary/10" : "bg-muted group-hover:bg-muted-foreground/10"
+                        }`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="font-semibold">{cfg.label}</span>
+                      <span className="text-[10px] text-center leading-tight opacity-70">
+                        {v === "public"  && "Everyone"}
+                        {v === "team"    && "Your team"}
+                        {v === "private" && "Only you"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {watchedVisibility === "team" && (
+                <Controller
+                  control={control}
+                  name="visibilityTeamId"
+                  render={({ field }) => (
+                    <SearchableSelect
+                      options={teams.map((t) => ({ value: String(t.id), label: t.name }))}
+                      value={field.value != null ? String(field.value) : ""}
+                      onChange={(v) => field.onChange(Number(v))}
+                      placeholder={teams.length === 0 ? "No teams configured" : "Select team…"}
+                      searchPlaceholder="Search teams…"
+                      className="h-9 text-sm"
                     />
                   )}
                 />
-              ))}
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 text-xs w-full"
-              onClick={() => append({ type: "escalate" } as ScenarioAction)}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add Action
-            </Button>
+              )}
+            </section>
+
+            <div className="border-t" />
+
+            {/* Section: Actions */}
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Actions
+                  </h3>
+                  {fields.length > 0 && (
+                    <span className="rounded-full bg-muted text-muted-foreground px-1.5 py-0.5 text-[10px] font-medium">
+                      {fields.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {errors.actions && (
+                <ErrorMessage message={(errors.actions as any).message ?? "Invalid actions"} />
+              )}
+
+              {fields.length === 0 ? (
+                <div className="rounded-lg border border-dashed py-8 text-center">
+                  <Zap className="h-6 w-6 text-muted-foreground/40 mx-auto" />
+                  <p className="text-xs text-muted-foreground mt-2">No actions yet</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {fields.map((field, idx) => (
+                    <Controller
+                      key={field.id}
+                      control={control}
+                      name={`actions.${idx}`}
+                      render={({ field: f }) => (
+                        <ActionEditor
+                          index={idx}
+                          value={f.value as ScenarioAction}
+                          onChange={(val) => update(idx, val)}
+                          onRemove={() => remove(idx)}
+                          agents={agents}
+                          teams={teams}
+                          customFieldDefs={customFieldDefs}
+                        />
+                      )}
+                    />
+                  ))}
+                </div>
+              )}
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 text-xs w-full border-dashed hover:border-solid hover:bg-primary/5 hover:text-primary hover:border-primary/40 transition-colors"
+                onClick={() => append({ type: "escalate" } as ScenarioAction)}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add Action
+              </Button>
+            </section>
+
+            {mutation.isError && (
+              <ErrorAlert error={mutation.error} fallback="Failed to save scenario" />
+            )}
           </div>
 
-          {mutation.isError && (
-            <ErrorAlert error={mutation.error} fallback="Failed to save scenario" />
-          )}
-
-          <DialogFooter>
+          {/* Sticky footer */}
+          <SheetFooter className="shrink-0 mt-0 px-6 py-3 border-t bg-muted/30 flex-row sm:justify-end gap-2">
             <Button type="button" variant="outline" size="sm" onClick={handleClose}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={isSubmitting || mutation.isPending}>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={isSubmitting || mutation.isPending}
+              className="gap-1.5"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
               {existing ? "Save Changes" : "Create Scenario"}
             </Button>
-          </DialogFooter>
+          </SheetFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }
 

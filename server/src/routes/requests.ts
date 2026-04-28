@@ -21,6 +21,7 @@ import {
 } from "core/constants/fulfillment-task-status.ts";
 import { computeRequestSlaDueAt } from "../lib/request-sla";
 import { logRequestEvent } from "../lib/request-events";
+import { logSystemAudit } from "../lib/audit";
 import { generateTicketNumber } from "../lib/ticket-number";
 import { createApproval } from "../lib/approval-engine";
 import { syncServiceRequestToTicket } from "../lib/ticket-sync";
@@ -277,6 +278,11 @@ router.post(
       itemCount: data.items.length,
     });
 
+    void logSystemAudit(req.user.id, "request.created", {
+      entityType: "request", entityId: request.id, entityNumber: requestNumber,
+      entityTitle: request.title, priority: request.priority, via: "agent",
+    });
+
     // Evaluate escalation rules (fire-and-forget; never blocks the response)
     const cfSnapshot = Object.fromEntries(
       Object.entries((data.customFields ?? {}) as Record<string, unknown>)
@@ -461,6 +467,24 @@ router.patch(
     }
 
     await Promise.all(auditTasks);
+
+    // ── Global audit log entries ───────────────────────────────────────────
+    const rBase = { entityType: "request", entityId: id, entityNumber: updated.requestNumber, entityTitle: updated.title };
+    if (data.status && data.status !== current.status) {
+      void logSystemAudit(req.user.id, "request.status_changed", { ...rBase, from: current.status, to: data.status });
+      const statusMap: Record<string, "request.approved" | "request.rejected" | "request.cancelled" | "request.completed" | "request.fulfilled"> = {
+        approved:   "request.approved",
+        rejected:   "request.rejected",
+        cancelled:  "request.cancelled",
+        completed:  "request.completed",
+        fulfilled:  "request.fulfilled",
+      };
+      const named = statusMap[data.status];
+      if (named) void logSystemAudit(req.user.id, named, rBase);
+    }
+    if ("assignedToId" in data && data.assignedToId !== current.assignedToId) {
+      void logSystemAudit(req.user.id, "request.assigned", { ...rBase, from: current.assignedToId ?? null, to: data.assignedToId ?? null });
+    }
 
     // Notify followers on status change (fire-and-forget)
     if (data.status && data.status !== current.status) {
