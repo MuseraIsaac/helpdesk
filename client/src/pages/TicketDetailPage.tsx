@@ -55,17 +55,107 @@ function formatTs(iso: string) {
 type ComposeMode = ReplyType | "note" | null;
 
 // ── Section card ──────────────────────────────────────────────────────────────
+//
+// Each section gets a tasteful low-saturation colour theme so the right rail
+// reads as a series of distinct, scannable cards. Themes echo the rest of
+// the app: amber/emerald/sky/indigo on the inline Update panel, and a fresh
+// palette here (violet / cyan / rose / teal) so the two columns don't repeat.
+
+type CardTheme = {
+  /** Soft gradient header background + bottom border accent */
+  header: string;
+  /** Icon container background + border */
+  iconBg: string;
+  /** Icon foreground colour */
+  iconColor: string;
+  /** Section title text colour */
+  titleColor: string;
+  /** 3px top-edge accent rail */
+  rail: string;
+};
+
+const CARD_THEMES: Record<string, CardTheme> = {
+  // Conversation — soft slate / neutral so the message stream feels primary
+  Conversation: {
+    header:     "bg-gradient-to-r from-slate-500/[0.06] via-slate-500/[0.02] to-transparent border-b-slate-500/15",
+    iconBg:     "bg-slate-500/10 border-slate-500/25",
+    iconColor:  "text-slate-600 dark:text-slate-400",
+    titleColor: "text-slate-700/90 dark:text-slate-300/90",
+    rail:       "bg-slate-500/50",
+  },
+  // Activity — neutral grey, audit-trail feel
+  Activity: {
+    header:     "bg-gradient-to-r from-zinc-500/[0.06] via-zinc-500/[0.02] to-transparent border-b-zinc-500/15",
+    iconBg:     "bg-zinc-500/10 border-zinc-500/25",
+    iconColor:  "text-zinc-600 dark:text-zinc-400",
+    titleColor: "text-zinc-700/90 dark:text-zinc-300/90",
+    rail:       "bg-zinc-500/50",
+  },
+  // Linked Assets — violet (assets / inventory)
+  "Linked Assets": {
+    header:     "bg-gradient-to-r from-violet-500/[0.10] via-violet-500/[0.04] to-transparent border-b-violet-500/15",
+    iconBg:     "bg-violet-500/10 border-violet-500/25",
+    iconColor:  "text-violet-600 dark:text-violet-400",
+    titleColor: "text-violet-700/90 dark:text-violet-300/90",
+    rail:       "bg-violet-500/60",
+  },
+  // Linked Config Items — cyan (CMDB / infrastructure)
+  "Linked Config Items": {
+    header:     "bg-gradient-to-r from-cyan-500/[0.10] via-cyan-500/[0.04] to-transparent border-b-cyan-500/15",
+    iconBg:     "bg-cyan-500/10 border-cyan-500/25",
+    iconColor:  "text-cyan-600 dark:text-cyan-400",
+    titleColor: "text-cyan-700/90 dark:text-cyan-300/90",
+    rail:       "bg-cyan-500/60",
+  },
+  // CSAT Rating — rose (customer voice / feedback)
+  "CSAT Rating": {
+    header:     "bg-gradient-to-r from-rose-500/[0.10] via-rose-500/[0.04] to-transparent border-b-rose-500/15",
+    iconBg:     "bg-rose-500/10 border-rose-500/25",
+    iconColor:  "text-rose-600 dark:text-rose-400",
+    titleColor: "text-rose-700/90 dark:text-rose-300/90",
+    rail:       "bg-rose-500/60",
+  },
+};
+
+const DEFAULT_CARD_THEME: CardTheme = {
+  header:     "bg-muted/20 border-b-border/50",
+  iconBg:     "bg-muted border-border/60",
+  iconColor:  "text-muted-foreground",
+  titleColor: "text-muted-foreground/70",
+  rail:       "bg-transparent",
+};
+
+function getCardTheme(title: string): CardTheme {
+  // Match by prefix so dynamic suffixes (e.g. "Linked Assets (3)") still
+  // resolve to the right theme.
+  for (const key of Object.keys(CARD_THEMES)) {
+    if (title === key || title.startsWith(`${key} `) || title.startsWith(`${key}(`)) {
+      return CARD_THEMES[key]!;
+    }
+  }
+  return DEFAULT_CARD_THEME;
+}
 
 function SectionCard({
   icon: Icon, title, children, noPad = false,
 }: {
   icon?: React.ElementType; title: string; children: React.ReactNode; noPad?: boolean;
 }) {
+  const theme = getCardTheme(title);
   return (
-    <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/50 bg-muted/20">
-        {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">{title}</span>
+    <div className="relative rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
+      {theme.rail !== "bg-transparent" && (
+        <div className={`absolute top-0 inset-x-0 h-[3px] ${theme.rail}`} />
+      )}
+      <div className={`flex items-center gap-2.5 px-4 py-3 border-b ${theme.header}`}>
+        {Icon && (
+          <span className={`flex h-6 w-6 items-center justify-center rounded-md border shrink-0 ${theme.iconBg}`}>
+            <Icon className={`h-3.5 w-3.5 ${theme.iconColor}`} />
+          </span>
+        )}
+        <span className={`text-[11px] font-bold uppercase tracking-widest ${theme.titleColor}`}>
+          {title}
+        </span>
       </div>
       <div className={noPad ? "" : "p-4"}>{children}</div>
     </div>
@@ -207,7 +297,7 @@ function LinkedAssetsSection({
               <Server className={`h-3.5 w-3.5 shrink-0 ${ASSET_TYPE_COLOR[l.asset.type] ?? "text-muted-foreground"}`} />
               <div className="flex-1 min-w-0">
                 <Link
-                  to={`/assets/${l.asset.id}`}
+                  to={`/assets/${l.asset.assetNumber ?? l.asset.id}`}
                   className="text-xs font-semibold hover:text-primary transition-colors truncate flex items-center gap-1"
                 >
                   {l.asset.name}
@@ -332,7 +422,7 @@ function LinkedCIsSection({
               <Database className="h-3.5 w-3.5 text-purple-500 shrink-0" />
               <div className="flex-1 min-w-0">
                 <Link
-                  to={`/cmdb/${l.ci.id}`}
+                  to={`/cmdb/${l.ci.ciNumber ?? l.ci.id}`}
                   className="text-xs font-semibold hover:text-primary transition-colors truncate flex items-center gap-1"
                 >
                   {l.ci.name}
@@ -390,13 +480,83 @@ export default function TicketDetailPage() {
     setTimeout(() => composeRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
   }, []);
 
+  // Replies cache shared with ConversationTimeline (same queryKey, no extra fetch).
+  // Used to auto-quote the most recent message when the toolbar Reply/Forward
+  // buttons are clicked — matches Gmail/Outlook behaviour.
+  // NOTE: queryKey uses Number(id) so it matches ConversationTimeline's key
+  // (which keys by ticket.id — a number). ReplyForm invalidates by the numeric
+  // form on send; if we kept the string here, this query would never refresh
+  // and the next reply would re-quote the stale "last" message.
+  const { data: repliesForQuote } = useQuery({
+    queryKey: ["replies", Number(id)],
+    queryFn: async () => {
+      const { data } = await axios.get<{
+        replies: Array<{
+          body: string;
+          bodyHtml: string | null;
+          senderType: "agent" | "customer";
+          replyType: string | null;
+          quotedHtml: string | null;
+          user: { name: string } | null;
+          createdAt: string;
+        }>;
+      }>(`/api/tickets/${id}/replies`);
+      return data.replies;
+    },
+    enabled: !!id,
+  });
+
   const { data: ticket, isLoading, error, refetch: refetchTicket } = useQuery({
     queryKey: ["ticket", id],
     queryFn: async () => {
       const { data } = await axios.get<Ticket>(`/api/tickets/${id}`);
       return data;
     },
+    // Mutations from the page invalidate ["ticket", id] explicitly. The
+    // 30-second cache avoids re-fetching the full ticket when the user
+    // briefly navigates away and back (e.g. opens a sub-page in a tab).
+    staleTime: 30_000,
   });
+
+  const buildLatestQuote = useCallback((): QuoteData | null => {
+    if (!ticket) return null;
+
+    // Pick the most recent *conversational* reply — exclude forwards (they're
+    // outbound side-channels, not part of the customer thread). Internal notes
+    // are stored separately and never appear in this query.
+    const conversational = (repliesForQuote ?? []).filter(
+      (r) => r.replyType !== "forward",
+    );
+    const last = conversational.length ? conversational[conversational.length - 1]! : null;
+
+    if (last) {
+      const senderName = last.senderType === "agent"
+        ? (last.user?.name ?? "Agent")
+        : ticket.senderName;
+
+      // Email-style accumulating quote: include the prior reply's body AND
+      // the trail it was already carrying, so each new reply preserves the
+      // full pyramid of nested quotes. Each older message gets its own
+      // attribution header so the recipient can still read who-said-what.
+      const ownBody = last.bodyHtml ?? `<p>${last.body}</p>`;
+      const innerTrail = last.quotedHtml
+        ? `<blockquote style="margin:0 0 0 .8ex;border-left:2px solid #ccc;padding-left:1ex;color:#555">${last.quotedHtml}</blockquote>`
+        : "";
+
+      return {
+        bodyHtml: ownBody + innerTrail,
+        senderName,
+        createdAt: last.createdAt,
+      };
+    }
+
+    // No conversational replies yet — quote the original ticket message
+    return {
+      bodyHtml: ticket.bodyHtml ?? `<p>${ticket.body}</p>`,
+      senderName: ticket.senderName,
+      createdAt: ticket.createdAt,
+    };
+  }, [ticket, repliesForQuote]);
 
   const ticketIdNum = ticket?.id ?? 0;
   const composing = composeMode !== null;
@@ -580,12 +740,16 @@ export default function TicketDetailPage() {
               {formatTs(ticket.createdAt)}
             </span>
             {ticket.assignedTo && (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-[11px] text-muted-foreground bg-muted/30">
+              <Link
+                to={`/tickets?assignedToId=${ticket.assignedTo.id}`}
+                title={`View tickets assigned to ${ticket.assignedTo.name}`}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-[11px] text-muted-foreground bg-muted/30 hover:text-foreground hover:bg-muted hover:border-primary/40 transition-colors"
+              >
                 <span className="h-3.5 w-3.5 rounded-full bg-primary/15 flex items-center justify-center text-[8px] font-bold text-primary">
                   {ticket.assignedTo.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
                 </span>
-                {ticket.assignedTo.name}
-              </span>
+                <span className="hover:underline">{ticket.assignedTo.name}</span>
+              </Link>
             )}
           </div>
         </div>
@@ -705,16 +869,16 @@ export default function TicketDetailPage() {
             {/* Triage / SLA / Escalation / Body */}
             <TicketDetail ticket={ticket} />
 
-            {/* AI Summarize */}
-            <TicketSummary ticket={ticket} />
-
-            {/* Conversation */}
+            {/* Conversation — Summarize lives at the bottom of this card so
+                the AI brief follows the thread it's summarising, with the
+                full context above it for verification. */}
             <SectionCard icon={MessageSquare} title="Conversation" noPad>
               <div className="p-4">
                 <ConversationTimeline
                   ticket={ticket}
                   onCompose={(mode, quote) => openCompose(mode, quote)}
                 />
+                <TicketSummary ticket={ticket} />
               </div>
             </SectionCard>
 
@@ -745,19 +909,19 @@ export default function TicketDetailPage() {
                 <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl border border-dashed border-border/60 bg-muted/20">
                   <span className="text-xs text-muted-foreground mr-1 select-none">Compose:</span>
                   <Button type="button" size="sm" className="gap-1.5 h-8 shadow-sm"
-                    onClick={() => openCompose(defaultReplyMode)}>
+                    onClick={() => openCompose(defaultReplyMode, buildLatestQuote() ?? undefined)}>
                     <MessageSquare className="h-3.5 w-3.5" />
                     {defaultReplyMode === "reply_all" ? "Reply to All" : "Reply to Sender"}
                   </Button>
                   {defaultReplyMode === "reply_all" && (
                     <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5"
-                      onClick={() => openCompose("reply_sender")}>
+                      onClick={() => openCompose("reply_sender", buildLatestQuote() ?? undefined)}>
                       <MessageSquare className="h-3.5 w-3.5" />
                       Reply to Sender
                     </Button>
                   )}
                   <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5"
-                    onClick={() => openCompose("forward")}>
+                    onClick={() => openCompose("forward", buildLatestQuote() ?? undefined)}>
                     <Forward className="h-3.5 w-3.5" />
                     Forward
                   </Button>
@@ -836,7 +1000,7 @@ export default function TicketDetailPage() {
               <LinkedPanel
                 icon={Link2}
                 title="Linked Incident"
-                to={`/incidents/${ticket.linkedIncident.id}`}
+                to={`/incidents/${ticket.linkedIncident.incidentNumber}`}
                 number={ticket.linkedIncident.incidentNumber}
                 description={ticket.linkedIncident.title}
                 badges={
@@ -860,7 +1024,7 @@ export default function TicketDetailPage() {
               <LinkedPanel
                 icon={Link2}
                 title="Linked Request"
-                to={`/requests/${ticket.linkedServiceRequest.id}`}
+                to={`/requests/${ticket.linkedServiceRequest.requestNumber}`}
                 number={ticket.linkedServiceRequest.requestNumber}
                 description={ticket.linkedServiceRequest.title}
                 badges={
@@ -892,12 +1056,8 @@ export default function TicketDetailPage() {
 
             {/* CSAT */}
             {ticket.csatRating && (
-              <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/50 bg-muted/20">
-                  <Star className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">CSAT Rating</span>
-                </div>
-                <div className="p-4 space-y-3">
+              <SectionCard icon={Star} title="CSAT Rating">
+                <div className="space-y-3">
                   <div className="flex items-center gap-1.5">
                     {[1, 2, 3, 4, 5].map((n) => (
                       <Star key={n} className={`h-4 w-4 ${
@@ -911,7 +1071,7 @@ export default function TicketDetailPage() {
                     </span>
                   </div>
                   {ticket.csatRating.comment && (
-                    <p className="text-xs text-muted-foreground italic leading-relaxed border-l-2 border-border/60 pl-3">
+                    <p className="text-xs text-muted-foreground italic leading-relaxed border-l-2 border-rose-500/30 pl-3">
                       "{ticket.csatRating.comment}"
                     </p>
                   )}
@@ -919,7 +1079,7 @@ export default function TicketDetailPage() {
                     {new Date(ticket.csatRating.submittedAt).toLocaleDateString(undefined, { dateStyle: "medium" })}
                   </p>
                 </div>
-              </div>
+              </SectionCard>
             )}
 
             {/* ── Parent ticket: merged children panel ── */}
@@ -952,7 +1112,7 @@ export default function TicketDetailPage() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
                             <Link
-                              to={`/tickets/${m.id}`}
+                              to={`/tickets/${m.ticketNumber}`}
                               className="font-mono text-[11px] font-bold text-violet-600 dark:text-violet-400 hover:underline"
                             >
                               {m.ticketNumber}
@@ -968,7 +1128,7 @@ export default function TicketDetailPage() {
 
                         {/* Actions */}
                         <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Link to={`/tickets/${m.id}`} title="Open ticket">
+                          <Link to={`/tickets/${m.ticketNumber}`} title="Open ticket">
                             <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground">
                               <ArrowUpRight className="h-3 w-3" />
                             </Button>

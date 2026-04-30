@@ -53,17 +53,83 @@ function initials(name: string) {
 }
 
 // ── Section card ──────────────────────────────────────────────────────────────
+//
+// Each sidebar section gets a distinctive — but tastefully muted — color
+// theme so users can visually scan the right rail. Themes are designed to
+// read as a unified palette (all low-saturation tints over the card BG)
+// rather than rainbow accents that fight for attention.
+
+type SectionTheme = {
+  /** Header gradient + bottom border accent */
+  header: string;
+  /** Icon container background + border */
+  iconBg: string;
+  /** Icon foreground colour */
+  iconColor: string;
+  /** Section title text colour */
+  titleColor: string;
+  /** Left rail accent stripe at the top edge */
+  rail: string;
+};
+
+const SECTION_THEMES: Record<string, SectionTheme> = {
+  // Indigo — neutral overview / classification
+  Details: {
+    header:     "bg-gradient-to-r from-indigo-500/[0.08] via-indigo-500/[0.03] to-transparent border-b-indigo-500/15",
+    iconBg:     "bg-indigo-500/10 border-indigo-500/25",
+    iconColor:  "text-indigo-600 dark:text-indigo-400",
+    titleColor: "text-indigo-700/90 dark:text-indigo-300/90",
+    rail:       "bg-indigo-500/60",
+  },
+  // Amber — triage decisions, attention-grabbing
+  Triage: {
+    header:     "bg-gradient-to-r from-amber-500/[0.10] via-amber-500/[0.04] to-transparent border-b-amber-500/15",
+    iconBg:     "bg-amber-500/10 border-amber-500/25",
+    iconColor:  "text-amber-600 dark:text-amber-400",
+    titleColor: "text-amber-700/90 dark:text-amber-300/90",
+    rail:       "bg-amber-500/60",
+  },
+  // Emerald — assignment / human routing
+  Routing: {
+    header:     "bg-gradient-to-r from-emerald-500/[0.08] via-emerald-500/[0.03] to-transparent border-b-emerald-500/15",
+    iconBg:     "bg-emerald-500/10 border-emerald-500/25",
+    iconColor:  "text-emerald-600 dark:text-emerald-400",
+    titleColor: "text-emerald-700/90 dark:text-emerald-300/90",
+    rail:       "bg-emerald-500/60",
+  },
+  // Sky — time, schedule, calendar
+  Dates: {
+    header:     "bg-gradient-to-r from-sky-500/[0.08] via-sky-500/[0.03] to-transparent border-b-sky-500/15",
+    iconBg:     "bg-sky-500/10 border-sky-500/25",
+    iconColor:  "text-sky-600 dark:text-sky-400",
+    titleColor: "text-sky-700/90 dark:text-sky-300/90",
+    rail:       "bg-sky-500/60",
+  },
+};
+
+const DEFAULT_THEME: SectionTheme = {
+  header:     "bg-gradient-to-r from-muted/40 via-muted/15 to-transparent border-b-border/50",
+  iconBg:     "bg-muted border-border/60",
+  iconColor:  "text-muted-foreground",
+  titleColor: "text-muted-foreground/80",
+  rail:       "bg-muted-foreground/20",
+};
 
 function SidebarSection({
   icon: Icon, title, children,
 }: {
   icon: React.ElementType; title: string; children: React.ReactNode;
 }) {
+  const theme = SECTION_THEMES[title] ?? DEFAULT_THEME;
   return (
-    <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/50 bg-muted/20">
-        <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+    <div className="relative rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
+      {/* Top-edge color rail — subtle but visible signature for the section */}
+      <div className={`absolute top-0 inset-x-0 h-[3px] ${theme.rail}`} />
+      <div className={`flex items-center gap-2.5 px-4 py-3 border-b ${theme.header}`}>
+        <span className={`flex h-6 w-6 items-center justify-center rounded-md border shrink-0 ${theme.iconBg}`}>
+          <Icon className={`h-3.5 w-3.5 ${theme.iconColor}`} />
+        </span>
+        <span className={`text-[11px] font-bold uppercase tracking-widest ${theme.titleColor}`}>
           {title}
         </span>
       </div>
@@ -130,6 +196,7 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
       const { data } = await axios.get<{ agents: Agent[] }>("/api/agents");
       return data.agents;
     },
+    refetchOnWindowFocus: true,
   });
 
   const { data: teamsData } = useQuery({
@@ -138,6 +205,7 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
       const { data } = await axios.get<{ teams: Team[] }>("/api/teams");
       return data.teams;
     },
+    refetchOnWindowFocus: true,
   });
 
   const { data: customStatusesData } = useQuery({
@@ -156,27 +224,97 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
     },
   });
 
+  // Apply an in-flight patch onto a ticket, mirroring the fields the sidebar
+  // dropdowns can mutate. Mapped relations (team, customStatus, customTicketType,
+  // assignedTo) are derived from the *Id fields plus the relevant lookup data
+  // so the UI updates immediately without waiting for the server round-trip.
+  function applyOptimisticPatch(prev: Ticket, patch: Record<string, unknown>): Ticket {
+    const next: Ticket = { ...prev };
+    for (const [k, v] of Object.entries(patch)) {
+      (next as Record<string, unknown>)[k] = v;
+    }
+    if ("teamId" in patch) {
+      const id = patch.teamId as number | null | undefined;
+      const team = id == null ? null : teamsData?.find((t) => t.id === id) ?? null;
+      (next as Record<string, unknown>).team = team
+        ? { id: team.id, name: team.name, color: team.color }
+        : null;
+    }
+    if ("assignedToId" in patch) {
+      const id = patch.assignedToId as string | null | undefined;
+      const agent = id == null ? null : agentsData?.find((a) => a.id === id) ?? null;
+      (next as Record<string, unknown>).assignedTo = agent
+        ? { id: agent.id, name: agent.name }
+        : null;
+    }
+    if ("customStatusId" in patch) {
+      const id = patch.customStatusId as number | null | undefined;
+      const cs = id == null ? null : customStatusesData?.find((c) => c.id === id) ?? null;
+      (next as Record<string, unknown>).customStatus = cs
+        ? { id: cs.id, label: cs.label, color: cs.color }
+        : null;
+      if (cs) (next as Record<string, unknown>).status = cs.workflowState;
+    }
+    if ("customTicketTypeId" in patch) {
+      const id = patch.customTicketTypeId as number | null | undefined;
+      const ct = id == null ? null : customTicketTypesData?.find((c) => c.id === id) ?? null;
+      (next as Record<string, unknown>).customTicketType = ct
+        ? { id: ct.id, name: ct.name, slug: ct.slug, color: ct.color }
+        : null;
+    }
+    return next;
+  }
+
   const updateMutation = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
-      const { data } = await axios.patch(`/api/tickets/${ticket.id}`, body);
+      const { data } = await axios.patch<Ticket>(`/api/tickets/${ticket.id}`, body);
       return data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["ticket", String(ticket.id)] }),
+    // Optimistic update — write the patched ticket to the cache *before* the
+    // request fires, so dropdowns reflect the new selection instantly. The
+    // server's authoritative response replaces the optimistic value on success;
+    // on error we roll back to the pre-mutation snapshot.
+    onMutate: async (patch) => {
+      const keys = [
+        ["ticket", String(ticket.id)] as const,
+        ["ticket", ticket.id] as const,
+      ];
+      await Promise.all(
+        keys.map((k) => queryClient.cancelQueries({ queryKey: k })),
+      );
+      const previous = keys.map((k) => [k, queryClient.getQueryData<Ticket>(k)] as const);
+      for (const [k] of previous) {
+        queryClient.setQueryData<Ticket>(k, (old) =>
+          old ? applyOptimisticPatch(old, patch) : old,
+        );
+      }
+      return { previous };
+    },
+    onError: (_err, _patch, ctx) => {
+      if (!ctx) return;
+      for (const [k, snapshot] of ctx.previous) {
+        if (snapshot) queryClient.setQueryData(k, snapshot);
+      }
+    },
+    onSuccess: (updated) => {
+      // Replace the optimistic value with the server's authoritative response.
+      queryClient.setQueryData(["ticket", String(ticket.id)], updated);
+      queryClient.setQueryData(["ticket", ticket.id], updated);
+      void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    },
   });
 
   const activeCustomTicketTypes = (customTicketTypesData ?? []).filter((t) => t.isActive);
   const selectedTeam = teamsData?.find((t) => t.id === ticket.teamId) ?? null;
-  const availableAgents: Agent[] =
-    selectedTeam && selectedTeam.members.length > 0
-      ? selectedTeam.members
-      : agentsData ?? [];
+  const availableAgents: Agent[] = selectedTeam
+    ? selectedTeam.members
+    : agentsData ?? [];
 
   function handleTeamChange(value: string) {
     const newTeamId = value === "none" ? null : Number(value);
     const newTeam = teamsData?.find((t) => t.id === newTeamId) ?? null;
     const assigneeInNewTeam =
       !newTeam ||
-      newTeam.members.length === 0 ||
       newTeam.members.some((m) => m.id === ticket.assignedTo?.id);
     const update: Record<string, unknown> = { teamId: newTeamId };
     if (ticket.assignedTo && !assigneeInNewTeam) update.assignedToId = null;

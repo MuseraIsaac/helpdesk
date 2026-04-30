@@ -1007,7 +1007,7 @@ export default function RequestDetailPage() {
                 Source Ticket
               </h3>
               <Link
-                to={`/tickets/${request.sourceTicket.id}`}
+                to={`/tickets/${request.sourceTicket.ticketNumber}`}
                 className="font-medium text-primary hover:underline block text-sm"
               >
                 {request.sourceTicket.ticketNumber}

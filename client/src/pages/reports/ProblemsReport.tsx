@@ -97,7 +97,7 @@ export default function ProblemsReport() {
       >
         {statusData.length > 0 ? (
           <ChartContainer
-            config={{ count: { label: "Problems", color: "hsl(var(--chart-4))" } }}
+            config={{ count: { label: "Problems", color: "var(--chart-4)" } }}
             className="h-52"
           >
             <BarChart data={statusData} layout="vertical" barSize={16}>
@@ -112,7 +112,7 @@ export default function ProblemsReport() {
                 tick={{ fontSize: 11 }}
               />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="count" fill="hsl(var(--chart-4))" radius={[0, 4, 4, 0]} />
+              <Bar dataKey="count" fill="var(--chart-4)" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ChartContainer>
         ) : (

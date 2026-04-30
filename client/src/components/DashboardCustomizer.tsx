@@ -88,13 +88,17 @@ function normalizeConfig(config: DashboardConfigData): DashboardConfigData {
 
 // Category label → accent color mapping for widget badges
 const CATEGORY_COLORS: Record<string, string> = {
-  "Service Desk":    "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
-  "Quality & SLA":   "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
-  "Teams & Agents":  "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300",
-  "ITSM Modules":    "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
+  "Service Desk":      "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+  "Volume Tiles":      "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300",
+  "Performance Tiles": "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300",
+  "Breakdown Charts":  "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300",
+  "Quality & SLA":     "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
+  "CSAT Tiles & Cards":"bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
+  "Teams & Agents":    "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300",
+  "ITSM Modules":      "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
   "Change Management": "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
-  "Assets & CMDB":   "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300",
-  "Knowledge Base":  "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300",
+  "Assets & CMDB":     "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300",
+  "Knowledge Base":    "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300",
 };
 
 function widgetCategory(id: WidgetId): string {
@@ -106,14 +110,17 @@ function widgetCategory(id: WidgetId): string {
 type WidgetActionPhase =
   | "adding"   | "added"
   | "removing" | "removed"
-  | "moving"   | "moved";
+  | "moving"   | "moved"
+  | "deleting" | "deleted";
 
 function WidgetRow({
-  id, visible, isFirst, isLast, onToggle, onMoveUp, onMoveDown,
+  id, visible, isFirst, isLast, onToggle, onMoveUp, onMoveDown, onRemove,
   recentAction,
 }: {
   id: WidgetId; visible: boolean; isFirst: boolean; isLast: boolean;
   onToggle: () => void; onMoveUp: () => void; onMoveDown: () => void;
+  /** Permanently remove this widget from the dashboard config. */
+  onRemove: () => void;
   /** Two-phase action label: in-progress ("Adding…") then completed ("Added"). */
   recentAction: WidgetActionPhase | null;
 }) {
@@ -126,6 +133,7 @@ function WidgetRow({
   const ringClass =
     recentAction === "adding"   || recentAction === "added"   ? "ring-2 ring-emerald-500/40 bg-emerald-500/5" :
     recentAction === "removing" || recentAction === "removed" ? "ring-2 ring-amber-500/40  bg-amber-500/5"   :
+    recentAction === "deleting" || recentAction === "deleted" ? "ring-2 ring-red-500/50    bg-red-500/5"     :
     recentAction === "moving"   || recentAction === "moved"   ? "ring-2 ring-primary/40    bg-primary/5"     : "";
 
   // Make the entire row a button (except the move arrows) so the click
@@ -194,6 +202,18 @@ function WidgetRow({
         }
       </button>
 
+      {/* Remove (trash) — permanently filters this widget out of the dashboard
+          config. Different from On/Off (which just toggles visibility). */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onRemove(); }}
+        className="shrink-0 flex items-center justify-center h-7 w-7 rounded-full text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 transition-colors border border-transparent hover:border-destructive/20"
+        title={`Remove ${meta.label} from this dashboard`}
+        aria-label={`Remove ${meta.label}`}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+
       {/* Two-phase transient chip: spinner + "Adding…" first, then a check
           + "Added" once the local mutation has settled. Same pattern for
           remove and move. pointer-events-none so it never eats clicks. */}
@@ -203,6 +223,7 @@ function WidgetRow({
             "pointer-events-none absolute right-2 -top-2 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider border shadow-sm animate-in fade-in slide-in-from-top-1",
             (recentAction === "adding" || recentAction === "added")     && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
             (recentAction === "removing" || recentAction === "removed") && "bg-amber-500/15   text-amber-700  dark:text-amber-300  border-amber-500/30",
+            (recentAction === "deleting" || recentAction === "deleted") && "bg-red-500/15     text-red-700    dark:text-red-300    border-red-500/30",
             (recentAction === "moving" || recentAction === "moved")     && "bg-primary/15     text-primary                            border-primary/30",
           ].filter(Boolean).join(" ")}
         >
@@ -210,6 +231,8 @@ function WidgetRow({
           {recentAction === "added"    && <><Check    className="h-2.5 w-2.5" />Added</>}
           {recentAction === "removing" && <><Loader2 className="h-2.5 w-2.5 animate-spin" />Removing…</>}
           {recentAction === "removed"  && <><Check    className="h-2.5 w-2.5" />Removed</>}
+          {recentAction === "deleting" && <><Loader2 className="h-2.5 w-2.5 animate-spin" />Deleting…</>}
+          {recentAction === "deleted"  && <><Check    className="h-2.5 w-2.5" />Deleted</>}
           {recentAction === "moving"   && <><Loader2 className="h-2.5 w-2.5 animate-spin" />Moving…</>}
           {recentAction === "moved"    && <><Check    className="h-2.5 w-2.5" />Moved</>}
         </span>
@@ -240,10 +263,12 @@ export default function DashboardCustomizer({
   // ── Fetch real team list from API ──────────────────────────────────────────
   // Previously only teams with existing team-visible dashboards were shown,
   // which meant the dropdown was empty if no dashboard had been shared yet.
+  // Shares ["dict","teams"] with TicketsPage / TicketsFilterSidebar.
   const { data: teamsData } = useQuery<{ teams: TeamOption[] }>({
-    queryKey: ["teams-for-share"],
+    queryKey: ["dict", "teams"],
     queryFn:  () => axios.get<{ teams: TeamOption[] }>("/api/teams").then(r => r.data),
-    staleTime: 2 * 60_000,
+    staleTime: 5 * 60_000,
+    gcTime:    30 * 60_000,
     enabled: open,
   });
 
@@ -291,13 +316,19 @@ export default function DashboardCustomizer({
   const [recentAction, setRecentAction] = useState<Record<string, WidgetActionPhase>>({});
   const recentTimers = useRef<Record<string, ReturnType<typeof setTimeout>[]>>({});
 
-  const flagRecent = useCallback((id: string, kind: "add" | "remove" | "move") => {
+  const flagRecent = useCallback((id: string, kind: "add" | "remove" | "move" | "delete") => {
     // Cancel any in-flight phase chain for this widget
     (recentTimers.current[id] ?? []).forEach(clearTimeout);
     recentTimers.current[id] = [];
 
-    const startPhase: WidgetActionPhase  = kind === "add" ? "adding"   : kind === "remove" ? "removing" : "moving";
-    const finishPhase: WidgetActionPhase = kind === "add" ? "added"    : kind === "remove" ? "removed"  : "moved";
+    const startPhase: WidgetActionPhase  =
+      kind === "add"    ? "adding"   :
+      kind === "remove" ? "removing" :
+      kind === "delete" ? "deleting" : "moving";
+    const finishPhase: WidgetActionPhase =
+      kind === "add"    ? "added"    :
+      kind === "remove" ? "removed"  :
+      kind === "delete" ? "deleted"  : "moved";
     const startMs = kind === "move" ? 250 : 350;
     const totalMs = kind === "move" ? 1150 : 1450;
 
@@ -348,6 +379,25 @@ export default function DashboardCustomizer({
       [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
       return next;
     });
+  }
+
+  /**
+   * Permanently remove a widget from the dashboard config — different from the
+   * On/Off toggle, which only sets `visible: false`. The widget can always be
+   * re-added later via the widget picker (or by resetting to defaults).
+   */
+  function removeWidget(id: WidgetId) {
+    flagRecent(id, "delete");
+    // Wait for the "Deleting…" → "Deleted" animation before actually removing
+    // the row from the list — gives the user visual confirmation.
+    setTimeout(() => {
+      setDraft(d => ({
+        ...d,
+        widgets: d.widgets
+          .filter(w => w.id !== id)
+          .map((w, i) => ({ ...w, order: i })),
+      }));
+    }, 700);
   }
 
   // ── Dirty detection ────────────────────────────────────────────────────────
@@ -598,6 +648,7 @@ export default function DashboardCustomizer({
                     onToggle={() => toggleWidget(w.id)}
                     onMoveUp={() => moveWidget(idx, -1)}
                     onMoveDown={() => moveWidget(idx, 1)}
+                    onRemove={() => removeWidget(w.id)}
                     recentAction={recentAction[w.id] ?? null}
                   />
                 ))}

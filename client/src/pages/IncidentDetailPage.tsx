@@ -5,7 +5,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import axios from "axios";
 import { type Incident } from "core/constants/incident.ts";
-import { incidentStatusLabel, incidentStatusTransitions } from "core/constants/incident-status.ts";
+import { incidentStatuses, incidentStatusLabel, incidentStatusTransitions } from "core/constants/incident-status.ts";
 import type { IncidentStatus } from "core/constants/incident-status.ts";
 import { incidentPriorityLabel, incidentPriorityShortLabel, incidentPriorities } from "core/constants/incident-priority.ts";
 import type { IncidentPriority } from "core/constants/incident-priority.ts";
@@ -64,6 +64,10 @@ import {
   Paperclip,
   Image,
   FileText,
+  Lock,
+  Eye,
+  PlayCircle,
+  Settings2,
 } from "lucide-react";
 
 // ── Palette helpers ───────────────────────────────────────────────────────────
@@ -506,7 +510,7 @@ function MajorIncidentToggle({ incident }: { incident: Incident }) {
   );
 }
 
-// ── Lifecycle action buttons ──────────────────────────────────────────────────
+// ── Lifecycle action buttons (used in the page header) ───────────────────────
 
 function LifecycleActions({ incident }: { incident: Incident }) {
   const queryClient = useQueryClient();
@@ -540,6 +544,170 @@ function LifecycleActions({ incident }: { incident: Incident }) {
           {LABELS[next] ?? next}
         </Button>
       ))}
+    </div>
+  );
+}
+
+// ── Status section (sidebar) ──────────────────────────────────────────────────
+//
+// Provides a clearly visible status switcher in the sidebar so users always
+// have a discoverable way to move an incident through its lifecycle without
+// hunting for buttons in the top action row. Also offers a "Change to any
+// status" override for legitimate admin actions (reopening a closed incident,
+// jumping a step forward, etc.) that the strict workflow doesn't cover.
+
+function StatusSection({ incident }: { incident: Incident }) {
+  const queryClient = useQueryClient();
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
+
+  // Workflow transition — server enforces incidentStatusTransitions
+  const transitionMutation = useMutation({
+    mutationFn: async (status: IncidentStatus) => {
+      const { data } = await axios.patch(`/api/incidents/${incident.id}`, { status });
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["incident", String(incident.id)] });
+    },
+  });
+
+  // Force override — admins/supervisors only; bypasses workflow validation.
+  // Required for transitions the strict workflow forbids (e.g. closed →
+  // anything to reopen, in_progress → acknowledged to revert, etc.).
+  const overrideMutation = useMutation({
+    mutationFn: async (status: IncidentStatus) => {
+      const { data } = await axios.patch(`/api/incidents/${incident.id}`, { status, force: true });
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["incident", String(incident.id)] });
+      setOverrideOpen(false);
+      setOverrideError(null);
+    },
+    onError: (err: unknown) => {
+      const msg = axios.isAxiosError(err)
+        ? (err.response?.data?.error ?? err.message)
+        : "Failed to override status";
+      setOverrideError(msg);
+    },
+  });
+
+  const current = incident.status as IncidentStatus;
+  const validNext = incidentStatusTransitions[current] ?? [];
+  const palette = STATUS_COLORS[current] ?? STATUS_COLORS.open;
+
+  // Step-button labels — same vocabulary as the header's quick actions
+  const NEXT_LABELS: Partial<Record<IncidentStatus, string>> = {
+    acknowledged: "Acknowledge",
+    in_progress:  "Mark In Progress",
+    resolved:     "Mark Resolved",
+    closed:       "Close",
+  };
+
+  // Per-status next-step icon
+  const NEXT_ICONS: Partial<Record<IncidentStatus, React.ElementType>> = {
+    acknowledged: Eye,
+    in_progress:  PlayCircle,
+    resolved:     CheckCircle2,
+    closed:       Lock,
+  };
+
+  // Statuses available in the override dropdown — every status except current
+  const OVERRIDE_OPTIONS = incidentStatuses
+    .filter((s) => s !== current)
+    .map((s) => ({
+      value: s,
+      label: incidentStatusLabel[s],
+    }));
+
+  return (
+    <div className="space-y-3">
+      {/* Current status pill — large, colour-coded */}
+      <div className="space-y-1.5">
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+          Current status
+        </p>
+        <div className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 w-full ${palette}`}>
+          <span className="h-2 w-2 rounded-full bg-current opacity-70" />
+          <span className="text-sm font-semibold">
+            {incidentStatusLabel[current]}
+          </span>
+        </div>
+      </div>
+
+      {/* Forward-transition quick buttons — tied to the workflow */}
+      {validNext.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+            Move to next stage
+          </p>
+          <div className="grid gap-1.5">
+            {validNext.map((next) => {
+              const Icon = NEXT_ICONS[next] ?? ArrowRight;
+              return (
+                <Button
+                  key={next}
+                  size="sm"
+                  variant={next === "closed" ? "outline" : "default"}
+                  className="h-9 justify-start gap-2 w-full"
+                  disabled={transitionMutation.isPending}
+                  onClick={() => transitionMutation.mutate(next)}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {NEXT_LABELS[next] ?? incidentStatusLabel[next]}
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Override — set status to any value (e.g. reopen a closed incident) */}
+      <div className="pt-1 border-t border-border/40">
+        {overrideOpen ? (
+          <div className="space-y-2 pt-2">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-amber-700/90 dark:text-amber-400/90">
+              Override status
+            </p>
+            <SearchableSelect
+              value=""
+              placeholder="Select any status…"
+              options={OVERRIDE_OPTIONS}
+              onChange={(val) => overrideMutation.mutate(val as IncidentStatus)}
+              disabled={overrideMutation.isPending}
+              className="h-9 text-sm"
+            />
+            {overrideError && (
+              <p className="text-[11px] text-destructive flex items-start gap-1.5">
+                <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+                {overrideError}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => { setOverrideOpen(false); setOverrideError(null); }}
+              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+            <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
+              Bypasses the standard lifecycle. Admin or supervisor only. Use for
+              cases the workflow doesn't cover (reopening a closed incident,
+              skipping a stage).
+            </p>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setOverrideOpen(true)}
+            className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors pt-2"
+          >
+            <Settings2 className="h-3 w-3" />
+            Change to any status
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -782,6 +950,11 @@ export default function IncidentDetailPage() {
           {/* ── Sidebar ── */}
           <div className="space-y-4">
 
+            {/* Status — current state, forward transitions, and override */}
+            <SectionCard icon={Activity} title="Status">
+              <StatusSection incident={incident} />
+            </SectionCard>
+
             {/* Ownership */}
             <SectionCard icon={Users} title="Ownership">
               <AssignmentPanel incident={incident} />
@@ -890,7 +1063,7 @@ export default function IncidentDetailPage() {
             {incident.sourceTicket && (
               <SectionCard icon={Link2} title="Source Ticket">
                 <div className="space-y-2">
-                  <Link to={`/tickets/${incident.sourceTicket.id}`}
+                  <Link to={`/tickets/${incident.sourceTicket.ticketNumber}`}
                     className="font-medium text-primary hover:underline block text-sm">
                     {incident.sourceTicket.ticketNumber}
                   </Link>

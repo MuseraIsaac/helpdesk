@@ -180,6 +180,7 @@ function EditTicketTypeForm({ ticketType, onSuccess }: EditFormProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ticket-types"] });
+      queryClient.invalidateQueries({ queryKey: ["dict", "ticket-types"] });
       onSuccess();
     },
   });
@@ -294,12 +295,14 @@ export default function TicketTypesPage() {
     mutationFn: (id: number) => axios.delete(`/api/ticket-types/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ticket-types"] });
+      queryClient.invalidateQueries({ queryKey: ["dict", "ticket-types"] });
       setDeleteTarget(null);
     },
   });
 
   function handleCreated(slug: string, name: string) {
     queryClient.invalidateQueries({ queryKey: ["ticket-types"] });
+      queryClient.invalidateQueries({ queryKey: ["dict", "ticket-types"] });
     setCreateOpen(false);
     setJustCreated({ slug, name });
   }

@@ -153,7 +153,7 @@ function RowActions({ asset, onClone }: { asset: AssetSummary; onClone: (id: num
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44 text-sm">
         <DropdownMenuItem asChild>
-          <Link to={`/assets/${asset.id}`} className="flex items-center gap-2">
+          <Link to={`/assets/${asset.assetNumber}`} className="flex items-center gap-2">
             <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
             Open
           </Link>
@@ -164,13 +164,13 @@ function RowActions({ asset, onClone }: { asset: AssetSummary; onClone: (id: num
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link to={`/assets/${asset.id}`} className="flex items-center gap-2 text-muted-foreground">
+          <Link to={`/assets/${asset.assetNumber}`} className="flex items-center gap-2 text-muted-foreground">
             <RotateCcw className="h-3.5 w-3.5" />
             Transition status
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link to={`/assets/${asset.id}`} className="flex items-center gap-2 text-muted-foreground">
+          <Link to={`/assets/${asset.assetNumber}`} className="flex items-center gap-2 text-muted-foreground">
             <User className="h-3.5 w-3.5" />
             {asset.assignedTo ? "Reassign" : "Assign"}
           </Link>
@@ -354,7 +354,7 @@ export default function AssetsPage() {
         <SortableHeader col="assetNumber" label="#" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSortChange} />
       ),
       cell: ({ row }) => (
-        <Link to={`/assets/${row.original.id}`} className="block hover:text-primary transition-colors">
+        <Link to={`/assets/${row.original.assetNumber}`} className="block hover:text-primary transition-colors">
           <p className="font-medium leading-tight">{row.original.name}</p>
           <p className="font-mono text-[11px] text-muted-foreground mt-0.5">{row.original.assetNumber}</p>
         </Link>
@@ -366,7 +366,7 @@ export default function AssetsPage() {
         <SortableHeader col="name" label="Name" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSortChange} />
       ),
       cell: ({ row }) => (
-        <Link to={`/assets/${row.original.id}`} className="block hover:text-primary transition-colors">
+        <Link to={`/assets/${row.original.assetNumber}`} className="block hover:text-primary transition-colors">
           <p className="font-medium leading-tight truncate max-w-[200px]">{row.original.name}</p>
         </Link>
       ),

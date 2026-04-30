@@ -11,6 +11,7 @@ import { saveFormDefinitionSchema } from "core/schemas/form-definitions.ts";
 import { FORM_FIELD_REGISTRY } from "core/constants/form-fields.ts";
 import type { FormFieldConfig } from "core/schemas/form-definitions.ts";
 import prisma from "../db";
+import { setMediumCache } from "../lib/cache-control";
 
 const router = Router();
 
@@ -39,6 +40,7 @@ function buildDefaultFields(): FormFieldConfig[] {
 
 // GET /api/ticket-types
 router.get("/", requireAuth, async (req, res) => {
+  setMediumCache(res);
   const types = await prisma.ticketTypeConfig.findMany({
     orderBy: { name: "asc" },
     include: { formDefinition: { select: { id: true, updatedAt: true } } },

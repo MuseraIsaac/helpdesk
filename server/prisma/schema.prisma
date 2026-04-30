@@ -534,6 +534,8 @@ model Ticket {
   @@index([status, updatedAt])
   @@index([lastAgentReplyAt])
   @@index([lastCustomerReplyAt])
+  @@index([createdAt])      // default ORDER BY for the agent ticket list
+  @@index([assignedToId])   // filter "assigned to me" / per-agent boards
   @@map("ticket")
 }
 
@@ -606,6 +608,11 @@ model Reply {
   channelMeta    Json?        @map("channel_meta")
   // ── Reply addressing ─────────────────────────────────────────────────────
   replyType      String?      // "reply_all" | "reply_sender" | "forward"
+  /// Primary recipient(s) for non-forward replies. Comma-joined when multiple.
+  /// NULL means the reply went to ticket.senderEmail (the historical default).
+  /// Populated when an agent overrides the To field (e.g. redirects the reply
+  /// to a different address than the original ticket sender).
+  to             String?      @map("to")
   cc             String?      // comma-separated CC addresses
   bcc            String?      // comma-separated BCC addresses
   forwardTo      String?      // recipient address for forwarded messages
@@ -616,6 +623,7 @@ model Reply {
   attachments    Attachment[]
 
   @@index([channel])
+  @@index([ticketId, createdAt])  // last-reply-per-ticket lookup on the list endpoint
   @@map("reply")
 }
 
@@ -678,6 +686,7 @@ model Note {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  @@index([ticketId, createdAt])  // last-note-per-ticket lookup on the list endpoint
   @@map("note")
 }
 

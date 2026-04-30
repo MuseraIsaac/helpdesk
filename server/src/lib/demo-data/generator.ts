@@ -14,6 +14,7 @@
 
 import { hashPassword } from "better-auth/crypto";
 import prisma from "../../db";
+import { computeRequestSlaDueAt } from "../request-sla";
 import {
   type GeneratorConfig,
   type GeneratorContext,
@@ -260,12 +261,47 @@ async function generateTickets(ctx: GeneratorContext, batchId: number, progress:
   let noteCount = 0; let replyCount = 0; let csatCount = 0;
   const specs = take(TICKET_POOL, ctx.params.tickets);
 
+  // SLA targets by priority (hours from creation): [firstResponse, resolution]
+  const SLA_TARGETS: Record<string, [number, number]> = {
+    urgent: [1, 4],
+    high:   [4, 8],
+    medium: [8, 24],
+    low:    [24, 72],
+  };
+
   for (let i = 0; i < specs.length; i++) {
     const spec = specs[i]!;
     const cust = ctx.customerIds[spec.custIdx % ctx.customerIds.length];
     const custRec = cust ? await prisma.customer.findUnique({ where: { id: cust } }) : null;
     const agentId = ctx.userIds[spec.agentIdx % ctx.userIds.length];
     const teamId  = ctx.teamIds[spec.teamIdx  % ctx.teamIds.length];
+
+    const createdAt = daysAgo(jitter(1, 14));
+    const [frtHours, resHours] = SLA_TARGETS[spec.priority] ?? SLA_TARGETS.medium!;
+    const firstResponseDueAt = new Date(createdAt.getTime() + frtHours * 3_600_000);
+    const resolutionDueAt    = new Date(createdAt.getTime() + resHours * 3_600_000);
+
+    // ~80% of tickets get an agent reply (mirrors the reply-creation rule below).
+    const willHaveReply = !!agentId && i % 5 !== 0;
+
+    // Stamp first-response time when a reply will be created. Mostly within SLA;
+    // ~20% breach to make compliance metrics non-trivial. Express in seconds for
+    // sub-hour precision and to support 'urgent' tickets whose SLA is 1h.
+    let firstRespondedAt: Date | null = null;
+    let frBreached = false;
+    if (willHaveReply) {
+      const slaSeconds = frtHours * 3_600;
+      const breach = i % 5 === 1; // ~20% breach
+      const responseSeconds = breach
+        ? slaSeconds + jitter(60 * 30, 60 * 60 * 4)        // 30min–4.5h past SLA
+        : Math.max(60, Math.floor(slaSeconds * (0.2 + Math.random() * 0.7))); // 20–90% of SLA
+      firstRespondedAt = new Date(createdAt.getTime() + responseSeconds * 1000);
+      frBreached = breach;
+    }
+
+    // For resolved/closed tickets, ~15% miss the resolution SLA.
+    const isResolved = ["resolved", "closed"].includes(spec.status);
+    const resBreached = isResolved && i % 7 === 3;
 
     const ticket = await prisma.ticket.create({
       data: {
@@ -278,9 +314,13 @@ async function generateTickets(ctx: GeneratorContext, batchId: number, progress:
         assignedToId: agentId ?? null,
         teamId: teamId ?? null,
         source: "portal",
-        createdAt: daysAgo(jitter(1, 14)),
+        createdAt,
         updatedAt: new Date(),
-        ...(["resolved", "closed"].includes(spec.status) ? { resolvedAt: daysAgo(jitter(0, 3)) } : {}),
+        firstResponseDueAt,
+        resolutionDueAt,
+        ...(firstRespondedAt ? { firstRespondedAt } : {}),
+        slaBreached: frBreached || resBreached,
+        ...(isResolved ? { resolvedAt: daysAgo(jitter(0, 3)) } : {}),
       },
     });
     ctx.ticketIds.push(ticket.id);
@@ -313,9 +353,35 @@ async function generateTickets(ctx: GeneratorContext, batchId: number, progress:
       ctx.replyIds.push(reply.id); replyCount++;
     }
 
-    // CSAT for resolved tickets
+    // CSAT for resolved tickets — spread submission dates across the last
+    // 30 days and use a realistic rating distribution so the report's trend
+    // line, breakdown bars, and "coverage" KPI all render meaningfully.
     if (["resolved", "closed"].includes(spec.status)) {
-      const r = await prisma.csatRating.create({ data: { ticketId: ticket.id, rating: Math.random() > 0.15 ? 5 : 4, comment: Math.random() > 0.4 ? "Very helpful and fast!" : null, submittedAt: new Date() } });
+      // Realistic distribution skewed positive: ~5% 1★, 5% 2★, 10% 3★, 30% 4★, 50% 5★
+      const roll = Math.random();
+      const rating =
+        roll < 0.05 ? 1 :
+        roll < 0.10 ? 2 :
+        roll < 0.20 ? 3 :
+        roll < 0.50 ? 4 : 5;
+      const comments: Record<number, string[]> = {
+        1: ["Very disappointing experience.", "Took far too long to resolve.", "Issue is still not fixed properly."],
+        2: ["Could have been handled better.", "Resolution was slow.", "Communication was lacking."],
+        3: ["Issue resolved but took some back-and-forth.", "Acceptable, nothing special.", "Resolved eventually."],
+        4: ["Helpful and clear.", "Resolved quickly, thanks.", "Good service overall."],
+        5: ["Very helpful and fast!", "Excellent support, thank you!", "Resolved on the first reply — perfect."],
+      };
+      const submittedAt = new Date();
+      submittedAt.setDate(submittedAt.getDate() - Math.floor(Math.random() * 30));
+      submittedAt.setHours(8 + Math.floor(Math.random() * 10), Math.floor(Math.random() * 60), 0, 0);
+      const r = await prisma.csatRating.create({
+        data: {
+          ticketId: ticket.id,
+          rating,
+          comment: Math.random() > 0.4 ? comments[rating]![Math.floor(Math.random() * comments[rating]!.length)]! : null,
+          submittedAt,
+        },
+      });
       ctx.csatRatingIds.push(r.id); csatCount++;
     }
   }
@@ -372,6 +438,7 @@ async function generateRequests(ctx: GeneratorContext, batchId: number, progress
     const catalogRec = catalogId ? await prisma.catalogItem.findUnique({ where: { id: catalogId } }) : null;
     const teamId = ctx.teamIds[CATALOG_ITEM_POOL[spec.catalogIdx % CATALOG_ITEM_POOL.length]?.teamIdx ?? 0];
 
+    const createdAt = daysAgo(jitter(1, 10));
     const req = await prisma.serviceRequest.create({
       data: {
         requestNumber: `DEMO-SRQ-${pad(i + 1, 4)}`,
@@ -384,7 +451,8 @@ async function generateRequests(ctx: GeneratorContext, batchId: number, progress
         catalogItemId: catalogId ?? null, catalogItemName: catalogRec?.name ?? null,
         approvalStatus: spec.status === "pending_approval" ? "pending" : "not_required",
         createdById: requester ?? null,
-        createdAt: daysAgo(jitter(1, 10)),
+        createdAt,
+        slaDueAt: computeRequestSlaDueAt(spec.priority, createdAt),
         ...(spec.status === "fulfilled" ? { resolvedAt: daysAgo(jitter(0, 3)) } : {}),
       },
     });
@@ -462,13 +530,25 @@ async function generateChanges(ctx: GeneratorContext, batchId: number, progress:
 
     // CAB approval for changes in authorize/scheduled/implement state
     if (["authorize", "scheduled", "implement"].includes(spec.state)) {
+      // Stamp resolvedAt when the seed marks the approval as already
+      // approved — otherwise turnaround analytics see status='approved'
+      // but no decision time and the average reads "—".
+      // Backdate createdAt so the request exists *before* the decision
+      // (turnaround = decided - created; must be positive).
+      const isApproved = spec.state !== "authorize";
+      const requestCreatedAt = daysAgo(jitter(3, 7));
+      const decidedAt = isApproved
+        ? new Date(requestCreatedAt.getTime() + jitter(2, 36) * 3_600_000) // 2–36 h later
+        : null;
       const approvalReq = await prisma.approvalRequest.create({
         data: {
           subjectType: "change_request", subjectId: String(change.id),
           title: `CAB Approval — ${spec.title}`,
-          approvalMode: "all", status: spec.state === "authorize" ? "pending" : "approved",
+          approvalMode: "all", status: isApproved ? "approved" : "pending",
           requestedById: assigneeId ?? ctx.adminId,
-          expiresAt: new Date(Date.now() + 7 * 24 * 3_600_000),
+          expiresAt: new Date(requestCreatedAt.getTime() + 7 * 24 * 3_600_000),
+          createdAt:  requestCreatedAt,
+          resolvedAt: decidedAt,
         },
       });
       ctx.approvalRequestIds.push(approvalReq.id); approvalCount++;
@@ -477,18 +557,18 @@ async function generateChanges(ctx: GeneratorContext, batchId: number, progress:
         data: {
           approvalRequestId: approvalReq.id, stepOrder: 1,
           approverId: ctx.adminId,
-          status: spec.state === "authorize" ? "pending" : "approved",
+          status: isApproved ? "approved" : "pending",
         },
       });
 
-      if (spec.state !== "authorize") {
+      if (isApproved && decidedAt) {
         await prisma.approvalDecision.create({
           data: {
             stepId:      step.id,
             decidedById: ctx.adminId,
             decision:    "approved",
             comment:     "Approved. Risk is acceptable and rollback plan is documented.",
-            decidedAt:   daysAgo(jitter(0, 2)),
+            decidedAt,
           },
         });
       }
@@ -539,6 +619,40 @@ async function generateAssets(ctx: GeneratorContext, batchId: number, progress: 
       if (chgId) {
         await prisma.assetChangeLink.create({ data: { assetId: asset.id, changeId: chgId } }).catch(() => {});
       }
+    }
+  }
+
+  // Link assets to catalog items (services) — round-robin so every catalog item
+  // with assets gets coverage. Powers the Insights → Service Health report.
+  const assetsByCatalogItem = new Map<number, number[]>();
+  if (ctx.catalogItemIds.length > 0) {
+    for (let i = 0; i < ctx.assetIds.length; i++) {
+      const assetId = ctx.assetIds[i]!;
+      const catalogItemId = ctx.catalogItemIds[i % ctx.catalogItemIds.length]!;
+      await prisma.assetServiceLink
+        .create({ data: { assetId, catalogItemId } })
+        .catch(() => {});
+      const list = assetsByCatalogItem.get(catalogItemId) ?? [];
+      list.push(assetId);
+      assetsByCatalogItem.set(catalogItemId, list);
+    }
+  }
+
+  // Link service requests to one of the assets supplying their catalog item.
+  // Powers Insights → Service Health "requests affected by assets" KPI.
+  if (ctx.requestIds.length > 0 && assetsByCatalogItem.size > 0) {
+    const requests = await prisma.serviceRequest.findMany({
+      where: { id: { in: ctx.requestIds } },
+      select: { id: true, catalogItemId: true },
+    });
+    for (const req of requests) {
+      if (!req.catalogItemId) continue;
+      const candidates = assetsByCatalogItem.get(req.catalogItemId);
+      if (!candidates?.length) continue;
+      const assetId = candidates[req.id % candidates.length]!;
+      await prisma.assetRequestLink
+        .create({ data: { assetId, requestId: req.id } })
+        .catch(() => {});
     }
   }
 
@@ -595,6 +709,35 @@ async function generateCmdb(ctx: GeneratorContext, batchId: number, progress: Ba
   }
   if (ctx.ciIds.length >= 4) {
     await prisma.ciRelationship.create({ data: { fromCiId: ctx.ciIds[2]!, toCiId: ctx.ciIds[3]!, type: "connects_to" } }).catch(() => {});
+  }
+
+  // ── Cross-module links: tickets ↔ problems / assets / CIs ──────────────
+  // These junction tables drive the "Linked to Problem / Asset / CI"
+  // KPIs on the Insights → Ticket Relationships report. Without them
+  // every ticket reads as standalone and cross-module conversion metrics
+  // are all zero, which doesn't reflect a healthy ITSM environment. The
+  // every-Nth-ticket pattern produces a realistic Venn diagram — some
+  // tickets carry several links, some carry one, most carry at least one.
+  for (let i = 0; i < ctx.ticketIds.length; i++) {
+    const ticketId = ctx.ticketIds[i]!;
+    if (i % 3 === 0 && ctx.problemIds.length) {
+      const problemId = ctx.problemIds[i % ctx.problemIds.length]!;
+      await prisma.problemTicketLink.create({
+        data: { problemId, ticketId, linkedById: ctx.adminId },
+      }).catch(() => { /* unique violation = link already exists */ });
+    }
+    if (i % 4 !== 2 && ctx.assetIds.length) {
+      const assetId = ctx.assetIds[i % ctx.assetIds.length]!;
+      await prisma.assetTicketLink.create({
+        data: { assetId, ticketId },
+      }).catch(() => { /* unique violation */ });
+    }
+    if (i % 4 === 0 && ctx.ciIds.length) {
+      const ciId = ctx.ciIds[i % ctx.ciIds.length]!;
+      await prisma.ticketCiLink.create({
+        data: { ticketId, ciId },
+      }).catch(() => { /* unique violation */ });
+    }
   }
 
   await markModuleDone(batchId, "cmdb", ctx.ciIds.length, progress);

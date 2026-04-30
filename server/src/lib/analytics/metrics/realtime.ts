@@ -62,7 +62,7 @@ const realtimeUnassigned: MetricDefinition = {
 const realtimeSlaAtRisk: MetricDefinition = {
   id: "realtime.sla_at_risk",
   label: "Tickets at SLA Risk",
-  description: "Open tickets with SLA deadline within the next 2 hours that have not yet breached.",
+  description: "Active tickets whose first-response or resolution deadline is within the next 2 hours and has not yet been satisfied.",
   domain: "realtime",
   unit: "count",
   supportedVisualizations: ["number"],
@@ -70,14 +70,32 @@ const realtimeSlaAtRisk: MetricDefinition = {
 
   computeFor: {
     async stat(ctx) {
+      // "At risk" = active ticket with an SLA deadline in the next 2h
+      // that is still in-flight. Two windows qualify: first-response (no
+      // agent has replied yet) and resolution. We include 'escalated'
+      // because escalated tickets are still operationally active. We
+      // exclude tickets already flagged as breached — those belong on the
+      // OVERDUE metric.
       interface Row { count: bigint }
       const [row] = await ctx.db.$queryRaw<Row[]>`
         SELECT COUNT(*) AS count FROM ticket
-        WHERE status IN ('open','in_progress')
+        WHERE status IN ('open','in_progress','escalated')
           AND "slaBreached" = false
-          AND "resolutionDueAt" IS NOT NULL
-          AND "resolutionDueAt" <= NOW() + INTERVAL '2 hours'
-          AND "resolutionDueAt" > NOW()
+          AND (
+            (
+              "firstResponseDueAt" IS NOT NULL
+              AND "firstRespondedAt"   IS NULL
+              AND "firstResponseDueAt" >  NOW()
+              AND "firstResponseDueAt" <= NOW() + INTERVAL '2 hours'
+            )
+            OR
+            (
+              "resolutionDueAt" IS NOT NULL
+              AND "resolvedAt"   IS NULL
+              AND "resolutionDueAt" >  NOW()
+              AND "resolutionDueAt" <= NOW() + INTERVAL '2 hours'
+            )
+          )
       `;
       return { type: "stat", value: Number(row?.count ?? 0), label: "At SLA Risk", unit: "count" };
     },
@@ -88,8 +106,8 @@ const realtimeSlaAtRisk: MetricDefinition = {
 
 const realtimeSlaBreached: MetricDefinition = {
   id: "realtime.sla_breached_open",
-  label: "SLA Breached (Open)",
-  description: "Currently open tickets that have already breached their SLA.",
+  label: "SLA Overdue (Open)",
+  description: "Currently active tickets that have breached their SLA — either the slaBreached flag is set, or a deadline has passed without first response / resolution.",
   domain: "realtime",
   unit: "count",
   supportedVisualizations: ["number"],
@@ -97,12 +115,34 @@ const realtimeSlaBreached: MetricDefinition = {
 
   computeFor: {
     async stat(ctx) {
+      // OVERDUE = active ticket past its SLA deadline. Two paths qualify:
+      //   1. The slaBreached flag is true (set by check-sla cron every 5 min)
+      //   2. A deadline has actually passed and the corresponding event
+      //      hasn't occurred yet (firstResponseDueAt < NOW with no first
+      //      response, OR resolutionDueAt < NOW with no resolution). This
+      //      catches tickets that the breach-marker cron hasn't yet
+      //      flipped — between cron ticks the metric still reflects truth.
+      // Status set includes 'escalated' so escalated overdue tickets are
+      // visible to operators (escalation doesn't satisfy SLA).
       interface Row { count: bigint }
       const [row] = await ctx.db.$queryRaw<Row[]>`
         SELECT COUNT(*) AS count FROM ticket
-        WHERE status IN ('open','in_progress') AND "slaBreached" = true
+        WHERE status IN ('open','in_progress','escalated')
+          AND (
+            "slaBreached" = true
+            OR (
+              "firstResponseDueAt" IS NOT NULL
+              AND "firstRespondedAt" IS NULL
+              AND "firstResponseDueAt" < NOW()
+            )
+            OR (
+              "resolutionDueAt" IS NOT NULL
+              AND "resolvedAt" IS NULL
+              AND "resolutionDueAt" < NOW()
+            )
+          )
       `;
-      return { type: "stat", value: Number(row?.count ?? 0), label: "SLA Breached", unit: "count" };
+      return { type: "stat", value: Number(row?.count ?? 0), label: "SLA Overdue", unit: "count" };
     },
   },
 };
@@ -218,21 +258,47 @@ const realtimeAgentWorkloadSnapshot: MetricDefinition = {
   description: "Current open ticket count per agent — top 10 busiest agents.",
   domain: "realtime",
   unit: "count",
-  supportedVisualizations: ["leaderboard", "bar_horizontal"],
-  defaultVisualization: "bar_horizontal",
+  // Only `leaderboard` is implemented in computeFor below — listing
+  // `bar_horizontal` made the engine pick it as the default and then throw
+  // UNSUPPORTED_VIZ because no handler exists, which the client surfaced as
+  // "No workload data" even when agents had open tickets.
+  supportedVisualizations: ["leaderboard"],
+  defaultVisualization:    "leaderboard",
 
   computeFor: {
     async leaderboard(ctx) {
       const limit = ctx.limit ?? 10;
-      interface Row { agent_id: string; agent_name: string; count: bigint }
+      // Split counts by status so the UI can render Open + In-Progress as
+      // separate columns. The previous version returned a single
+      // `openTickets` total, which left the client's `open` and
+      // `inProgress` columns empty (rendered as "—") even when the agent
+      // had tickets — that was the "Agent Workload shows _" bug.
+      interface Row {
+        agent_id: string;
+        agent_name: string;
+        open_count: bigint;
+        in_progress_count: bigint;
+        total: bigint;
+      }
+      // The ticket table maps Prisma's `deletedAt` field to the SQL column
+      // `deleted_at` (via @map in schema.prisma); the user table keeps the
+      // original camelCase `"deletedAt"`. Mixing those up was the actual
+      // cause of the earlier "_" empty workload — the query threw 42703
+      // and the analytics runner swallowed the error, returning no rows.
       const rows = await ctx.db.$queryRawUnsafe<Row[]>(
-        `SELECT u.id AS agent_id, u.name AS agent_name, COUNT(t.id) AS count
-         FROM "user" u JOIN ticket t ON t."assignedToId" = u.id
+        `SELECT u.id   AS agent_id,
+                u.name AS agent_name,
+                COUNT(*) FILTER (WHERE t.status = 'open')        AS open_count,
+                COUNT(*) FILTER (WHERE t.status = 'in_progress') AS in_progress_count,
+                COUNT(*)                                         AS total
+         FROM "user" u
+         JOIN ticket t ON t."assignedToId" = u.id
          WHERE t.status IN ('open','in_progress')
-           AND u.role IN ('agent','supervisor','admin')
+           AND t.deleted_at IS NULL
+           AND u.role <> 'customer'
            AND u."deletedAt" IS NULL
          GROUP BY u.id, u.name
-         ORDER BY count DESC LIMIT $1`,
+         ORDER BY total DESC LIMIT $1`,
         limit,
       );
       return {
@@ -241,10 +307,20 @@ const realtimeAgentWorkloadSnapshot: MetricDefinition = {
           rank: i + 1,
           key: r.agent_id,
           label: r.agent_name,
-          primaryValue: Number(r.count),
-          columns: { openTickets: Number(r.count) },
+          primaryValue: Number(r.total),
+          columns: {
+            open:        Number(r.open_count),
+            inProgress:  Number(r.in_progress_count),
+            // Keep the legacy key around so any pre-existing exports / UIs
+            // bound to `openTickets` still resolve to a value (the total).
+            openTickets: Number(r.total),
+          },
         })),
-        columnDefs: [{ key: "openTickets", label: "Open Tickets", unit: "count" }],
+        columnDefs: [
+          { key: "open",        label: "Open",        unit: "count" },
+          { key: "inProgress",  label: "In Progress", unit: "count" },
+          { key: "openTickets", label: "Total",       unit: "count" },
+        ],
       };
     },
   },

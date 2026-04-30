@@ -20,6 +20,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
 import {
@@ -34,6 +44,7 @@ import {
   Mail,
   ExternalLink,
   AlertCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { Link } from "react-router";
 
@@ -110,6 +121,7 @@ function TeamFormDialog({ team, onClose }: TeamFormDialogProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["teams"] });
+      queryClient.invalidateQueries({ queryKey: ["dict", "teams"] });
       onClose();
     },
   });
@@ -254,6 +266,7 @@ function MembersDialog({ team, onClose }: MembersDialogProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["teams"] });
+      queryClient.invalidateQueries({ queryKey: ["dict", "teams"] });
       onClose();
     },
   });
@@ -516,6 +529,7 @@ export default function TeamsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editTeam, setEditTeam] = useState<TeamDetail | null>(null);
   const [membersTeam, setMembersTeam] = useState<TeamDetail | null>(null);
+  const [deletingTeam, setDeletingTeam] = useState<Team | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["teams"],
@@ -531,6 +545,8 @@ export default function TeamsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["teams"] });
+      queryClient.invalidateQueries({ queryKey: ["dict", "teams"] });
+      setDeletingTeam(null);
     },
   });
 
@@ -633,12 +649,8 @@ export default function TeamsPage() {
               team={team}
               onEdit={() => openEdit(team)}
               onMembers={() => openMembers(team)}
-              onDelete={() => {
-                if (confirm(`Delete team "${team.name}"? Tickets will not be deleted.`)) {
-                  deleteMutation.mutate(team.id);
-                }
-              }}
-              deleteLoading={deleteMutation.isPending}
+              onDelete={() => setDeletingTeam(team)}
+              deleteLoading={deleteMutation.isPending && deletingTeam?.id === team.id}
             />
           ))}
         </div>
@@ -656,6 +668,53 @@ export default function TeamsPage() {
       <Dialog open={membersTeam !== null} onOpenChange={(open) => !open && setMembersTeam(null)}>
         {membersTeam && <MembersDialog team={membersTeam} onClose={() => setMembersTeam(null)} />}
       </Dialog>
+
+      {/* ── Delete confirmation ───────────────────────────────────────────── */}
+      <AlertDialog
+        open={deletingTeam !== null}
+        onOpenChange={(open) => {
+          if (!open) { setDeletingTeam(null); deleteMutation.reset(); }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Delete this team?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 pt-1">
+                <p>
+                  You're about to delete{" "}
+                  <span className="font-medium text-foreground">{deletingTeam?.name}</span>.
+                  This action <span className="font-medium text-destructive">cannot be undone</span>.
+                </p>
+                <ul className="text-xs space-y-1 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                  <li>• {deletingTeam?.memberCount ?? 0} member(s) will be removed from this team (their accounts are kept).</li>
+                  <li>• {deletingTeam?.ticketCount ?? 0} ticket(s) currently routed here will be <span className="font-medium text-foreground">unassigned from any team</span>.</li>
+                  <li>• Routing rules, automations, and dashboards that reference this team may stop working.</li>
+                </ul>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteMutation.isError && (
+            <ErrorAlert error={deleteMutation.error} fallback="Failed to delete team" />
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (deletingTeam) deleteMutation.mutate(deletingTeam.id);
+              }}
+              disabled={deleteMutation.isPending}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? "Deleting…" : "Yes, delete team"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

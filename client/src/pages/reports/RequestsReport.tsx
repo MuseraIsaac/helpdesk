@@ -53,7 +53,7 @@ export default function RequestsReport() {
   const statusData = data.byStatus.map(s => ({
     ...s,
     label: STATUS_LABELS[s.status] ?? s.status,
-    fill:  STATUS_COLORS[s.status] ?? "hsl(var(--chart-1))",
+    fill:  STATUS_COLORS[s.status] ?? "var(--chart-1)",
   }));
 
   return (
@@ -99,7 +99,7 @@ export default function RequestsReport() {
         description="Distribution of service requests across fulfillment stages."
       >
         <ChartContainer
-          config={{ count: { label: "Requests", color: "hsl(var(--chart-2))" } }}
+          config={{ count: { label: "Requests", color: "var(--chart-2)" } }}
           className="h-52"
         >
           <BarChart data={statusData} layout="vertical" barSize={14}>
@@ -117,7 +117,7 @@ export default function RequestsReport() {
             <Bar
               dataKey="count"
               radius={[0, 4, 4, 0]}
-              fill="hsl(var(--chart-2))"
+              fill="var(--chart-2)"
             />
           </BarChart>
         </ChartContainer>

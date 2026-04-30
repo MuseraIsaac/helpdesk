@@ -53,7 +53,7 @@ describe("TicketSummary", () => {
   it("should render Summarize button", () => {
     renderSummary();
 
-    expect(screen.getByRole("button", { name: "Summarize" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Summarize conversation" })).toBeInTheDocument();
   });
 
   it("should not show summary card before clicking", () => {
@@ -66,7 +66,7 @@ describe("TicketSummary", () => {
     mockedAxios.post.mockResolvedValue({ data: { summary: "A summary" } });
     const { user } = renderSummary();
 
-    await user.click(screen.getByRole("button", { name: "Summarize" }));
+    await user.click(screen.getByRole("button", { name: "Summarize conversation" }));
 
     await waitFor(() => {
       expect(mockedAxios.post).toHaveBeenCalledWith(
@@ -81,7 +81,7 @@ describe("TicketSummary", () => {
     });
     const { user } = renderSummary();
 
-    await user.click(screen.getByRole("button", { name: "Summarize" }));
+    await user.click(screen.getByRole("button", { name: "Summarize conversation" }));
 
     await waitFor(() => {
       expect(
@@ -94,10 +94,10 @@ describe("TicketSummary", () => {
     mockedAxios.post.mockReturnValue(new Promise(() => {}));
     const { user } = renderSummary();
 
-    await user.click(screen.getByRole("button", { name: "Summarize" }));
+    await user.click(screen.getByRole("button", { name: "Summarize conversation" }));
 
     await waitFor(() => {
-      const button = screen.getByRole("button", { name: "Summarizing..." });
+      const button = screen.getByRole("button", { name: "Summarizing…" });
       expect(button).toBeDisabled();
     });
   });
@@ -107,7 +107,7 @@ describe("TicketSummary", () => {
     mockedAxios.isAxiosError.mockReturnValue(false);
     const { user } = renderSummary();
 
-    await user.click(screen.getByRole("button", { name: "Summarize" }));
+    await user.click(screen.getByRole("button", { name: "Summarize conversation" }));
 
     await waitFor(() => {
       expect(screen.getByText("Failed to generate summary")).toBeInTheDocument();
@@ -120,12 +120,12 @@ describe("TicketSummary", () => {
       .mockResolvedValueOnce({ data: { summary: "Updated summary" } });
     const { user } = renderSummary();
 
-    await user.click(screen.getByRole("button", { name: "Summarize" }));
+    await user.click(screen.getByRole("button", { name: "Summarize conversation" }));
     await waitFor(() => {
       expect(screen.getByText("First summary")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Summarize" }));
+    await user.click(screen.getByRole("button", { name: "Summarize conversation" }));
     await waitFor(() => {
       expect(screen.getByText("Updated summary")).toBeInTheDocument();
     });

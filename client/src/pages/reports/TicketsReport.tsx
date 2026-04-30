@@ -131,8 +131,8 @@ export default function TicketsReport() {
           >
             <ChartContainer
               config={{
-                tickets:     { label: "Current",  color: "hsl(var(--chart-1))" },
-                prevTickets: { label: "Previous", color: "hsl(var(--chart-3))" },
+                tickets:     { label: "Current",  color: "var(--chart-1)" },
+                prevTickets: { label: "Previous", color: "var(--chart-3)" },
               }}
               className="h-48"
             >
@@ -205,8 +205,8 @@ export default function TicketsReport() {
         ) : (
           <ChartContainer
             config={{
-              opened: { label: "Opened", color: "hsl(var(--chart-1))" },
-              closed: { label: "Closed",  color: "hsl(var(--chart-2))" },
+              opened: { label: "Opened", color: "var(--chart-1)" },
+              closed: { label: "Closed",  color: "var(--chart-2)" },
             }}
             className="h-48"
           >
@@ -234,8 +234,8 @@ export default function TicketsReport() {
         <ChartCard title="By Priority" description="Click a bar to filter the ticket list by that priority." accentColor="bg-orange-500">
           <ChartContainer
             config={{
-              total: { label: "Total", color: "hsl(var(--chart-1))" },
-              open:  { label: "Open",  color: "hsl(var(--chart-3))" },
+              total: { label: "Total", color: "var(--chart-1)" },
+              open:  { label: "Open",  color: "var(--chart-3)" },
             }}
             className="h-48"
           >
@@ -262,7 +262,7 @@ export default function TicketsReport() {
 
         <ChartCard title="By Category" description="Top 8 categories · click to filter ticket list." accentColor="bg-teal-500">
           <ChartContainer
-            config={{ total: { label: "Total", color: "hsl(var(--chart-1))" } }}
+            config={{ total: { label: "Total", color: "var(--chart-1)" } }}
             className="h-48"
           >
             <BarChart
@@ -297,7 +297,7 @@ export default function TicketsReport() {
           <Skeleton className="h-44" />
         ) : (
           <ChartContainer
-            config={{ count: { label: "Tickets", color: "hsl(var(--chart-1))" } }}
+            config={{ count: { label: "Tickets", color: "var(--chart-1)" } }}
             className="h-44"
           >
             <BarChart data={resDist}>

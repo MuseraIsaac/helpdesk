@@ -22,6 +22,7 @@ import {
   ChevronDown,
   Users,
   Quote,
+  Inbox,
 } from "lucide-react";
 import { useSession } from "@/lib/auth-client";
 
@@ -41,6 +42,7 @@ interface Reply {
   senderType: SenderType;
   channel: IntakeChannel | null;
   replyType: string | null;
+  to: string | null;
   cc: string | null;
   bcc: string | null;
   forwardTo: string | null;
@@ -227,7 +229,7 @@ function RecipientRow({
   const toAddress =
     reply.replyType === "forward"
       ? (reply.forwardTo ?? "—")
-      : ticket.senderEmail;
+      : (reply.to ?? ticket.senderEmail);
 
   const ccList = parseAddresses(reply.cc);
   const bccList = parseAddresses(reply.bcc);
@@ -277,6 +279,77 @@ function RecipientRow({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Original message card ─────────────────────────────────────────────────────
+// Renders the ticket's opening message as the first item in the conversation
+// thread, styled like a customer reply but flagged "Original" so the flow
+// reads as one continuous conversation.
+
+function OriginalMessageCard({ ticket }: { ticket: Ticket }) {
+  const card = {
+    wrap:    "border border-slate-200 dark:border-slate-700/60 bg-slate-50 dark:bg-slate-900/30",
+    stripe:  "bg-slate-400/60 dark:bg-slate-500/50",
+    divider: "border-slate-200/80 dark:border-slate-700/40",
+    avatar:  "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300",
+    badge:   "border-slate-300/70 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400",
+  };
+
+  return (
+    <div className={`group/card rounded-xl overflow-hidden transition-all duration-150 hover:shadow-md ${card.wrap} flex`}>
+      {/* Left colour stripe */}
+      <div className={`w-1 shrink-0 ${card.stripe}`} />
+
+      <div className="flex-1 min-w-0">
+        {/* Header */}
+        <div className="flex items-start gap-3 px-4 py-3">
+          <Avatar name={ticket.senderName} colorClass={card.avatar} />
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                <span className="text-sm font-semibold leading-tight truncate">
+                  {ticket.senderName}
+                </span>
+                <span className={`inline-flex items-center rounded-full border px-2 py-0 text-[10px] font-semibold shrink-0 ${card.badge}`}>
+                  Customer
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/[0.06] px-2 py-0 text-[10px] font-semibold text-primary shrink-0">
+                  <Inbox className="h-2.5 w-2.5" />
+                  Original
+                </span>
+                {ticket.source && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0 text-[10px] font-medium text-muted-foreground bg-background shrink-0 capitalize">
+                    {ticket.source}
+                  </span>
+                )}
+              </div>
+
+              <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">
+                {formatTime(ticket.createdAt)}
+              </span>
+            </div>
+
+            {ticket.senderEmail && (
+              <div className="mt-0.5 text-[11px] text-muted-foreground truncate">
+                {ticket.senderEmail}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className={`border-t mx-4 ${card.divider}`} />
+
+        {/* Body */}
+        <div className="px-4 py-3 pl-[52px]">
+          <div className="prose prose-sm dark:prose-invert max-w-none">
+            <RichTextRenderer content={ticket.bodyHtml ?? ticket.body} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -622,42 +695,49 @@ export default function ConversationTimeline({
 
   const timeline = [...pinnedNotes, ...unpinnedItems];
 
-  if (timeline.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-4 text-center">
-        No replies or notes yet.
-      </p>
-    );
-  }
-
   return (
-    <div className="space-y-3">
-      {timeline.map((item) => {
-        if (item.kind === "reply") {
-          return (
-            <ReplyCard
-              key={`reply-${item.data.id}`}
-              reply={item.data}
-              ticket={ticket}
-              onCompose={onCompose}
-            />
-          );
-        }
+    <div className="relative">
+      {/* Vertical thread guide — connects every card down the left edge */}
+      <div className="pointer-events-none absolute left-[19px] top-8 bottom-8 w-px bg-gradient-to-b from-border/60 via-border/40 to-transparent" aria-hidden />
 
-        return (
-          <NoteCard
-            key={`note-${item.data.id}`}
-            note={item.data}
-            ticketId={ticketId}
-            currentUserId={currentUserId}
-            currentUserRole={currentUserRole}
-            onPin={(id, pinned) =>
-              pinMutation.mutate({ noteId: id, isPinned: pinned })
+      <div className="relative space-y-3">
+        <OriginalMessageCard ticket={ticket} />
+
+        {timeline.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border/60 bg-muted/10 px-4 py-3 text-center">
+            <p className="text-xs text-muted-foreground">
+              No replies or notes yet — start the conversation below.
+            </p>
+          </div>
+        ) : (
+          timeline.map((item) => {
+            if (item.kind === "reply") {
+              return (
+                <ReplyCard
+                  key={`reply-${item.data.id}`}
+                  reply={item.data}
+                  ticket={ticket}
+                  onCompose={onCompose}
+                />
+              );
             }
-            onDelete={(id) => deleteMutation.mutate(id)}
-          />
-        );
-      })}
+
+            return (
+              <NoteCard
+                key={`note-${item.data.id}`}
+                note={item.data}
+                ticketId={ticketId}
+                currentUserId={currentUserId}
+                currentUserRole={currentUserRole}
+                onPin={(id, pinned) =>
+                  pinMutation.mutate({ noteId: id, isPinned: pinned })
+                }
+                onDelete={(id) => deleteMutation.mutate(id)}
+              />
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

@@ -297,6 +297,7 @@ export default function TicketStatusConfigsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ticket-status-configs"] });
+      queryClient.invalidateQueries({ queryKey: ["dict", "ticket-status-configs"] });
       setCreateOpen(false);
     },
   });
@@ -308,6 +309,7 @@ export default function TicketStatusConfigsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ticket-status-configs"] });
+      queryClient.invalidateQueries({ queryKey: ["dict", "ticket-status-configs"] });
       setEditTarget(null);
     },
   });
@@ -322,6 +324,7 @@ export default function TicketStatusConfigsPage() {
     mutationFn: (id: number) => axios.delete(`/api/ticket-status-configs/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ticket-status-configs"] });
+      queryClient.invalidateQueries({ queryKey: ["dict", "ticket-status-configs"] });
       setDeleteTarget(null);
     },
   });

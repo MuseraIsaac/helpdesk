@@ -179,10 +179,20 @@ const ticketsSlaCompliance: MetricDefinition = {
         total_with_sla: bigint;
         breached: bigint;
       }
+      // SLA Compliance uses the standard ITSM definition: only counts
+      // resolved/closed tickets (those with a determined SLA outcome) and
+      // computes breach from BOTH the persistent flag AND the actual
+      // resolved-vs-deadline comparison (the latter catches late
+      // resolutions that the 5-minute cron missed).
       const [row] = await ctx.db.$queryRawUnsafe<Row[]>(
         `SELECT
-           COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL)       AS total_with_sla,
-           COUNT(*) FILTER (WHERE "slaBreached" = true)                AS breached
+           COUNT(*) FILTER (WHERE status IN ('resolved','closed')
+                              AND "resolutionDueAt" IS NOT NULL)       AS total_with_sla,
+           COUNT(*) FILTER (WHERE status IN ('resolved','closed')
+                              AND "resolutionDueAt" IS NOT NULL
+                              AND ("slaBreached" = true OR
+                                   "resolvedAt" > "resolutionDueAt"))
+                                                                       AS breached
          FROM ticket ${clause}`,
         ctx.dateRange.since, ctx.dateRange.until, ...params,
       );
@@ -195,8 +205,13 @@ const ticketsSlaCompliance: MetricDefinition = {
         const { clause: pc, params: pp } = buildFilterSQL(ctx.filters, TICKET_FIELD_MAP, 3);
         const prevWhere = `WHERE "createdAt" >= $1 AND "createdAt" <= $2 AND status NOT IN ('new','processing')${pc}`;
         const [prevRow] = await ctx.db.$queryRawUnsafe<Row[]>(
-          `SELECT COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL) AS total_with_sla,
-                  COUNT(*) FILTER (WHERE "slaBreached" = true) AS breached
+          `SELECT COUNT(*) FILTER (WHERE status IN ('resolved','closed')
+                                      AND "resolutionDueAt" IS NOT NULL) AS total_with_sla,
+                  COUNT(*) FILTER (WHERE status IN ('resolved','closed')
+                                      AND "resolutionDueAt" IS NOT NULL
+                                      AND ("slaBreached" = true OR
+                                           "resolvedAt" > "resolutionDueAt"))
+                                                                          AS breached
            FROM ticket ${prevWhere}`,
           ctx.comparison.since, ctx.comparison.until, ...pp,
         );
@@ -235,8 +250,13 @@ const ticketsSlaCompliance: MetricDefinition = {
       if (dim === "team") {
         rows = await ctx.db.$queryRawUnsafe<Row[]>(
           `SELECT COALESCE(q.name,'Unassigned') AS key,
-                  COUNT(*) FILTER (WHERE t."resolutionDueAt" IS NOT NULL) AS total_with_sla,
-                  COUNT(*) FILTER (WHERE t."slaBreached" = true) AS breached
+                  COUNT(*) FILTER (WHERE t.status IN ('resolved','closed')
+                                      AND t."resolutionDueAt" IS NOT NULL) AS total_with_sla,
+                  COUNT(*) FILTER (WHERE t.status IN ('resolved','closed')
+                                      AND t."resolutionDueAt" IS NOT NULL
+                                      AND (t."slaBreached" = true OR
+                                           t."resolvedAt" > t."resolutionDueAt"))
+                                                                            AS breached
            FROM ticket t LEFT JOIN queue q ON q.id = t."queueId"
            ${clause.replace('WHERE', 'WHERE t.')} GROUP BY q.name ORDER BY total_with_sla DESC`,
           ctx.dateRange.since, ctx.dateRange.until, ...params,
@@ -244,8 +264,13 @@ const ticketsSlaCompliance: MetricDefinition = {
       } else {
         rows = await ctx.db.$queryRawUnsafe<Row[]>(
           `SELECT COALESCE(${groupCol}::text,'unset') AS key,
-                  COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL) AS total_with_sla,
-                  COUNT(*) FILTER (WHERE "slaBreached" = true) AS breached
+                  COUNT(*) FILTER (WHERE status IN ('resolved','closed')
+                                      AND "resolutionDueAt" IS NOT NULL) AS total_with_sla,
+                  COUNT(*) FILTER (WHERE status IN ('resolved','closed')
+                                      AND "resolutionDueAt" IS NOT NULL
+                                      AND ("slaBreached" = true OR
+                                           "resolvedAt" > "resolutionDueAt"))
+                                                                          AS breached
            FROM ticket ${clause} GROUP BY ${groupCol} ORDER BY total_with_sla DESC`,
           ctx.dateRange.since, ctx.dateRange.until, ...params,
         );

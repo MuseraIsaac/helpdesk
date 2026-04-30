@@ -74,7 +74,7 @@ export default function IncidentsReport() {
         accentColor="bg-rose-500"
       >
         <ChartContainer
-          config={{ count: { label: "Incidents", color: "hsl(var(--chart-1))" } }}
+          config={{ count: { label: "Incidents", color: "var(--chart-1)" } }}
           className="h-48"
         >
           <LineChart data={data.volume}>
@@ -103,7 +103,7 @@ export default function IncidentsReport() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title="By Status" accentColor="bg-slate-500">
           <ChartContainer
-            config={{ count: { label: "Count", color: "hsl(var(--chart-1))" } }}
+            config={{ count: { label: "Count", color: "var(--chart-1)" } }}
             className="h-52"
           >
             <BarChart data={data.byStatus} layout="vertical" barSize={14}>
@@ -126,7 +126,7 @@ export default function IncidentsReport() {
 
         <ChartCard title="By Priority" accentColor="bg-orange-500">
           <ChartContainer
-            config={{ count: { label: "Count", color: "hsl(var(--chart-4))" } }}
+            config={{ count: { label: "Count", color: "var(--chart-4)" } }}
             className="h-52"
           >
             <BarChart data={data.byPriority} layout="vertical" barSize={14}>

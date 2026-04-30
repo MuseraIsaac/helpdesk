@@ -3,16 +3,15 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { type Ticket } from "core/constants/ticket.ts";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import ErrorAlert from "@/components/ErrorAlert";
 import MacroPicker from "@/components/MacroPicker";
 import SaveMacroDialog from "@/components/SaveMacroDialog";
 import RichTextEditor, { type RichTextEditorHandle } from "@/components/RichTextEditor";
+import EmailChipsInput from "@/components/EmailChipsInput";
 import { useSession } from "@/lib/auth-client";
 import { useMe } from "@/hooks/useMe";
 import { useSettings } from "@/hooks/useSettings";
 import { BookOpen, BookmarkPlus, Paperclip, X, ChevronDown, Send, Sparkles, Quote } from "lucide-react";
-import RichTextRenderer from "@/components/RichTextRenderer";
 
 export type ReplyType = "reply_all" | "reply_sender" | "forward";
 
@@ -35,14 +34,25 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function parseEmails(raw: string): string[] {
-  return raw.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
-}
-
 // ── Quoted trail ──────────────────────────────────────────────────────────────
 
-function QuotedTrail({ quote, replyType }: { quote: QuoteData; replyType: ReplyType }) {
+function QuotedTrail({
+  quote,
+  replyType,
+  value,
+  onChange,
+  onReset,
+  disabled,
+}: {
+  quote: QuoteData;
+  replyType: ReplyType;
+  value: string;
+  onChange: (html: string) => void;
+  onReset: () => void;
+  disabled?: boolean;
+}) {
   const [open, setOpen] = useState(false);
+  const isEdited = value !== quote.bodyHtml;
 
   const headerLine = replyType === "forward"
     ? `Forwarded message from ${quote.senderName}`
@@ -66,20 +76,45 @@ function QuotedTrail({ quote, replyType }: { quote: QuoteData; replyType: ReplyT
       >
         <Quote className="h-3 w-3" />
         {open ? "Hide" : "Show"} quoted message
+        {isEdited && (
+          <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400 ml-0.5">
+            · edited
+          </span>
+        )}
         <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
       </button>
 
-      {/* Expanded content */}
+      {/* Expanded content — editable */}
       {open && (
         <div className="mt-2 rounded-lg border border-border/60 overflow-hidden">
           {/* Header bar */}
           <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border/40">
             <Quote className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="text-[11px] text-muted-foreground italic truncate">{headerLine}</span>
+            <span className="text-[11px] text-muted-foreground italic truncate flex-1">
+              {headerLine}
+            </span>
+            {isEdited && (
+              <button
+                type="button"
+                onClick={onReset}
+                disabled={disabled}
+                className="text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                title="Reset to original quoted text"
+              >
+                Reset
+              </button>
+            )}
           </div>
-          {/* Body */}
-          <div className="px-3 py-3 text-sm opacity-70 max-h-48 overflow-y-auto border-l-2 border-muted-foreground/20 ml-0">
-            <RichTextRenderer content={quote.bodyHtml} />
+          {/* Editable body — quote-styled left rail, dimmed to read as a quote */}
+          <div className="border-l-2 border-muted-foreground/20 bg-muted/10 max-h-64 overflow-y-auto">
+            <RichTextEditor
+              content={value}
+              onChange={(html) => onChange(html)}
+              disabled={disabled}
+              minHeight="80px"
+              className="border-0 shadow-none rounded-none bg-transparent"
+              editorClassName="text-sm opacity-80"
+            />
           </div>
         </div>
       )}
@@ -110,22 +145,65 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<RichTextEditorHandle>(null);
 
-  // Addressing fields — "to" is editable and pre-seeded from the ticket
-  const [to, setTo] = useState(replyType === "forward" ? "" : ticket.senderEmail);
-  const [cc, setCc] = useState("");
-  const [bcc, setBcc] = useState("");
+  // Addressing — chip-based recipient lists. The "To" row pre-seeds with the
+  // ticket's original sender for replies, and starts empty for forwards.
+  //
+  // Each chip array is mirrored into a ref. The chip input commits its draft
+  // on `blur`, which fires *before* the Send button's `click` handler. By the
+  // time React re-renders with the new state, the mutation has already read
+  // the old `toChips` closure. Updating the ref inside the wrapped setter
+  // means handleSendClick / replyMutation can read the freshly-committed
+  // value synchronously.
+  const [toChips,  setToChipsState]  = useState<string[]>(
+    replyType === "forward" ? [] : [ticket.senderEmail],
+  );
+  const [ccChips,  setCcChipsState]  = useState<string[]>([]);
+  const [bccChips, setBccChipsState] = useState<string[]>([]);
   const [showCcBcc, setShowCcBcc] = useState(false);
 
-  // Keep "to" in sync when replyType changes (parent switches mode)
+  const toChipsRef  = useRef<string[]>(toChips);
+  const ccChipsRef  = useRef<string[]>(ccChips);
+  const bccChipsRef = useRef<string[]>(bccChips);
+
+  const setToChips = useCallback((next: string[]) => {
+    toChipsRef.current = next;
+    setToChipsState(next);
+  }, []);
+  const setCcChips = useCallback((next: string[]) => {
+    ccChipsRef.current = next;
+    setCcChipsState(next);
+  }, []);
+  const setBccChips = useCallback((next: string[]) => {
+    bccChipsRef.current = next;
+    setBccChipsState(next);
+  }, []);
+
+  // Reset "To" only when the agent crosses the forward / non-forward boundary.
+  // Toggling between reply_all and reply_sender keeps the chips intact, so the
+  // agent's edits aren't wiped by an incidental tab click.
+  const prevReplyTypeRef = useRef(replyType);
   useEffect(() => {
-    if (replyType !== "forward") setTo(ticket.senderEmail);
-    else setTo("");
-  }, [replyType, ticket.senderEmail]);
+    const wasForward = prevReplyTypeRef.current === "forward";
+    const isForward  = replyType === "forward";
+    if (wasForward !== isForward) {
+      setToChips(isForward ? [] : [ticket.senderEmail]);
+    }
+    prevReplyTypeRef.current = replyType;
+  }, [replyType, ticket.senderEmail, setToChips]);
 
   // Rich-text state
   const [bodyHtml, setBodyHtml] = useState("");
   const [bodyText, setBodyText] = useState("");
   const [editorContent, setEditorContent] = useState("");
+
+  // Editable quoted-message buffer — initialised from the parent-supplied
+  // QuoteData and reset whenever the quote source changes (e.g. user picks a
+  // different message via the conversation timeline). Sent verbatim to the
+  // server as the outgoing email's quoted trail.
+  const [editedQuotedHtml, setEditedQuotedHtml] = useState<string>(quote?.bodyHtml ?? "");
+  useEffect(() => {
+    setEditedQuotedHtml(quote?.bodyHtml ?? "");
+  }, [quote?.bodyHtml]);
 
   const handleEditorChange = useCallback((html: string, text: string) => {
     setBodyHtml(html);
@@ -164,17 +242,34 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
 
   const replyMutation = useMutation({
     mutationFn: async () => {
-      if (!to.trim()) throw new Error("Please enter a recipient email address.");
+      // Read from refs so any draft committed by the input's blur handler
+      // (which fires synchronously between mousedown and click) is included.
+      const toLatest  = toChipsRef.current;
+      const ccLatest  = ccChipsRef.current;
+      const bccLatest = bccChipsRef.current;
+
+      const toJoined = toLatest.join(", ");
+      if (!toJoined) throw new Error("Please add at least one recipient.");
+
+      const ccArr  = replyType === "reply_sender" ? [] : ccLatest;
+      const bccArr = bccLatest;
+
+      // For non-forward replies, send `to` only when the chips differ from the
+      // single original sender (so default replies match historical behaviour).
+      const toDifferentFromOriginal =
+        toLatest.length !== 1 ||
+        toLatest[0]!.trim().toLowerCase() !== ticket.senderEmail.toLowerCase();
 
       const { data: reply } = await axios.post(`/api/tickets/${ticketId}/replies`, {
         body: bodyText,
         bodyHtml,
         replyType,
         attachmentIds: stagedFiles.map((f) => f.id),
-        ...(replyType === "forward" && { forwardTo: to.trim() }),
-        ...(replyType !== "reply_sender" && cc.trim() && { cc: parseEmails(cc) }),
-        ...(bcc.trim() && { bcc: parseEmails(bcc) }),
-        ...(quote && { quotedHtml: quote.bodyHtml }),
+        ...(replyType === "forward" && { forwardTo: toJoined }),
+        ...(replyType !== "forward" && toDifferentFromOriginal && { to: toJoined }),
+        ...(ccArr.length  && { cc:  ccArr  }),
+        ...(bccArr.length && { bcc: bccArr }),
+        ...(quote && editedQuotedHtml && { quotedHtml: editedQuotedHtml }),
       });
       return reply;
     },
@@ -197,6 +292,63 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
     },
     onSuccess: (polished) => setEditorContent(`<p>${polished}</p>`),
   });
+
+  // ── Undo Send (Gmail-style) ────────────────────────────────────────────────
+  //
+  // When `replyUndoEnabled`, clicking Send doesn't immediately POST to the
+  // server — instead we hold the message in component state for `undoSeconds`,
+  // then fire the mutation. During the window the composer is replaced with a
+  // banner showing a countdown and an Undo button. Closing the tab cancels the
+  // send (matches the user's mental model: undo before delivery).
+  const undoEnabled = ticketSettings?.replyUndoEnabled ?? false;
+  const undoSeconds = Math.max(3, Math.min(30, ticketSettings?.replyUndoSeconds ?? 7));
+  const [pendingSecondsLeft, setPendingSecondsLeft] = useState<number | null>(null);
+  const sendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isPending = pendingSecondsLeft !== null;
+
+  const clearPendingTimers = useCallback(() => {
+    if (sendTimerRef.current) clearTimeout(sendTimerRef.current);
+    if (tickIntervalRef.current) clearInterval(tickIntervalRef.current);
+    sendTimerRef.current = null;
+    tickIntervalRef.current = null;
+  }, []);
+
+  // Cancel the in-flight send if the user navigates away mid-window.
+  // We do NOT auto-fire on unmount because the form state would be lost
+  // anyway, and silently sending would surprise users.
+  useEffect(() => () => clearPendingTimers(), [clearPendingTimers]);
+
+  function handleSendClick() {
+    if (toChipsRef.current.length === 0 || !bodyText.trim()) return;
+    if (!undoEnabled) {
+      replyMutation.mutate();
+      return;
+    }
+    // Begin undo window — countdown then fire the mutation.
+    setPendingSecondsLeft(undoSeconds);
+    tickIntervalRef.current = setInterval(() => {
+      setPendingSecondsLeft((s) => (s !== null && s > 1 ? s - 1 : s));
+    }, 1000);
+    sendTimerRef.current = setTimeout(() => {
+      clearPendingTimers();
+      setPendingSecondsLeft(null);
+      replyMutation.mutate();
+    }, undoSeconds * 1000);
+  }
+
+  function handleUndo() {
+    clearPendingTimers();
+    setPendingSecondsLeft(null);
+  }
+
+  // Skip the rest of the undo countdown and fire the send immediately —
+  // for agents who are sure and don't want to wait.
+  function handleSendNow() {
+    clearPendingTimers();
+    setPendingSecondsLeft(null);
+    replyMutation.mutate();
+  }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -234,11 +386,9 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
   function handleMentionSelect(email: string) {
     if (!email) return;
     setShowCcBcc(true);
-    setCc((prev) => {
-      const existing = prev.split(/[,;\s]+/).map((e) => e.trim().toLowerCase()).filter(Boolean);
-      if (existing.includes(email.toLowerCase())) return prev;
-      return prev.trim() ? `${prev.trim()}, ${email}` : email;
-    });
+    const prev = ccChipsRef.current;
+    if (prev.some((e) => e.toLowerCase() === email.toLowerCase())) return;
+    setCcChips([...prev, email]);
   }
 
   function handleMacroInsert(resolvedBody: string) {
@@ -249,34 +399,88 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
     editorRef.current?.insertAtCursor(html);
   }
 
-  const isBusy = replyMutation.isPending || polishMutation.isPending;
-  const canSubmit = bodyText.trim().length > 0 && !isBusy;
+  const isBusy = replyMutation.isPending || polishMutation.isPending || isPending;
+  const canSubmit = bodyText.trim().length > 0 && !isBusy && toChips.length > 0;
   const sendLabel = replyType === "forward" ? "Forward" : "Send Reply";
+
+  // Pending-undo banner — replaces the composer while the send is held.
+  if (isPending) {
+    return (
+      <div className="rounded-xl border border-primary/30 bg-primary/[0.04] dark:bg-primary/[0.08] shadow-sm overflow-hidden">
+        <div className="flex items-center gap-3 px-4 py-3.5">
+          <div className="relative h-8 w-8 shrink-0">
+            {/* Animated countdown ring */}
+            <svg className="h-8 w-8 -rotate-90" viewBox="0 0 32 32">
+              <circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" strokeWidth="2.5"
+                className="text-primary/15" />
+              <circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" strokeWidth="2.5"
+                strokeLinecap="round" strokeDasharray={2 * Math.PI * 13}
+                strokeDashoffset={2 * Math.PI * 13 * (1 - (pendingSecondsLeft ?? 0) / undoSeconds)}
+                className="text-primary transition-[stroke-dashoffset] duration-1000 ease-linear" />
+            </svg>
+            <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold tabular-nums text-primary">
+              {pendingSecondsLeft}
+            </span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">
+              {replyType === "forward" ? "Forward" : "Reply"} sent
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Holding for {pendingSecondsLeft}s — close the tab or click Undo to cancel.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleUndo}
+              className="h-8 gap-1.5 border-primary/40 text-primary hover:bg-primary/10 hover:text-primary"
+            >
+              <X className="h-3.5 w-3.5" />
+              Undo
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleSendNow}
+              className="h-8 gap-1.5 shadow-sm"
+              title="Skip the undo window and send immediately"
+            >
+              <Send className="h-3.5 w-3.5" />
+              Send now
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
       {/* Composer card */}
       <div className="rounded-xl border border-border/70 shadow-sm bg-background overflow-hidden">
 
-        {/* Addressing header */}
+        {/* Addressing header — Gmail-style chip recipients */}
         <div className="divide-y divide-border/60">
           {/* To row */}
-          <div className="flex items-center px-4 py-2 gap-3">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-7 shrink-0 select-none">
+          <div className="flex items-start px-4 py-2 gap-3">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-7 shrink-0 select-none mt-1.5">
               To
             </span>
-            <Input
-              type="email"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              placeholder={replyType === "forward" ? "Enter recipient email…" : ticket.senderEmail}
-              className="flex-1 border-0 shadow-none focus-visible:ring-0 h-8 px-1 text-sm bg-transparent"
+            <EmailChipsInput
+              value={toChips}
+              onChange={setToChips}
+              ariaLabel="Recipients"
+              placeholder={replyType === "forward" ? "Enter recipient email…" : "Add recipient"}
               disabled={isBusy}
+              containerClassName="flex-1"
             />
             <button
               type="button"
               onClick={() => setShowCcBcc((v) => !v)}
-              className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md transition-colors shrink-0
+              className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md transition-colors shrink-0 mt-1
                 ${showCcBcc
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -290,30 +494,30 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
           {/* CC row */}
           {showCcBcc && (
             <>
-              <div className="flex items-center px-4 py-2 gap-3">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-7 shrink-0 select-none">
+              <div className="flex items-start px-4 py-2 gap-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-7 shrink-0 select-none mt-1.5">
                   CC
                 </span>
-                <Input
-                  type="text"
-                  value={cc}
-                  onChange={(e) => setCc(e.target.value)}
-                  placeholder="Separate multiple emails with commas"
-                  className="flex-1 border-0 shadow-none focus-visible:ring-0 h-8 px-1 text-sm bg-transparent"
+                <EmailChipsInput
+                  value={ccChips}
+                  onChange={setCcChips}
+                  ariaLabel="CC recipients"
+                  placeholder="Add CC — press , or Enter"
                   disabled={isBusy}
+                  containerClassName="flex-1"
                 />
               </div>
-              <div className="flex items-center px-4 py-2 gap-3">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-7 shrink-0 select-none">
+              <div className="flex items-start px-4 py-2 gap-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-7 shrink-0 select-none mt-1.5">
                   BCC
                 </span>
-                <Input
-                  type="text"
-                  value={bcc}
-                  onChange={(e) => setBcc(e.target.value)}
-                  placeholder="Hidden recipients"
-                  className="flex-1 border-0 shadow-none focus-visible:ring-0 h-8 px-1 text-sm bg-transparent"
+                <EmailChipsInput
+                  value={bccChips}
+                  onChange={setBccChips}
+                  ariaLabel="BCC recipients"
+                  placeholder="Add hidden recipients"
                   disabled={isBusy}
+                  containerClassName="flex-1"
                 />
               </div>
             </>
@@ -339,7 +543,16 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
         </div>
 
         {/* Quoted mail trail */}
-        {quote && <QuotedTrail quote={quote} replyType={replyType} />}
+        {quote && (
+          <QuotedTrail
+            quote={quote}
+            replyType={replyType}
+            value={editedQuotedHtml}
+            onChange={setEditedQuotedHtml}
+            onReset={() => setEditedQuotedHtml(quote.bodyHtml)}
+            disabled={isBusy}
+          />
+        )}
 
         {/* Attachment chips */}
         {stagedFiles.length > 0 && (
@@ -443,7 +656,7 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
             type="button"
             size="sm"
             disabled={!canSubmit}
-            onClick={() => replyMutation.mutate()}
+            onClick={handleSendClick}
             className="gap-2 px-5 h-8 font-medium shadow-sm"
           >
             {replyMutation.isPending

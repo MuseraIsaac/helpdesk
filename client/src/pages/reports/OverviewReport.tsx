@@ -386,7 +386,7 @@ export default function OverviewReport() {
           <Skeleton className="h-44" />
         ) : (
           <ChartContainer
-            config={{ count: { label: "Open tickets", color: "hsl(var(--chart-1))" } }}
+            config={{ count: { label: "Open tickets", color: "var(--chart-1)" } }}
             className="h-44"
           >
             <BarChart data={aging ?? []} barSize={52}>

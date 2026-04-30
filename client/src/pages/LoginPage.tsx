@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { signIn, useSession } from "@/lib/auth-client";
 import { useBranding } from "@/lib/useBranding";
+import { useAuthProviders } from "@/lib/useAuthProviders";
 import { agentLoginVars } from "@/lib/portalColor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -90,6 +91,8 @@ export default function LoginPage() {
   const [serverError, setServerError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const { data: branding } = useBranding();
+  const { data: authProviders } = useAuthProviders();
+  const googleEnabled = authProviders?.google ?? false;
 
   const logoDataUrl      = branding?.logoDataUrl;
   const companyName      = branding?.companyName      || "Zentra";
@@ -250,30 +253,34 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Google sign-in */}
-          <Button
-            type="button"
-            variant="outline"
-            size="lg"
-            className="w-full h-11 font-medium gap-2 mb-4"
-            onClick={handleGoogleSignIn}
-            disabled={isSubmitting}
-          >
-            <GoogleIcon />
-            Continue with Google
-          </Button>
+          {/* Google sign-in — only shown when configured in Settings → Integrations */}
+          {googleEnabled && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                className="w-full h-11 font-medium gap-2 mb-4"
+                onClick={handleGoogleSignIn}
+                disabled={isSubmitting}
+              >
+                <GoogleIcon />
+                Continue with Google
+              </Button>
 
-          {/* Divider */}
-          <div className="relative my-5">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-border/60" />
-            </div>
-            <div className="relative flex justify-center">
-              <span className="bg-background px-3 text-[11px] uppercase tracking-widest text-muted-foreground/70">
-                or sign in with email
-              </span>
-            </div>
-          </div>
+              {/* Divider */}
+              <div className="relative my-5">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-border/60" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-background px-3 text-[11px] uppercase tracking-widest text-muted-foreground/70">
+                    or sign in with email
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Form */}
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">

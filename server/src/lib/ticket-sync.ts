@@ -46,6 +46,7 @@
 import prisma from "../db";
 import { computeSlaDeadlines } from "./sla";
 import { computeIncidentSlaDeadlines } from "./incident-sla";
+import { computeRequestSlaDueAt } from "./request-sla";
 import { generateTicketNumber } from "./ticket-number";
 import { logAudit } from "./audit";
 import { logIncidentEvent } from "./incident-events";
@@ -238,12 +239,13 @@ export async function createLinkedServiceRequest(
     const requestNumber = await generateTicketNumber("service_request", new Date());
     const requestStatus = ticketStatusToRequestStatus(ticket.status as TicketStatus);
 
+    const priority = (ticket.priority ?? "medium") as any;
     const sr = await prisma.serviceRequest.create({
       data: {
         requestNumber,
         title: ticket.subject,
         description: ticket.body,
-        priority: (ticket.priority ?? "medium") as any,
+        priority,
         status: requestStatus as any,
         requesterName: ticket.senderName,
         requesterEmail: ticket.senderEmail,
@@ -251,6 +253,7 @@ export async function createLinkedServiceRequest(
         assignedToId: ticket.assignedToId,
         teamId: ticket.teamId,
         createdById: actorId,
+        slaDueAt: computeRequestSlaDueAt(priority, new Date()),
       },
     });
 

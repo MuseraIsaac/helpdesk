@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import axios from "axios";
 import DateRangePicker from "@/components/DateRangePicker";
+import { periodToRange } from "@/lib/reports/utils";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
@@ -93,7 +94,15 @@ export default function ReportsLayout() {
         new Date(d).toLocaleDateString("en", { day: "numeric", month: "short", year: "numeric" });
       return `${fmt(customFrom)} – ${fmt(customTo)}`;
     }
-    const map: Record<string, string> = { "7": "Last 7 days", "30": "Last 30 days", "90": "Last 90 days" };
+    const map: Record<string, string> = {
+      today:        "Today",
+      yesterday:    "Yesterday",
+      "7":          "Last 7 days",
+      "30":         "Last 30 days",
+      "90":         "Last 90 days",
+      this_month:   "This month",
+      last_month:   "Last month",
+    };
     return map[period] ?? `Last ${period} days`;
   }
 
@@ -116,13 +125,26 @@ export default function ReportsLayout() {
   async function handleExport(format: "csv" | "xlsx") {
     setExporting(format);
     try {
+      // The export endpoint only understands numeric periods natively. For
+      // named presets (today / yesterday / this_month / last_month) resolve
+      // to a concrete from/to range on the client so the server receives
+      // dates instead of falling back to its default 30-day window.
+      const isNumeric = /^\d+$/.test(period);
+      let exportFrom = customFrom;
+      let exportTo   = customTo;
+      if (!isNumeric && period !== "custom") {
+        const range = periodToRange(period, customFrom, customTo);
+        exportFrom = range.from;
+        exportTo   = range.to;
+      }
+
       const resp = await axios.post(
         "/api/reports/export",
         {
           section: activeSection,
-          period,
-          from:    customFrom,
-          to:      customTo,
+          period:  isNumeric ? period : undefined,
+          from:    exportFrom,
+          to:      exportTo,
           format,
           filters: buildActiveFilters(),
         },
@@ -136,7 +158,14 @@ export default function ReportsLayout() {
       const a    = document.createElement("a");
       const sectionLabel = activeNav?.label ?? "Report";
       a.href     = url;
-      a.download = `${sectionLabel}_Report_${period === "custom" && customFrom ? `${customFrom}_to_${customTo}` : `Last_${period}_days`}.${ext}`;
+      const fileSuffix =
+        period === "custom" && customFrom ? `${customFrom}_to_${customTo}` :
+        period === "today"      ? "Today" :
+        period === "yesterday"  ? "Yesterday" :
+        period === "this_month" ? "This_Month" :
+        period === "last_month" ? "Last_Month" :
+        `Last_${period}_days`;
+      a.download = `${sectionLabel}_Report_${fileSuffix}.${ext}`;
       a.click();
       URL.revokeObjectURL(url);
     } finally {

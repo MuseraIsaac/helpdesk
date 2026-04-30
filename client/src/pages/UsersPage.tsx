@@ -21,7 +21,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import ErrorAlert from "@/components/ErrorAlert";
-import { Plus, Search, Users as UsersIcon, Shield, UserCog, Headphones, UserCircle } from "lucide-react";
+import { Plus, Search, Users as UsersIcon, Shield, UserCog, Headphones, UserCircle, AlertTriangle } from "lucide-react";
 import { Role } from "core/constants/role.ts";
 import UserForm from "./UserForm";
 import UsersTable from "./UsersTable";
@@ -155,9 +155,24 @@ export default function UsersPage() {
       <AlertDialog open={deletingUser !== null} onOpenChange={(open) => { if (!open) { setDeletingUser(null); deleteMutation.reset(); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete User</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete {deletingUser?.name}? This action cannot be undone.
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Delete this user?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 pt-1">
+                <p>
+                  You're about to delete{" "}
+                  <span className="font-medium text-foreground">{deletingUser?.name}</span>.
+                  This action <span className="font-medium text-destructive">cannot be undone</span>.
+                </p>
+                <ul className="text-xs space-y-1 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                  <li>• Their account is permanently disabled and active sessions are revoked.</li>
+                  <li>• Tickets currently assigned to them will be <span className="font-medium text-foreground">unassigned</span>.</li>
+                  <li>• Their replies, notes, and audit history will be retained for compliance.</li>
+                  <li>• They will be removed from all teams and groups.</li>
+                </ul>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteMutation.isError && (
@@ -169,7 +184,7 @@ export default function UsersPage() {
               onClick={() => deletingUser && deleteMutation.mutate(deletingUser.id)}
               className="bg-destructive text-white hover:bg-destructive/90"
             >
-              Confirm
+              Yes, delete user
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

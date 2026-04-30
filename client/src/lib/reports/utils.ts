@@ -68,12 +68,22 @@ export function periodToRange(
 
 function _periodToRange(period: PeriodOption | string): DateRangeParams {
   const now = new Date();
+  const today = now.toISOString().slice(0, 10);
 
+  if (period === "today") {
+    return { from: today, to: today };
+  }
+  if (period === "yesterday") {
+    const y = new Date(now);
+    y.setDate(y.getDate() - 1);
+    const yIso = y.toISOString().slice(0, 10);
+    return { from: yIso, to: yIso };
+  }
   if (period === "this_month") {
     const from = new Date(now.getFullYear(), now.getMonth(), 1);
     return {
       from: from.toISOString().slice(0, 10),
-      to:   now.toISOString().slice(0, 10),
+      to:   today,
     };
   }
   if (period === "last_month") {

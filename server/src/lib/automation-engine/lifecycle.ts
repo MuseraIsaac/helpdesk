@@ -30,6 +30,7 @@ import prisma from "../../db";
 import { AI_AGENT_ID } from "core/constants/ai-agent";
 import { generateTicketNumber } from "../ticket-number";
 import { generateChangeNumber } from "../change-number";
+import { computeRequestSlaDueAt } from "../request-sla";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -199,17 +200,20 @@ export async function handleCreateLinkedRequest(
     : `Auto-created from ticket #${snapshot.ticketNumber ?? snapshot.id}`;
 
   const requestNumber = await generateTicketNumber("incident"); // service requests share "ticket" series
+  const priority = (action.priority ?? "medium") as any;
+  const now = new Date();
 
   const request = await prisma.serviceRequest.create({
     data: {
       requestNumber,
       title,
       description,
-      priority: (action.priority ?? "medium") as any,
+      priority,
       status: "submitted" as any,
       requesterName:  snapshot.senderName,
       requesterEmail: snapshot.senderEmail,
       createdById: AI_AGENT_ID,
+      slaDueAt: computeRequestSlaDueAt(priority, now),
     },
   });
 

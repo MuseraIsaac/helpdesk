@@ -32,7 +32,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import {
   Palette, Type, BarChart2, TrendingUp, PieChart, Activity,
-  Plus, Trash2, Check, RotateCcw,
+  Plus, Trash2, Check, RotateCcw, Maximize2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type WidgetId, WIDGET_META, WIDGET_PRESENTATION } from "core/schemas/dashboard.ts";
@@ -98,6 +98,7 @@ export default function WidgetAppearanceEditor({
   const [titleOverride, setTitleOverride] = useState<string>(appearance?.titleOverride ?? "");
   const [thresholds,    setThresholds]    = useState<WidgetThreshold[]>(appearance?.thresholds ?? []);
   const [hexInput,      setHexInput]      = useState<string>(appearance?.accentColor ?? "");
+  const [scale,         setScale]         = useState<number>(appearance?.scale ?? 1);
 
   // Sync local state when appearance prop changes (e.g. different widget opened)
   useEffect(() => {
@@ -106,6 +107,7 @@ export default function WidgetAppearanceEditor({
     setTitleOverride(appearance?.titleOverride ?? "");
     setThresholds(appearance?.thresholds ?? []);
     setHexInput(appearance?.accentColor ?? "");
+    setScale(appearance?.scale ?? 1);
   }, [widgetId, appearance]);
 
   const meta         = WIDGET_META[widgetId];
@@ -141,6 +143,7 @@ export default function WidgetAppearanceEditor({
     if (chartType && chartType !== "default")             result.chartType     = chartType as WidgetAppearance["chartType"];
     if (titleOverride.trim())                             result.titleOverride = titleOverride.trim();
     if (thresholds.length > 0 && thresholds.every(t => t.metric)) result.thresholds = thresholds;
+    if (scale !== 1)                                      result.scale         = scale;
     onSave(result);
     onOpenChange(false);
   }
@@ -151,6 +154,7 @@ export default function WidgetAppearanceEditor({
     setTitleOverride("");
     setThresholds([]);
     setHexInput("");
+    setScale(1);
     onSave({});
     onOpenChange(false);
   }
@@ -198,6 +202,105 @@ export default function WidgetAppearanceEditor({
             />
             <p className="text-[10px] text-muted-foreground/70">
               Leave blank to use the default widget name.
+            </p>
+          </section>
+
+          <Separator />
+
+          {/* ── Content scale ─────────────────────────────────────────────── */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Content Size
+              </Label>
+              <div className="ml-auto flex items-baseline gap-1 tabular-nums">
+                <span className={cn(
+                  "text-sm font-semibold leading-none transition-colors",
+                  scale === 1 ? "text-muted-foreground" : "text-primary",
+                )}>
+                  {Math.round(scale * 100)}
+                </span>
+                <span className="text-[10px] text-muted-foreground/70">%</span>
+              </div>
+            </div>
+
+            {/* Range slider — 20% to 160%, 5% steps */}
+            <div className="relative pt-1.5 pb-1">
+              {/* Tick marks */}
+              <div className="absolute inset-x-0 top-0 flex justify-between px-[1px] pointer-events-none">
+                {[0.2, 0.5, 0.75, 1, 1.25, 1.6].map(t => (
+                  <span
+                    key={t}
+                    className={cn(
+                      "h-1.5 w-px rounded-full transition-colors",
+                      Math.abs(scale - t) < 0.025 ? "bg-primary" : "bg-border",
+                    )}
+                  />
+                ))}
+              </div>
+
+              <input
+                type="range"
+                min={0.2}
+                max={1.6}
+                step={0.05}
+                value={scale}
+                onChange={e => setScale(Number(e.target.value))}
+                className="widget-scale-slider w-full"
+                style={{
+                  // Fill the track up to current value with the primary colour
+                  // using a CSS gradient — leaves the rest in muted.
+                  background: `linear-gradient(to right,
+                    hsl(var(--primary)) 0%,
+                    hsl(var(--primary)) ${((scale - 0.2) / 1.4) * 100}%,
+                    hsl(var(--muted)) ${((scale - 0.2) / 1.4) * 100}%,
+                    hsl(var(--muted)) 100%)`,
+                }}
+              />
+
+              {/* Min / Default / Max labels */}
+              <div className="flex justify-between text-[9px] text-muted-foreground/60 mt-1.5 font-mono">
+                <span>20%</span>
+                <button
+                  type="button"
+                  onClick={() => setScale(1)}
+                  className={cn(
+                    "transition-colors hover:text-primary cursor-pointer",
+                    scale === 1 && "text-primary font-semibold",
+                  )}
+                  title="Reset to 100%"
+                >
+                  100%
+                </button>
+                <span>160%</span>
+              </div>
+            </div>
+
+            {/* Quick preset chips */}
+            <div className="flex flex-wrap gap-1">
+              {[0.25, 0.5, 0.75, 1, 1.15, 1.3, 1.5].map(v => {
+                const active = Math.abs(scale - v) < 0.025;
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setScale(v)}
+                    className={cn(
+                      "flex-1 min-w-[42px] h-7 px-2 rounded-md border text-[11px] font-semibold tabular-nums transition-all",
+                      active
+                        ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                        : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-muted/40",
+                    )}
+                  >
+                    {Math.round(v * 100)}%
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-[10px] text-muted-foreground/70">
+              Scales icons, numbers, and text together inside the widget body.
             </p>
           </section>
 

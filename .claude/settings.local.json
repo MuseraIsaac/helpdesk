@@ -176,7 +176,23 @@
       "PowerShell(Out-File *)",
       "PowerShell(bun run *)",
       "Bash(rm -f _db-ping.ts _mark-migrations.ts _status.txt)",
-      "PowerShell(Set-Location \"C:\\\\Users\\\\IMusera\\\\OneDrive - CopyCat Group\\\\Desktop\\\\ITSM\\\\helpdesk\\\\client\"; bunx tsc --noEmit 2>&1 | Select-Object -First 15; Write-Host \"EXIT=$LASTEXITCODE\")"
+      "PowerShell(Set-Location \"C:\\\\Users\\\\IMusera\\\\OneDrive - CopyCat Group\\\\Desktop\\\\ITSM\\\\helpdesk\\\\client\"; bunx tsc --noEmit 2>&1 | Select-Object -First 15; Write-Host \"EXIT=$LASTEXITCODE\")",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\IMusera\\\\OneDrive - CopyCat Group\\\\Desktop\\\\ITSM\\\\helpdesk\\\\client\"; bunx tsc --noEmit 2>&1 | Select-Object -First 30; Write-Host \"EXIT=$LASTEXITCODE\")",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\IMusera\\\\OneDrive - CopyCat Group\\\\Desktop\\\\ITSM\\\\helpdesk\\\\client\"; bunx tsc --noEmit 2>&1 | Select-String -Pattern \"dashboard|split\" | Select-Object -First 10; Write-Host \"EXIT=$LASTEXITCODE\")",
+      "PowerShell(bun *)",
+      "Bash(grep -n \"periodToParams\\\\|period.*&\\\\|period.*\\\\\\\\?\" client/src/pages/reports/OverviewReport.tsx)",
+      "Bash(xargs sed *)",
+      "Bash(grep -n \"submittedAt\" \"C:\\\\\\\\Users\\\\\\\\IMusera\\\\\\\\OneDrive - CopyCat Group\\\\\\\\Desktop\\\\\\\\ITSM\\\\\\\\helpdesk\\\\\\\\server\\\\\\\\src\\\\\\\\lib\\\\\\\\demo-data\\\\\\\\generator.ts\")",
+      "Bash(cd \"C:\\\\\\\\Users\\\\\\\\IMusera\\\\\\\\OneDrive - CopyCat Group\\\\\\\\Desktop\\\\\\\\ITSM\\\\\\\\helpdesk\\\\\\\\server\")",
+      "Bash(DATABASE_URL='postgresql://postgres:postgres@204.168.179.132:5432/helpdesk?schema=public' bunx prisma db execute --stdin <<< \"SELECT status, COUNT\\(*\\) FROM ticket GROUP BY status;\")",
+      "Bash(DATABASE_URL='postgresql://postgres:tf2Fo7MRJjqEXbgKL1tSfGbw@138.199.153.57:5432/helpdesk?schema=public' bunx prisma db execute --stdin <<< \"SELECT status, COUNT\\(*\\) FROM ticket GROUP BY status;\")",
+      "Bash(DATABASE_URL='postgresql://postgres:tf2Fo7MRJjqEXbgKL1tSfGbw@138.199.153.57:5432/helpdesk?schema=public' bun /tmp/sla-test.ts)",
+      "Bash(cd \"C:\\\\\\\\Users\\\\\\\\IMusera\\\\\\\\OneDrive - CopyCat Group\\\\\\\\Desktop\\\\\\\\ITSM\\\\\\\\helpdesk\\\\\\\\client\")",
+      "Bash(tail -20 \"C:\\\\\\\\Users\\\\\\\\IMusera\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Users-IMusera-OneDrive---CopyCat-Group-Desktop-ITSM-helpdesk\\\\\\\\4b7caafa-59c1-4464-9849-c3d45ae6d9b7\\\\\\\\tasks\\\\\\\\b85j4snmg.output\")",
+      "Bash(tail -15 \"C:\\\\\\\\Users\\\\\\\\IMusera\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Users-IMusera-OneDrive---CopyCat-Group-Desktop-ITSM-helpdesk\\\\\\\\4b7caafa-59c1-4464-9849-c3d45ae6d9b7\\\\\\\\tasks\\\\\\\\bnwe50mfk.output\")",
+      "PowerShell(Get-Process *)",
+      "Bash(grep -rn \"tickets/\\\\${\" \"C:\\\\Users\\\\IMusera\\\\OneDrive - CopyCat Group\\\\Desktop\\\\ITSM\\\\helpdesk\\\\client\\\\src\")",
+      "Bash(kill bk608pecl *)"
     ]
   }
 }

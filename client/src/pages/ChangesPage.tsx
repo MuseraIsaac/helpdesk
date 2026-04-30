@@ -295,7 +295,7 @@ export default function ChangesPage() {
                   </TableCell>
                   <TableCell className="font-mono text-xs font-medium text-muted-foreground">
                     <Link
-                      to={`/changes/${change.id}`}
+                      to={`/changes/${change.changeNumber}`}
                       className="hover:text-foreground transition-colors"
                       onClick={(e) => e.stopPropagation()}
                     >

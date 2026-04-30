@@ -27,7 +27,7 @@ import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
 import SettingsFormShell from "./SettingsFormShell";
 import { SettingsField, SettingsSwitchRow, SettingsGroup } from "./SettingsField";
 import EscalationRulesManager from "@/components/EscalationRulesManager";
-import { Upload, X, Sparkles, Monitor } from "lucide-react";
+import { Upload, X, Sparkles, Monitor, ShieldCheck, ShieldX, Check, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -875,6 +875,43 @@ export function TicketsSection() {
         </SettingsSwitchRow>
       </SettingsGroup>
 
+      <SettingsGroup title="AI assistance">
+        <SettingsSwitchRow
+          label="Show Summarize button on the ticket page"
+          description="Adds an AI-powered “Summarize conversation” button below the conversation thread on every ticket. Agents can click it to collapse the entire customer ↔ agent thread into a 2–4 sentence brief. Disable to hide the button organisation-wide."
+        >
+          <Controller name="summarizeEnabled" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Resolution requirements">
+        <p className="text-xs text-muted-foreground -mt-2 mb-3 leading-relaxed">
+          Force agents to fill specific ticket fields before they can mark a ticket{" "}
+          <span className="font-medium text-foreground">Resolved</span> or{" "}
+          <span className="font-medium text-foreground">Closed</span>. Useful for enforcing
+          good post-mortem hygiene — e.g. category, root cause, affected system. Custom fields
+          you've defined on the ticket entity are loaded automatically.
+        </p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <Controller name="resolveRequiredFields" control={control} render={({ field }) => (
+            <RequiredFieldsPicker
+              kind="resolve"
+              value={field.value ?? []}
+              onChange={field.onChange}
+            />
+          )} />
+          <Controller name="closeRequiredFields" control={control} render={({ field }) => (
+            <RequiredFieldsPicker
+              kind="close"
+              value={field.value ?? []}
+              onChange={field.onChange}
+            />
+          )} />
+        </div>
+      </SettingsGroup>
+
       <SettingsGroup title="Live Collaboration">
         <SettingsSwitchRow
           label="Presence indicators"
@@ -931,6 +968,30 @@ export function TicketsSection() {
               />
             </SettingsField>
           </>
+        )}
+        <SettingsSwitchRow
+          label="Undo Send"
+          description="Hold replies and forwards for a few seconds before delivering, giving agents a window to recall a message — same as Gmail's Undo Send."
+        >
+          <Controller name="replyUndoEnabled" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+        {watch("replyUndoEnabled") && (
+          <SettingsField
+            label="Undo window (seconds)"
+            description="How long the message is held before it actually goes out. 3–30 seconds."
+            htmlFor="replyUndoSeconds"
+          >
+            <Input
+              id="replyUndoSeconds"
+              type="number"
+              min={3}
+              max={30}
+              className="w-32"
+              {...register("replyUndoSeconds", { valueAsNumber: true })}
+            />
+          </SettingsField>
         )}
       </SettingsGroup>
     </SettingsFormShell>
@@ -2278,6 +2339,24 @@ export function IntegrationsSection() {
   const emailEnabled = watch("emailEnabled");
   const emailProvider = watch("emailProvider");
   const slackEnabled = watch("slackEnabled");
+  const inboundEmailMode = watch("inboundEmailMode");
+
+  const smtpHost = watch("smtpHost");
+  const smtpPort = watch("smtpPort");
+  const smtpUser = watch("smtpUser");
+  const smtpPassword = watch("smtpPassword");
+
+  const googleSignInEnabled = watch("googleSignInEnabled");
+
+  const testSmtp = useMutation({
+    mutationFn: async (payload: { smtpHost: string; smtpPort: number; smtpUser: string; smtpPassword: string }) => {
+      const { data } = await axios.post<{ ok: boolean; error?: string; code?: string | null; responseCode?: number | null; command?: string | null }>(
+        "/api/settings/integrations/test-smtp",
+        payload,
+      );
+      return data;
+    },
+  });
 
   if (isLoading) return <SectionLoading />;
 
@@ -2338,19 +2417,174 @@ export function IntegrationsSection() {
                 <SettingsField label="SMTP password">
                   <Input type="password" {...register("smtpPassword")} autoComplete="off" />
                 </SettingsField>
+                <SettingsField
+                  label="Test connection"
+                  description="Opens a connection to the SMTP server and authenticates if credentials are provided. No email is sent."
+                >
+                  <div className="space-y-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={testSmtp.isPending || !smtpHost}
+                      onClick={() => {
+                        testSmtp.reset();
+                        testSmtp.mutate({
+                          smtpHost: smtpHost ?? "",
+                          smtpPort: Number(smtpPort) || 587,
+                          smtpUser: smtpUser ?? "",
+                          smtpPassword: smtpPassword ?? "",
+                        });
+                      }}
+                    >
+                      {testSmtp.isPending ? "Testing..." : "Test SMTP connection"}
+                    </Button>
+                    {testSmtp.data?.ok && (
+                      <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+                        <CheckCircle2 className="h-4 w-4 shrink-0" />
+                        <span>Connection succeeded.</span>
+                      </div>
+                    )}
+                    {testSmtp.data && !testSmtp.data.ok && (
+                      <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                        <div className="flex items-start gap-2">
+                          <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <div className="font-medium">Connection failed</div>
+                            <div className="break-words font-mono">{testSmtp.data.error || "Unknown error"}</div>
+                            {(testSmtp.data.code || testSmtp.data.responseCode || testSmtp.data.command) && (
+                              <div className="text-muted-foreground">
+                                {testSmtp.data.code && <>code: <span className="font-mono">{testSmtp.data.code}</span> </>}
+                                {testSmtp.data.responseCode != null && <>response: <span className="font-mono">{testSmtp.data.responseCode}</span> </>}
+                                {testSmtp.data.command && <>command: <span className="font-mono">{testSmtp.data.command}</span></>}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {testSmtp.error && (
+                      <ErrorAlert error={testSmtp.error} fallback="Failed to test SMTP connection" />
+                    )}
+                  </div>
+                </SettingsField>
               </>
             )}
           </>
         )}
       </SettingsGroup>
 
-      <SettingsGroup title="Inbound Email Webhook">
-        <SettingsField
-          label="Webhook secret"
-          description="Secret token that SendGrid (or your inbound email provider) must send in the X-Webhook-Secret header. Stored securely."
+      <SettingsGroup title="Google Sign-In">
+        <div className="rounded-md border border-border/60 bg-muted/30 px-4 py-3 text-xs text-muted-foreground space-y-1.5">
+          <div className="font-medium text-foreground">Setup steps</div>
+          <ol className="list-decimal list-inside space-y-0.5">
+            <li>Open <a className="text-primary hover:underline" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console → Credentials</a> and create an <span className="font-mono">OAuth 2.0 Client ID</span> of type <span className="font-mono">Web application</span>.</li>
+            <li>Under <span className="font-medium">Authorised JavaScript origins</span>, add this app's origin (e.g. <span className="font-mono">https://helpdesk.example.com</span>).</li>
+            <li>Under <span className="font-medium">Authorised redirect URIs</span>, add <span className="font-mono">{`${typeof window !== "undefined" ? window.location.origin : "<your-origin>"}/api/auth/callback/google`}</span>.</li>
+            <li>Copy the resulting Client ID and Client secret into the fields below, toggle <span className="font-medium">Enable Google sign-in</span>, then save.</li>
+          </ol>
+          <p className="pt-1">These credentials are <span className="font-medium">separate</span> from the Google Meet bridge — they use the basic profile/email scopes, not the Calendar API.</p>
+        </div>
+
+        <SettingsSwitchRow
+          label="Enable Google sign-in"
+          description="Show the 'Continue with Google' button on the agent and portal login pages. Requires both Client ID and Client secret to be filled."
         >
-          <Input type="password" {...register("webhookSecret")} autoComplete="off" placeholder="Set a strong random secret" />
+          <Controller name="googleSignInEnabled" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+
+        {googleSignInEnabled && (
+          <>
+            <SettingsField
+              label="Client ID"
+              description="From Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client ID."
+              htmlFor="googleSignInClientId"
+            >
+              <Input
+                id="googleSignInClientId"
+                placeholder="xxxxxxxxxxxx.apps.googleusercontent.com"
+                {...register("googleSignInClientId")}
+                autoComplete="off"
+              />
+            </SettingsField>
+            <SettingsField label="Client secret" description="Stored securely. Displayed as ••••••••. Leave the masked value to keep the existing secret.">
+              <Input
+                type="password"
+                {...register("googleSignInClientSecret")}
+                autoComplete="off"
+              />
+            </SettingsField>
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              When this section overrides the <span className="font-mono">GOOGLE_CLIENT_ID</span> / <span className="font-mono">GOOGLE_CLIENT_SECRET</span> environment variables, the env values are ignored. Toggle this off (and clear both fields) to fall back to env-based config.
+            </div>
+          </>
+        )}
+      </SettingsGroup>
+
+      <SettingsGroup title="Inbound Email">
+        <SettingsField
+          label="Inbound transport"
+          description="How customer emails arrive at the helpdesk. Webhook = SendGrid Inbound Parse posts to /api/webhooks/inbound-email. IMAP = poll a Gmail/Outlook mailbox every minute. Both = run in parallel; the system de-duplicates by Message-ID so an email never produces two tickets."
+        >
+          <Controller name="inboundEmailMode" control={control} render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="disabled">Disabled</SelectItem>
+                <SelectItem value="webhook">Webhook (SendGrid Inbound Parse)</SelectItem>
+                <SelectItem value="imap">IMAP poller (Gmail / Outlook)</SelectItem>
+                <SelectItem value="both">Both (webhook + IMAP)</SelectItem>
+              </SelectContent>
+            </Select>
+          )} />
         </SettingsField>
+
+        {(inboundEmailMode === "webhook" || inboundEmailMode === "both") && (
+          <SettingsField
+            label="Webhook secret"
+            description="Secret token that SendGrid (or your inbound email provider) must send in the X-Webhook-Secret header. Stored securely."
+          >
+            <Input type="password" {...register("webhookSecret")} autoComplete="off" placeholder="Set a strong random secret" />
+          </SettingsField>
+        )}
+
+        {(inboundEmailMode === "imap" || inboundEmailMode === "both") && (
+          <>
+            <SettingsField label="IMAP host" description="e.g. imap.gmail.com for Gmail, outlook.office365.com for Microsoft 365." htmlFor="imapHost">
+              <Input id="imapHost" placeholder="imap.gmail.com" {...register("imapHost")} />
+            </SettingsField>
+            <SettingsField label="IMAP port" htmlFor="imapPort">
+              <Input id="imapPort" type="number" className="w-24" {...register("imapPort", { valueAsNumber: true })} />
+            </SettingsField>
+            <SettingsField label="Use TLS (recommended)" description="Standard for port 993. Disable only for STARTTLS on 143.">
+              <Controller name="imapUseTls" control={control} render={({ field }) => (
+                <Switch checked={field.value} onCheckedChange={field.onChange} />
+              )} />
+            </SettingsField>
+            <SettingsField label="IMAP username" description="Full email address — e.g. support@yourdomain.com." htmlFor="imapUser">
+              <Input id="imapUser" type="email" placeholder="support@yourdomain.com" {...register("imapUser")} />
+            </SettingsField>
+            <SettingsField
+              label="IMAP password"
+              description="Gmail accounts require a 16-character app password from myaccount.google.com/apppasswords. Stored securely."
+            >
+              <Input type="password" {...register("imapPassword")} autoComplete="off" placeholder="abcd efgh ijkl mnop" />
+            </SettingsField>
+            <SettingsField label="Folder" description="Mailbox to watch. Gmail's primary inbox is INBOX." htmlFor="imapFolder">
+              <Input id="imapFolder" placeholder="INBOX" {...register("imapFolder")} />
+            </SettingsField>
+            <SettingsField label="Poll interval (seconds)" description="How often to check for new mail. Minimum 60." htmlFor="imapPollSeconds">
+              <Input id="imapPollSeconds" type="number" className="w-24" {...register("imapPollSeconds", { valueAsNumber: true })} />
+            </SettingsField>
+            <SettingsField label="Mark messages as read after ingest" description="Recommended — prevents the same email from being ingested twice. Disable only for testing.">
+              <Controller name="imapMarkSeen" control={control} render={({ field }) => (
+                <Switch checked={field.value} onCheckedChange={field.onChange} />
+              )} />
+            </SettingsField>
+          </>
+        )}
       </SettingsGroup>
 
       <SettingsGroup title="AI (OpenAI)">
@@ -4113,5 +4347,172 @@ export function TrashSection() {
         </p>
       </div>
     </SettingsFormShell>
+  );
+}
+
+// ── Resolution requirements picker ───────────────────────────────────────────
+//
+// One card per transition (Resolve / Close). Each card lists every available
+// field as a click-toggleable chip; chips light up when required. Custom
+// fields defined on the ticket entity are loaded from the API and listed in
+// their own sub-section so admins can require them without typing keys.
+
+interface RequiredFieldsPickerProps {
+  kind: "resolve" | "close";
+  value: string[];
+  onChange: (next: string[]) => void;
+}
+
+interface CustomFieldRow {
+  id:    number;
+  key:   string;
+  label: string;
+}
+
+const BUILTIN_TICKET_FIELDS: { key: string; label: string; hint: string }[] = [
+  { key: "priority",       label: "Priority",       hint: "Low / Medium / High / Urgent" },
+  { key: "severity",       label: "Severity",       hint: "Sev1–Sev5 impact rating" },
+  { key: "impact",         label: "Impact",         hint: "Scope of affected users" },
+  { key: "urgency",        label: "Urgency",        hint: "Speed required to resolve" },
+  { key: "category",       label: "Category",       hint: "Top-level classification" },
+  { key: "ticketType",     label: "Ticket type",    hint: "Incident, request, problem, etc." },
+  { key: "assignedToId",   label: "Assigned agent", hint: "Ticket must have an owner" },
+  { key: "teamId",         label: "Team",           hint: "Ticket must be routed to a team" },
+  { key: "affectedSystem", label: "Affected system",hint: "Free-text system identifier" },
+];
+
+function RequiredFieldsPicker({ kind, value, onChange }: RequiredFieldsPickerProps) {
+  const selected = useMemo(() => new Set(value), [value]);
+
+  const { data: customFields, isLoading } = useQuery({
+    queryKey: ["dict", "custom-fields", "ticket"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ fields: CustomFieldRow[] }>(
+        "/api/custom-fields?entityType=ticket",
+      );
+      return data.fields;
+    },
+    staleTime: 5 * 60_000,
+    gcTime:    30 * 60_000,
+  });
+
+  function toggle(key: string) {
+    const next = new Set(selected);
+    next.has(key) ? next.delete(key) : next.add(key);
+    onChange(Array.from(next));
+  }
+
+  function clearAll() { onChange([]); }
+
+  const accent = kind === "resolve"
+    ? { tint: "emerald", icon: ShieldCheck, label: "Required to resolve" }
+    : { tint: "rose",    icon: ShieldX,     label: "Required to close" };
+
+  const tintMap = {
+    emerald: { ring: "ring-emerald-500/30", bg: "bg-emerald-500/5", header: "bg-emerald-500/10 border-emerald-500/20", icon: "text-emerald-600 dark:text-emerald-400", chipOn: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25" },
+    rose:    { ring: "ring-rose-500/30",    bg: "bg-rose-500/5",    header: "bg-rose-500/10 border-rose-500/20",       icon: "text-rose-600 dark:text-rose-400",       chipOn: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/40 hover:bg-rose-500/25" },
+  } as const;
+  const c = tintMap[accent.tint as "emerald" | "rose"];
+  const Icon = accent.icon;
+
+  const cfList = customFields ?? [];
+
+  return (
+    <div className={`rounded-xl border ${c.bg} overflow-hidden`}>
+      {/* Header */}
+      <div className={`flex items-center justify-between gap-2 px-4 py-2.5 border-b ${c.header}`}>
+        <div className="flex items-center gap-2">
+          <Icon className={`h-4 w-4 ${c.icon}`} />
+          <span className="text-sm font-semibold">{accent.label}</span>
+          <span className="text-[11px] text-muted-foreground">
+            · {selected.size} field{selected.size === 1 ? "" : "s"}
+          </span>
+        </div>
+        {selected.size > 0 && (
+          <button
+            type="button"
+            onClick={clearAll}
+            className="text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      <div className="p-3 space-y-3">
+        {/* Built-in fields */}
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
+            Built-in
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {BUILTIN_TICKET_FIELDS.map((f) => {
+              const on = selected.has(f.key);
+              return (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => toggle(f.key)}
+                  title={f.hint}
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium border transition-all ${
+                    on
+                      ? c.chipOn
+                      : "bg-background text-muted-foreground border-border hover:border-foreground/30 hover:text-foreground"
+                  }`}
+                >
+                  {on ? <Check className="h-3 w-3" /> : <Plus className="h-3 w-3 opacity-50" />}
+                  {f.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Custom fields */}
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+            Custom Fields
+            {!isLoading && cfList.length > 0 && (
+              <span className="rounded-full bg-muted text-muted-foreground px-1.5 py-0.5 text-[9px] font-semibold">
+                {cfList.length}
+              </span>
+            )}
+          </p>
+          {isLoading ? (
+            <p className="text-[11px] text-muted-foreground italic">Loading…</p>
+          ) : cfList.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground italic">
+              No custom fields defined for tickets yet.{" "}
+              <Link to="/admin/ticket-types" className="text-primary hover:underline">
+                Add some →
+              </Link>
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {cfList.map((cf) => {
+                const key = `cf.${cf.key}`;
+                const on  = selected.has(key);
+                return (
+                  <button
+                    key={cf.id}
+                    type="button"
+                    onClick={() => toggle(key)}
+                    title={`Custom field "${cf.label}" (${cf.key})`}
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium border transition-all ${
+                      on
+                        ? c.chipOn
+                        : "bg-background text-muted-foreground border-border hover:border-foreground/30 hover:text-foreground"
+                    }`}
+                  >
+                    {on ? <Check className="h-3 w-3" /> : <Plus className="h-3 w-3 opacity-50" />}
+                    {cf.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

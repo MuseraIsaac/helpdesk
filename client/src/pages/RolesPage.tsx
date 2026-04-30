@@ -354,6 +354,7 @@ function RoleEditor({ open, onClose, role, duplicateFrom }: RoleEditorProps) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["roles"] });
       void queryClient.invalidateQueries({ queryKey: ["roles-assignable"] });
+      void queryClient.invalidateQueries({ queryKey: ["dict", "roles", "assignable"] });
       onClose();
     },
   });

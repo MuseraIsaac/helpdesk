@@ -5,9 +5,11 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { toNodeHandler } from "better-auth/node";
-import { auth } from "./lib/auth";
+import { auth, reloadAuth } from "./lib/auth";
 import { requireAuth } from "./middleware/require-auth";
+import { resolveIdent } from "./middleware/resolve-ident";
 import { logSystemAudit } from "./lib/audit";
+import prisma from "./db";
 import usersRouter from "./routes/users";
 import ticketsRouter from "./routes/tickets";
 import agentsRouter from "./routes/agents";
@@ -233,6 +235,32 @@ app.use("/api/webhooks/outbound", outboundWebhooksRouter);
 app.use("/api/routing", routingRouter);
 app.use("/api/duty-plans", dutyPlansRouter);
 app.use("/api/approvals", approvalsRouter);
+// ── Human-readable entity URL resolvers ─────────────────────────────────────
+// Mounted BEFORE each entity's routers so /api/<entity>/<NUMBER>/* gets
+// rewritten to /api/<entity>/<numeric-id>/* before any handler runs. Lets
+// /api/tickets/TKT-456 and /api/tickets/49 both work transparently.
+app.use("/api/tickets", resolveIdent(async (n) =>
+  (await prisma.ticket.findFirst({ where: { ticketNumber: n }, select: { id: true } }))?.id ?? null,
+));
+app.use("/api/incidents", resolveIdent(async (n) =>
+  (await prisma.incident.findFirst({ where: { incidentNumber: n }, select: { id: true } }))?.id ?? null,
+));
+app.use("/api/requests", resolveIdent(async (n) =>
+  (await prisma.serviceRequest.findFirst({ where: { requestNumber: n }, select: { id: true } }))?.id ?? null,
+));
+app.use("/api/problems", resolveIdent(async (n) =>
+  (await prisma.problem.findFirst({ where: { problemNumber: n }, select: { id: true } }))?.id ?? null,
+));
+app.use("/api/changes", resolveIdent(async (n) =>
+  (await prisma.change.findFirst({ where: { changeNumber: n }, select: { id: true } }))?.id ?? null,
+));
+app.use("/api/assets", resolveIdent(async (n) =>
+  (await prisma.asset.findFirst({ where: { assetNumber: n }, select: { id: true } }))?.id ?? null,
+));
+app.use("/api/cmdb", resolveIdent(async (n) =>
+  (await prisma.configItem.findFirst({ where: { ciNumber: n }, select: { id: true } }))?.id ?? null,
+));
+
 app.use("/api/incidents", incidentsRouter);
 app.use("/api/incidents/:incidentId/attachments", incidentAttachmentsRouter);
 app.use("/api/incidents/:incidentId/presence", incidentPresenceRouter);
@@ -361,6 +389,16 @@ async function boot() {
     await loadRoles();
   } catch (err) {
     console.error("[role-cache] Failed to load roles at boot:", err);
+    Sentry.captureException(err);
+  }
+
+  // Apply Google Sign-In credentials from the integrations settings (falling
+  // back to env vars when not yet configured via UI). Failure leaves the
+  // env-only build in place so the app still boots.
+  try {
+    await reloadAuth();
+  } catch (err) {
+    console.error("[auth] Failed to load Google Sign-In settings at boot:", err);
     Sentry.captureException(err);
   }
 

@@ -35,6 +35,7 @@ import type {
   InsightsChangeRisk,
   InsightsServiceHealth,
   InsightsTickets,
+  InsightsCiImpact,
 } from "./types";
 
 // ── Overview ──────────────────────────────────────────────────────────────────
@@ -217,5 +218,10 @@ export async function fetchInsightsServiceHealth(periodOrQs: string): Promise<In
 
 export async function fetchInsightsTickets(periodOrQs: string): Promise<InsightsTickets> {
   const { data } = await axios.get<InsightsTickets>(`/api/reports/insights/tickets?${insightsQS(periodOrQs)}`);
+  return data;
+}
+
+export async function fetchInsightsCiImpact(periodOrQs: string): Promise<InsightsCiImpact> {
+  const { data } = await axios.get<InsightsCiImpact>(`/api/reports/insights/ci-impact?${insightsQS(periodOrQs)}`);
   return data;
 }

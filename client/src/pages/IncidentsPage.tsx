@@ -287,7 +287,7 @@ export default function IncidentsPage() {
                   </TableCell>
                   <TableCell className="font-mono text-xs font-medium text-muted-foreground">
                     <Link
-                      to={`/incidents/${incident.id}`}
+                      to={`/incidents/${incident.incidentNumber}`}
                       className="hover:text-foreground transition-colors"
                     >
                       {incident.incidentNumber}
@@ -295,7 +295,7 @@ export default function IncidentsPage() {
                   </TableCell>
                   <TableCell>
                     <Link
-                      to={`/incidents/${incident.id}`}
+                      to={`/incidents/${incident.incidentNumber}`}
                       className="flex items-center gap-2 hover:text-foreground/80 transition-colors"
                     >
                       {incident.isMajor && (
@@ -330,7 +330,7 @@ export default function IncidentsPage() {
                     {formatRelative(incident.createdAt)}
                   </TableCell>
                   <TableCell>
-                    <Link to={`/incidents/${incident.id}`}>
+                    <Link to={`/incidents/${incident.incidentNumber}`}>
                       <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                     </Link>
                   </TableCell>

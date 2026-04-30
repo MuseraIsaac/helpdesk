@@ -176,6 +176,93 @@ router.patch("/:id/global-view", requireAuth, requireAdmin, async (req, res) => 
   res.json({ user });
 });
 
+// ── Team membership for a user ────────────────────────────────────────────────
+//
+// GET /api/users/:id/teams      → list the teams this user belongs to
+// PUT /api/users/:id/teams      → replace the user's team membership atomically
+//
+// These mirror /api/teams/:id/members but flipped — used when the user editor
+// wants to assign a person to N teams in one round-trip.
+
+router.get("/:id/teams", requireAuth, requireAdmin, async (req, res) => {
+  const userId = req.params.id as string;
+  const exists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+  if (!exists) { res.status(404).json({ error: "User not found" }); return; }
+
+  const memberships = await prisma.teamMember.findMany({
+    where: { userId },
+    include: { team: { select: { id: true, name: true, color: true } } },
+    orderBy: { team: { name: "asc" } },
+  });
+  res.json({ teams: memberships.map((m) => m.team) });
+});
+
+router.put("/:id/teams", requireAuth, requireAdmin, async (req, res) => {
+  const userId = req.params.id as string;
+
+  const body = req.body as { teamIds?: unknown };
+  const raw = Array.isArray(body?.teamIds) ? body.teamIds : null;
+  if (!raw) { res.status(400).json({ error: "teamIds must be an array" }); return; }
+
+  const teamIds = raw
+    .map((v) => Number(v))
+    .filter((n) => Number.isInteger(n) && n > 0);
+
+  const target = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, name: true, role: true, deletedAt: true },
+  });
+  if (!target || target.deletedAt) { res.status(404).json({ error: "User not found" }); return; }
+  if (target.role === Role.customer) {
+    res.status(400).json({ error: "Customers cannot be assigned to teams" });
+    return;
+  }
+
+  if (teamIds.length > 0) {
+    const found = await prisma.team.findMany({
+      where: { id: { in: teamIds } },
+      select: { id: true },
+    });
+    if (found.length !== teamIds.length) {
+      res.status(400).json({ error: "One or more team IDs are invalid" });
+      return;
+    }
+  }
+
+  const current = await prisma.teamMember.findMany({ where: { userId }, select: { teamId: true } });
+  const currentIds = new Set(current.map((m) => m.teamId));
+  const nextIds    = new Set(teamIds);
+  const added   = teamIds.filter((id) => !currentIds.has(id));
+  const removed = [...currentIds].filter((id) => !nextIds.has(id));
+
+  await prisma.$transaction([
+    prisma.teamMember.deleteMany({ where: { userId } }),
+    ...(teamIds.length > 0
+      ? [prisma.teamMember.createMany({ data: teamIds.map((teamId) => ({ teamId, userId })) })]
+      : []),
+  ]);
+
+  for (const teamId of added) {
+    void logSystemAudit(req.user.id, "team.member_added", {
+      entityType: "team", entityId: teamId, entityNumber: `TEAM-${teamId}`, entityTitle: target.name,
+      memberId: userId,
+    });
+  }
+  for (const teamId of removed) {
+    void logSystemAudit(req.user.id, "team.member_removed", {
+      entityType: "team", entityId: teamId, entityNumber: `TEAM-${teamId}`, entityTitle: target.name,
+      memberId: userId,
+    });
+  }
+
+  const memberships = await prisma.teamMember.findMany({
+    where: { userId },
+    include: { team: { select: { id: true, name: true, color: true } } },
+    orderBy: { team: { name: "asc" } },
+  });
+  res.json({ teams: memberships.map((m) => m.team) });
+});
+
 router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   const id = req.params.id as string;
 

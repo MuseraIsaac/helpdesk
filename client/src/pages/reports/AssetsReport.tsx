@@ -379,7 +379,7 @@ export default function AssetsReport() {
           accentColor="bg-violet-500"
         >
           <ChartContainer
-            config={{ count: { label: "Assets", color: "hsl(var(--chart-2))" } }}
+            config={{ count: { label: "Assets", color: "var(--chart-2)" } }}
             className="h-60"
           >
             <BarChart data={typeChartData} layout="vertical" barSize={13} margin={{ left: 8 }}>
@@ -408,8 +408,8 @@ export default function AssetsReport() {
         >
           <ChartContainer
             config={{
-              count:  { label: "Total",  color: "hsl(var(--chart-1))" },
-              active: { label: "Active", color: "hsl(var(--chart-3))" },
+              count:  { label: "Total",  color: "var(--chart-1)" },
+              active: { label: "Active", color: "var(--chart-3)" },
             }}
             className="h-64"
           >
@@ -435,7 +435,7 @@ export default function AssetsReport() {
           action={<MapPin className="h-4 w-4 text-muted-foreground" />}
         >
           <ChartContainer
-            config={{ count: { label: "Assets", color: "hsl(var(--chart-4))" } }}
+            config={{ count: { label: "Assets", color: "var(--chart-4)" } }}
             className="h-64"
           >
             <BarChart data={locationChartData} layout="vertical" barSize={12} margin={{ left: 8 }}>
@@ -462,14 +462,14 @@ export default function AssetsReport() {
           accentColor="bg-emerald-500"
         >
           <ChartContainer
-            config={{ count: { label: "Registered", color: "hsl(var(--chart-3))" } }}
+            config={{ count: { label: "Registered", color: "var(--chart-3)" } }}
             className="h-44"
           >
             <AreaChart data={data.createdTrend}>
               <defs>
                 <linearGradient id="assetGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="hsl(var(--chart-3))" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="hsl(var(--chart-3))" stopOpacity={0} />
+                  <stop offset="5%"  stopColor="var(--chart-3)" stopOpacity={0.15} />
+                  <stop offset="95%" stopColor="var(--chart-3)" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid vertical={false} strokeDasharray="3 3" />
@@ -498,16 +498,16 @@ export default function AssetsReport() {
         >
           <ChartContainer
             config={{
-              retired:  { label: "Retired",  color: "hsl(var(--chart-5))" },
-              disposed: { label: "Disposed", color: "hsl(var(--chart-1))" },
+              retired:  { label: "Retired",  color: "var(--chart-5)" },
+              disposed: { label: "Disposed", color: "var(--chart-1)" },
             }}
             className="h-44"
           >
             <AreaChart data={data.retiredTrend}>
               <defs>
                 <linearGradient id="retiredGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="hsl(var(--chart-5))" stopOpacity={0.12} />
-                  <stop offset="95%" stopColor="hsl(var(--chart-5))" stopOpacity={0} />
+                  <stop offset="5%"  stopColor="var(--chart-5)" stopOpacity={0.12} />
+                  <stop offset="95%" stopColor="var(--chart-5)" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid vertical={false} strokeDasharray="3 3" />

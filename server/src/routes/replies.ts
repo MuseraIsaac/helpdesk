@@ -11,6 +11,7 @@ import { sendEmailJob } from "../lib/send-email";
 import { logAudit } from "../lib/audit";
 import { notifyMentions, extractMentionedEmails } from "../lib/mentions";
 import { fireTicketEvent } from "../lib/event-bus";
+import { getSection } from "../lib/settings";
 
 const router = Router({ mergeParams: true });
 
@@ -87,7 +88,7 @@ router.post("/", requireAuth, async (req, res) => {
     }
   }
 
-  const { cc, bcc, replyType = "reply_all", forwardTo, quotedBody, quotedHtml } = data;
+  const { cc, bcc, replyType = "reply_all", forwardTo, to: toOverride, quotedBody, quotedHtml } = data;
 
   if (replyType === "forward" && !forwardTo) {
     res.status(400).json({ error: "forwardTo is required for forward replies" });
@@ -101,6 +102,12 @@ router.post("/", requireAuth, async (req, res) => {
   const ccStr  = cc?.join(", ")  || null;
   const bccStr = bcc?.join(", ") || null;
 
+  // Capture the To override (if any) on the reply itself so the conversation
+  // timeline can show the *actual* recipient instead of always falling back to
+  // ticket.senderEmail. Only stored for non-forward replies; forwards use the
+  // existing forwardTo column.
+  const toForRow = replyType !== "forward" ? (toOverride?.trim() || null) : null;
+
   const reply = await prisma.reply.create({
     data: {
       body: plainBody,
@@ -111,6 +118,7 @@ router.post("/", requireAuth, async (req, res) => {
       channel: "email",
       channelMeta: { agentId: req.user.id, via: replyType === "forward" ? "agent_forward" : "agent_reply" },
       replyType,
+      to: toForRow,
       cc: ccStr,
       bcc: bccStr,
       forwardTo: replyType === "forward" ? forwardTo ?? null : null,
@@ -144,9 +152,23 @@ router.post("/", requireAuth, async (req, res) => {
     },
   });
 
+  // Recipient resolution:
+  //   forward       → forwardTo (validated above)
+  //   reply_all/sender → agent override if provided, else ticket.senderEmail
+  const emailTo = replyType === "forward"
+    ? forwardTo!
+    : (toOverride?.trim() || ticket.senderEmail);
+  const recipientWasOverridden =
+    replyType !== "forward" &&
+    !!toOverride &&
+    toOverride.trim().toLowerCase() !== ticket.senderEmail.toLowerCase();
+
   await logAudit(ticketId, req.user.id, "reply.created", {
     replyId: reply.id,
     senderType: "agent",
+    ...(recipientWasOverridden && {
+      recipientOverride: { from: ticket.senderEmail, to: emailTo },
+    }),
   });
 
   // Notify @mentioned users (fire-and-forget)
@@ -172,8 +194,6 @@ router.post("/", requireAuth, async (req, res) => {
   const references = allPriorIds.length
     ? allPriorIds.map((id) => `<${id}>`).join(" ")
     : undefined;
-
-  const emailTo = replyType === "forward" ? forwardTo! : ticket.senderEmail;
   const emailSubject = replyType === "forward"
     ? `Fwd: ${ticket.subject}`
     : `Re: ${ticket.subject}`;
@@ -239,6 +259,15 @@ router.post("/summarize", requireAuth, async (req, res) => {
   const ticketId = parseId(req.params.ticketId);
   if (!ticketId) {
     res.status(400).json({ error: "Invalid ticket ID" });
+    return;
+  }
+
+  // Honor the admin's "summarizeEnabled" toggle. The client hides the
+  // button when this is off, but enforce server-side too so a custom
+  // client / curl can't bypass the policy.
+  const ticketsCfg = await getSection("tickets");
+  if (ticketsCfg.summarizeEnabled === false) {
+    res.status(403).json({ error: "Summarize is disabled by your administrator" });
     return;
   }
 

@@ -171,7 +171,7 @@ const teamQueueDepth: MetricDefinition = {
          FROM queue q JOIN ticket t ON t."queueId" = q.id
          WHERE t.status IN ('open','in_progress')
          GROUP BY q.id, q.name
-         ORDER BY (open + in_progress) DESC LIMIT $1`,
+         ORDER BY COUNT(*) DESC LIMIT $1`,
         limit,
       );
       return {

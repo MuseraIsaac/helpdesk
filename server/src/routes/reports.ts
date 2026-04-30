@@ -48,6 +48,32 @@ function resolveDateWindow(query: Record<string, unknown>, defaultDays = 30): { 
     until.setHours(23, 59, 59, 999);
     return { since, until };
   }
+
+  // Named presets — fall through to the numeric-period path if unrecognised.
+  // Without this, `period=today` etc. silently became the default 30-day
+  // window because Number("today") is NaN.
+  const preset = String(query.period ?? "").toLowerCase();
+  const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const endOfDay   = (d: Date) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
+  const today = new Date();
+
+  if (preset === "today") {
+    return { since: startOfDay(today), until: endOfDay(today) };
+  }
+  if (preset === "yesterday") {
+    const y = new Date(today); y.setDate(y.getDate() - 1);
+    return { since: startOfDay(y), until: endOfDay(y) };
+  }
+  if (preset === "this_month") {
+    const first = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { since: startOfDay(first), until: endOfDay(today) };
+  }
+  if (preset === "last_month") {
+    const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const last  = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { since: startOfDay(first), until: endOfDay(last) };
+  }
+
   const period = Math.min(365, Math.max(1, Number(query.period ?? defaultDays) || defaultDays));
   const since = new Date(); since.setDate(since.getDate() - (period - 1)); since.setHours(0, 0, 0, 0);
   const until = new Date(); until.setHours(23, 59, 59, 999);
@@ -113,31 +139,45 @@ router.get("/overview", async (req, res) => {
     where += ` AND "createdAt" <= $${params.length}`;
   }
 
+  // First-response time is normally stamped to ticket.firstRespondedAt the
+  // moment an agent posts the first reply (see routes/replies.ts). For
+  // tickets that pre-date that code path — older seed data, imported
+  // tickets, or any future bug that silently skips the stamp — fall back
+  // to the MIN(reply.createdAt WHERE senderType='agent') so the metric
+  // still reflects reality. Without this fallback the report displayed
+  // "—" even with 24 of 31 tickets having genuine agent replies.
   const rows = await prisma.$queryRawUnsafe<OverviewRow[]>(
-    `SELECT
-       COUNT(*) FILTER (WHERE status NOT IN ('new','processing'))       AS "totalTickets",
-       COUNT(*) FILTER (WHERE status = 'open')                         AS "openTickets",
-       COUNT(*) FILTER (WHERE status = 'resolved')                     AS "resolvedTickets",
-       COUNT(*) FILTER (WHERE status = 'closed')                       AS "closedTickets",
-       COUNT(*) FILTER (WHERE status = 'resolved'
-                          AND "assignedToId" = $1)                     AS "resolvedByAI",
-       COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL
-                          AND status NOT IN ('new','processing'))       AS "ticketsWithSlaTarget",
-       COUNT(*) FILTER (WHERE "slaBreached" = true)                    AS "breachedTickets",
-       COUNT(*) FILTER (WHERE "isEscalated" = true)                    AS "escalatedTickets",
-       COUNT(*) FILTER (WHERE "resolvedAt" IS NOT NULL
-                          AND status = 'open')                         AS "reopenedTickets",
+    `WITH first_agent_reply AS (
+       SELECT "ticketId" AS ticket_id, MIN("createdAt") AS first_at
+       FROM reply
+       WHERE "senderType" = 'agent'
+       GROUP BY "ticketId"
+     )
+     SELECT
+       COUNT(*) FILTER (WHERE t.status NOT IN ('new','processing'))       AS "totalTickets",
+       COUNT(*) FILTER (WHERE t.status = 'open')                         AS "openTickets",
+       COUNT(*) FILTER (WHERE t.status = 'resolved')                     AS "resolvedTickets",
+       COUNT(*) FILTER (WHERE t.status = 'closed')                       AS "closedTickets",
+       COUNT(*) FILTER (WHERE t.status = 'resolved'
+                          AND t."assignedToId" = $1)                     AS "resolvedByAI",
+       COUNT(*) FILTER (WHERE t."resolutionDueAt" IS NOT NULL
+                          AND t.status NOT IN ('new','processing'))       AS "ticketsWithSlaTarget",
+       COUNT(*) FILTER (WHERE t."slaBreached" = true)                    AS "breachedTickets",
+       COUNT(*) FILTER (WHERE t."isEscalated" = true)                    AS "escalatedTickets",
+       COUNT(*) FILTER (WHERE t."resolvedAt" IS NOT NULL
+                          AND t.status = 'open')                         AS "reopenedTickets",
        ROUND(
-         AVG(EXTRACT(EPOCH FROM ("firstRespondedAt" - "createdAt")))
-           FILTER (WHERE "firstRespondedAt" IS NOT NULL)
-       )::int                                                           AS "avgFirstResponseSeconds",
+         AVG(EXTRACT(EPOCH FROM (COALESCE(t."firstRespondedAt", far.first_at) - t."createdAt")))
+           FILTER (WHERE COALESCE(t."firstRespondedAt", far.first_at) IS NOT NULL)
+       )::int                                                             AS "avgFirstResponseSeconds",
        ROUND(
-         AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")))
-           FILTER (WHERE "resolvedAt" IS NOT NULL
-                     AND status IN ('resolved','closed'))
-       )::int                                                           AS "avgResolutionSeconds"
-     FROM ticket
-     ${where}`,
+         AVG(EXTRACT(EPOCH FROM (t."resolvedAt" - t."createdAt")))
+           FILTER (WHERE t."resolvedAt" IS NOT NULL
+                     AND t.status IN ('resolved','closed'))
+       )::int                                                             AS "avgResolutionSeconds"
+     FROM ticket t
+     LEFT JOIN first_agent_reply far ON far.ticket_id = t.id
+     ${where.replace(/"createdAt"/g, 't."createdAt"')}`,
     ...params
   );
 
@@ -403,25 +443,47 @@ router.get("/sla-by-dimension", async (req, res) => {
 
   const d1 = dateParts(), d2 = dateParts(), d3 = dateParts("t");
 
+  // ── SLA Compliance computation ───────────────────────────────────────────
+  //
+  // Denominator includes any non-system ticket with a resolution SLA target —
+  // open tickets that haven't breached yet count as compliant; tickets already
+  // past their deadline (whether still open or resolved late) count as breached.
+  // This reflects current SLA health and avoids the "0 / 0" empty-state when
+  // the resolved-only window has no data yet.
+  //
+  // Breached = slaBreached flag is true, OR the ticket resolved after its
+  // deadline (catches late resolutions the breach-marker cron missed).
+  const breachExpr = `(
+    "slaBreached" = true OR
+    ("resolvedAt" IS NOT NULL AND "resolvedAt" > "resolutionDueAt")
+  )`;
+  const tBreachExpr = `(
+    t."slaBreached" = true OR
+    (t."resolvedAt" IS NOT NULL AND t."resolvedAt" > t."resolutionDueAt")
+  )`;
+
   const [byPriority, byCategory, byTeam] = await Promise.all([
     prisma.$queryRawUnsafe<SlaDimRow[]>(`
       SELECT COALESCE(priority::text,'unset') AS key,
-        COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL) AS "totalWithSla",
-        COUNT(*) FILTER (WHERE "slaBreached" = true)          AS "breached"
+        COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL)               AS "totalWithSla",
+        COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL
+                           AND ${breachExpr})                                AS "breached"
       FROM ticket WHERE status NOT IN ('new','processing') ${d1.where}
       GROUP BY priority ORDER BY "totalWithSla" DESC
     `, ...d1.params),
     prisma.$queryRawUnsafe<SlaDimRow[]>(`
       SELECT COALESCE(category::text,'unset') AS key,
-        COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL) AS "totalWithSla",
-        COUNT(*) FILTER (WHERE "slaBreached" = true)          AS "breached"
+        COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL)               AS "totalWithSla",
+        COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL
+                           AND ${breachExpr})                                AS "breached"
       FROM ticket WHERE status NOT IN ('new','processing') ${d2.where}
       GROUP BY category ORDER BY "totalWithSla" DESC
     `, ...d2.params),
     prisma.$queryRawUnsafe<SlaDimRow[]>(`
       SELECT COALESCE(q.name,'Unassigned') AS key,
-        COUNT(*) FILTER (WHERE t."resolutionDueAt" IS NOT NULL) AS "totalWithSla",
-        COUNT(*) FILTER (WHERE t."slaBreached" = true)          AS "breached"
+        COUNT(*) FILTER (WHERE t."resolutionDueAt" IS NOT NULL)             AS "totalWithSla",
+        COUNT(*) FILTER (WHERE t."resolutionDueAt" IS NOT NULL
+                           AND ${tBreachExpr})                               AS "breached"
       FROM ticket t LEFT JOIN "queue" q ON q.id = t."queueId"
       WHERE t.status NOT IN ('new','processing') ${d3.where}
       GROUP BY q.name ORDER BY "totalWithSla" DESC
@@ -683,17 +745,26 @@ router.get("/csat-trend", async (req, res) => {
 
   interface TrendRow { day: string; avgRating: number | null; count: bigint; }
 
+  // Cast the rounded NUMERIC to FLOAT8 so the JSON response is a real
+  // number, not a Decimal/string. Without this, recharts couldn't plot
+  // the trend line (it received `"4.67"` as a string) and a few client-
+  // side reduce() math paths drifted into string concatenation.
   const rows = await prisma.$queryRaw<TrendRow[]>`
     SELECT
-      TO_CHAR("submittedAt", 'YYYY-MM-DD') AS day,
-      ROUND(AVG(rating)::numeric, 2)        AS "avgRating",
-      COUNT(*)                              AS count
+      TO_CHAR("submittedAt", 'YYYY-MM-DD')        AS day,
+      ROUND(AVG(rating)::numeric, 2)::float8       AS "avgRating",
+      COUNT(*)                                     AS count
     FROM csat_rating
     WHERE "submittedAt" >= ${since} AND "submittedAt" <= ${until}
     GROUP BY day ORDER BY day
   `;
 
-  const byDay = new Map(rows.map(r => [r.day, { avgRating: r.avgRating, count: Number(r.count) }]));
+  // Coerce avgRating to number defensively in case the adapter still
+  // surfaces it as a string-Decimal under some configurations.
+  const byDay = new Map(rows.map(r => [r.day, {
+    avgRating: r.avgRating == null ? null : Number(r.avgRating),
+    count:     Number(r.count),
+  }]));
   const data = fillDateRange(
     since, until, byDay as Map<string, { avgRating: number | null; count: number }>,
     { avgRating: null, count: 0 },
@@ -1119,29 +1190,97 @@ router.get("/operational-health", async (_req, res) => {
     assigned_not_replied: bigint;
   }
 
+  // ── SLA health KPI computation ─────────────────────────────────────────────
+  //
+  // The "overdue" and "at_risk" filters mirror the per-ticket logic in
+  // `server/src/lib/sla.ts → computeSlaInfo` so the dashboard counts match
+  // what an agent sees on individual tickets.
+  //
+  // Rules:
+  //   * Overdue (Breached Open):
+  //       - status is open / in_progress
+  //       - SLA is NOT paused
+  //       - EITHER first-response deadline has passed and is unmet,
+  //         OR resolution deadline has passed and is unmet.
+  //     This is computed live from deadline columns, not from the persistent
+  //     `slaBreached` flag, so it doesn't lag behind the cron.
+  //
+  //   * At Risk:
+  //       - status is open / in_progress
+  //       - SLA is NOT paused
+  //       - NOT already breached (no unmet deadline in the past)
+  //       - At least one unmet deadline is within
+  //         max(20% × deadline-window, 60 minutes) of expiring.
+  //     Window is per-deadline (first-response and resolution evaluated
+  //     independently) and matches the per-ticket "at_risk" badge logic.
   const [row] = await prisma.$queryRaw<HealthRow[]>`
+    WITH t AS (
+      SELECT
+        id, status, "assignedToId", "createdAt", "slaPausedAt",
+        "firstResponseDueAt", "firstRespondedAt",
+        "resolutionDueAt",    "resolvedAt",
+        -- A deadline is "active" when it exists AND its corresponding milestone
+        -- hasn't been met yet.
+        CASE WHEN "firstResponseDueAt" IS NOT NULL AND "firstRespondedAt" IS NULL
+             THEN "firstResponseDueAt" END AS fr_due,
+        CASE WHEN "resolutionDueAt"    IS NOT NULL AND "resolvedAt"        IS NULL
+             THEN "resolutionDueAt"    END AS res_due
+      FROM ticket
+    ),
+    t2 AS (
+      SELECT *,
+        -- At-risk threshold per deadline = max(20% of total window, 60 min)
+        CASE WHEN fr_due IS NOT NULL THEN
+          GREATEST(EXTRACT(EPOCH FROM (fr_due - "createdAt")) / 60.0 * 0.20, 60)
+        END AS fr_threshold_min,
+        CASE WHEN res_due IS NOT NULL THEN
+          GREATEST(EXTRACT(EPOCH FROM (res_due - "createdAt")) / 60.0 * 0.20, 60)
+        END AS res_threshold_min
+      FROM t
+    )
     SELECT
-      COUNT(*) FILTER (WHERE status IN ('open','in_progress'))
-                                                                   AS open,
+      COUNT(*) FILTER (WHERE status IN ('open','in_progress'))           AS open,
+
       COUNT(*) FILTER (WHERE status IN ('open','in_progress')
-                         AND "assignedToId" IS NULL)               AS unassigned,
-      COUNT(*) FILTER (WHERE status IN ('open','in_progress')
-                         AND "slaBreached" = true)                 AS overdue,
+                         AND "assignedToId" IS NULL)                     AS unassigned,
+
+      -- Breached Open: live computation, not the lagging flag
       COUNT(*) FILTER (
         WHERE status IN ('open','in_progress')
-          AND "slaBreached" = false
-          AND "resolutionDueAt" IS NOT NULL
-          AND "resolutionDueAt" <= NOW() + INTERVAL '2 hours'
-          AND "resolutionDueAt" > NOW()
-      )                                                            AS at_risk,
-      (SELECT COUNT(*) FROM ticket t2
-       WHERE t2.status IN ('open','in_progress')
-         AND t2."assignedToId" IS NOT NULL
+          AND "slaPausedAt" IS NULL
+          AND (
+            (fr_due  IS NOT NULL AND fr_due  < NOW()) OR
+            (res_due IS NOT NULL AND res_due < NOW())
+          )
+      )                                                                  AS overdue,
+
+      -- At Risk: matches per-ticket logic (20% / 60 min floor on EITHER deadline)
+      COUNT(*) FILTER (
+        WHERE status IN ('open','in_progress')
+          AND "slaPausedAt" IS NULL
+          -- Not already breached (no past unmet deadline)
+          AND NOT (
+            (fr_due  IS NOT NULL AND fr_due  < NOW()) OR
+            (res_due IS NOT NULL AND res_due < NOW())
+          )
+          -- At least one unmet deadline within its at-risk window
+          AND (
+            (fr_due  IS NOT NULL AND fr_due  > NOW()
+              AND EXTRACT(EPOCH FROM (fr_due  - NOW())) / 60.0 <= fr_threshold_min)
+            OR
+            (res_due IS NOT NULL AND res_due > NOW()
+              AND EXTRACT(EPOCH FROM (res_due - NOW())) / 60.0 <= res_threshold_min)
+          )
+      )                                                                  AS at_risk,
+
+      (SELECT COUNT(*) FROM ticket tt
+       WHERE tt.status IN ('open','in_progress')
+         AND tt."assignedToId" IS NOT NULL
          AND NOT EXISTS (
            SELECT 1 FROM reply r
-           WHERE r."ticketId" = t2.id AND r."senderType" = 'agent'
-         ))                                                        AS assigned_not_replied
-    FROM ticket
+           WHERE r."ticketId" = tt.id AND r."senderType" = 'agent'
+         ))                                                              AS assigned_not_replied
+    FROM t2
   `;
 
   res.json({
@@ -1173,7 +1312,7 @@ router.get("/kb-search-stats", async (req, res) => {
   const [totalRow, queryRows] = await Promise.all([
     prisma.$queryRaw<[{ total: bigint; zero: bigint }]>`
       SELECT COUNT(*) AS total,
-             COUNT(*) FILTER (WHERE "result_count" = 0) AS zero
+             COUNT(*) FILTER (WHERE "resultCount" = 0) AS zero
       FROM kb_search_log
       WHERE "created_at" >= ${since} AND "created_at" <= ${until}
     `,
@@ -1181,8 +1320,8 @@ router.get("/kb-search-stats", async (req, res) => {
       SELECT
         LOWER(TRIM(query))                                     AS query,
         COUNT(*)                                               AS count,
-        ROUND(AVG("result_count")::numeric, 1)                AS "avgResultCount",
-        COUNT(*) FILTER (WHERE "result_count" = 0)            AS "zeroResultsCount"
+        ROUND(AVG("resultCount")::numeric, 1)                AS "avgResultCount",
+        COUNT(*) FILTER (WHERE "resultCount" = 0)            AS "zeroResultsCount"
       FROM kb_search_log
       WHERE "created_at" >= ${since} AND "created_at" <= ${until}
         AND LENGTH(TRIM(query)) >= 2

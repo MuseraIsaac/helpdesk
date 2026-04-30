@@ -148,7 +148,7 @@ export default function CsatReport() {
         accentColor="bg-emerald-500"
       >
         <ChartContainer
-          config={{ avgRating: { label: "Avg Rating", color: "hsl(var(--chart-2))" } }}
+          config={{ avgRating: { label: "Avg Rating", color: "var(--chart-2)" } }}
           className="h-56"
         >
           <LineChart data={all}>
@@ -175,7 +175,8 @@ export default function CsatReport() {
               dataKey="avgRating"
               stroke="hsl(142, 71%, 45%)"
               strokeWidth={2}
-              dot={false}
+              dot={{ r: 3, fill: "hsl(142, 71%, 45%)", strokeWidth: 0 }}
+              activeDot={{ r: 5 }}
               connectNulls={false}
             />
           </LineChart>

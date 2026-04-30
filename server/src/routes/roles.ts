@@ -31,6 +31,7 @@ import {
 import type { Permission } from "core/constants/permission.ts";
 import { logSystemAudit } from "../lib/audit";
 import { reloadRoles, getRoles } from "../lib/role-cache";
+import { setShortCache, setLongCache } from "../lib/cache-control";
 import prisma from "../db";
 
 const router = Router();
@@ -43,6 +44,10 @@ router.use(requireAuth);
 // this user do?" UI doesn't need to bundle the catalog client-side.
 
 router.get("/_catalog", (_req, res) => {
+  // Static data — only changes when a developer ships new permissions, so a
+  // 1-hour browser cache is safe and saves a round-trip every time the role
+  // editor opens.
+  setLongCache(res);
   res.json({
     categories: PERMISSION_CATEGORIES,
     permissions: PERMISSION_CATALOG,
@@ -66,6 +71,7 @@ function sanitizePermissions(input: unknown): Permission[] {
 // ── List roles ───────────────────────────────────────────────────────────────
 
 router.get("/", requirePermission("users.manage"), async (_req, res) => {
+  setShortCache(res);
   const records = await getRoles();
   res.json({
     roles: records

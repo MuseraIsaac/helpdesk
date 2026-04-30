@@ -27,6 +27,7 @@ import ExcelJS from "exceljs";
 import { hashPassword } from "better-auth/crypto";
 import prisma from "../../db";
 import { daysAgo, pad } from "./data-pools";
+import { computeRequestSlaDueAt } from "../request-sla";
 import { type BatchProgress, type RecordIds, computeRecordCounts } from "./types";
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -950,13 +951,15 @@ export async function runExcelImport(
       const catalogRec   = catalogId ? await prisma.catalogItem.findUnique({ where: { id: catalogId } }) : null;
       const status       = (data.status as string | null) ?? "submitted";
 
+      const priority = ((data.priority as string | null) ?? "medium") as "low" | "medium" | "high" | "urgent";
+      const createdAt = daysAgo(Math.floor(Math.random() * 10) + 1);
       const req = await prisma.serviceRequest.create({
         data: {
           requestNumber: mkNum("DEMO-SRQ", batchId, i),
           title:         String(data.title),
           description:   data.description ? String(data.description) : null,
           status:        status as "submitted" | "pending_approval" | "approved" | "in_fulfillment" | "fulfilled" | "closed",
-          priority:      ((data.priority as string | null) ?? "medium") as "low" | "medium" | "high" | "urgent",
+          priority,
           requesterId,
           requesterName:  requesterRec?.name  ?? "Imported User",
           requesterEmail: requesterRec?.email ?? `import-${batchId}-${i}@import.local`,
@@ -966,7 +969,8 @@ export async function runExcelImport(
           catalogItemName:catalogRec?.name ?? undefined,
           approvalStatus: status === "pending_approval" ? "pending" : "not_required",
           createdById:    requesterId ?? adminId,
-          createdAt:      daysAgo(Math.floor(Math.random() * 10) + 1),
+          createdAt,
+          slaDueAt:       computeRequestSlaDueAt(priority, createdAt),
           ...(status === "fulfilled" ? { resolvedAt: daysAgo(1) } : {}),
         },
       });

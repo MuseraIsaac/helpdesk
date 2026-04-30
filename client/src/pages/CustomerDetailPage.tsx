@@ -463,7 +463,7 @@ export default function CustomerDetailPage() {
                           </TableCell>
                           <TableCell>
                             <Link
-                              to={`/tickets/${t.id}`}
+                              to={`/tickets/${t.ticketNumber}`}
                               className="hover:underline font-medium text-sm"
                             >
                               {t.subject}
@@ -511,7 +511,7 @@ export default function CustomerDetailPage() {
                           </TableCell>
                           <TableCell>
                             <Link
-                              to={`/requests/${r.id}`}
+                              to={`/requests/${r.requestNumber}`}
                               className="hover:underline font-medium text-sm"
                             >
                               {r.title}

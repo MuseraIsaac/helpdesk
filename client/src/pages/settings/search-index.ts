@@ -36,6 +36,9 @@ export const SETTINGS_CONTENT_INDEX: Record<SettingsSection, string> = {
     csat satisfaction survey customer satisfaction
     auto-close close resolved after days auto close
     behavior defaults visibility
+    resolution requirements required fields enforce mandatory
+    cannot resolve close until fields filled custom field validation
+    block resolve block close required category root cause
   `,
 
   ticket_numbering: `

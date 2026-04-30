@@ -397,11 +397,14 @@ export default function TicketsPage() {
 
   const filters = useMemo(() => parseFiltersFromParams(searchParams), [searchParams]);
 
-  // Teams lookup — used to render `Team: <name>` instead of `Team: <id>`
+  // Teams lookup — used to render `Team: <name>` instead of `Team: <id>`.
+  // Shares the ["dict","teams"] cache entry with TicketsFilterSidebar /
+  // dialogs so we only fetch once per session.
   const { data: teamsData } = useQuery({
-    queryKey: ["teams"],
+    queryKey: ["dict", "teams"],
     queryFn:  () => axios.get<{ teams: { id: number; name: string }[] }>("/api/teams").then((r) => r.data.teams),
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
+    gcTime:    30 * 60_000,
   });
   const teamLookup = useMemo(() => {
     const m = new Map<number, string>();

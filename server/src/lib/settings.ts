@@ -95,6 +95,8 @@ export function redactSensitive(
       webhookSecret:   data.webhookSecret   ? "••••••••" : "",
       // AI
       openaiApiKey:    data.openaiApiKey    ? "••••••••" : "",
+      // Google Sign-In
+      googleSignInClientSecret: data.googleSignInClientSecret ? "••••••••" : "",
       // Video bridge secrets
       teamsClientSecret:  data.teamsClientSecret  ? "••••••••" : "",
       googleClientSecret: data.googleClientSecret ? "••••••••" : "",

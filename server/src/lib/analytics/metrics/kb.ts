@@ -84,12 +84,18 @@ const kbHelpfulRatio: MetricDefinition = {
   computeFor: {
     async stat(ctx) {
       interface Row { helpful: bigint; not_helpful: bigint }
+      // The kb_article_feedback table uses `submittedAt`, not `createdAt`
+      // (no @map alias on the Prisma model). The previous query referenced
+      // `"createdAt"` which doesn't exist — Postgres raised undefined-column
+      // and the analytics runner returned an empty result, so the widget
+      // looked permanently zero.
       const [row] = await ctx.db.$queryRaw<Row[]>`
         SELECT
           COUNT(*) FILTER (WHERE helpful = true)  AS helpful,
           COUNT(*) FILTER (WHERE helpful = false) AS not_helpful
         FROM kb_article_feedback
-        WHERE "createdAt" >= ${ctx.dateRange.since} AND "createdAt" <= ${ctx.dateRange.until}
+        WHERE "submittedAt" >= ${ctx.dateRange.since}
+          AND "submittedAt" <= ${ctx.dateRange.until}
       `;
       const h = Number(row?.helpful ?? 0);
       const n = Number(row?.not_helpful ?? 0);
@@ -116,12 +122,14 @@ const kbFeedbackTrend: MetricDefinition = {
   computeFor: {
     async time_series(ctx) {
       interface Row { day: string; helpful: bigint; not_helpful: bigint }
+      // Same fix as kb.helpful_ratio — column is `submittedAt`, not `createdAt`.
       const rows = await ctx.db.$queryRaw<Row[]>`
-        SELECT TO_CHAR("createdAt",'YYYY-MM-DD') AS day,
+        SELECT TO_CHAR("submittedAt",'YYYY-MM-DD') AS day,
                COUNT(*) FILTER (WHERE helpful = true)  AS helpful,
                COUNT(*) FILTER (WHERE helpful = false) AS not_helpful
         FROM kb_article_feedback
-        WHERE "createdAt" >= ${ctx.dateRange.since} AND "createdAt" <= ${ctx.dateRange.until}
+        WHERE "submittedAt" >= ${ctx.dateRange.since}
+          AND "submittedAt" <= ${ctx.dateRange.until}
         GROUP BY day ORDER BY day
       `;
       const lookup = new Map(rows.map(r => [r.day, { helpful: Number(r.helpful), notHelpful: Number(r.not_helpful) }]));

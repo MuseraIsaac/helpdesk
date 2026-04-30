@@ -1,4 +1,5 @@
 import sgMail from "@sendgrid/mail";
+import nodemailer from "nodemailer";
 import type { PgBoss } from "pg-boss";
 import Sentry from "./sentry";
 import { getSection } from "./settings";
@@ -45,30 +46,14 @@ export async function registerSendEmailWorker(boss: PgBoss): Promise<void> {
     try {
       // Read credentials from settings DB at send time; fall back to env vars
       const integrations = await getSection("integrations");
-      const apiKey   = integrations.sendgridApiKey  || process.env.SENDGRID_API_KEY  || "";
-      const fromAddr = integrations.fromEmail        || process.env.SENDGRID_FROM_EMAIL || "";
+      const provider = integrations.emailProvider || "sendgrid";
+      const fromAddr = integrations.fromEmail || process.env.SENDGRID_FROM_EMAIL || "";
 
-      if (!apiKey)  throw new Error("SendGrid API key not configured");
       if (!fromAddr && !from) throw new Error("From email address not configured");
 
-      sgMail.setApiKey(apiKey);
-
-      // Resolve the from field: use the per-message override when provided,
-      // otherwise fall back to the system-wide fromEmail setting.
-      const resolvedFrom: string | { email: string; name: string } = from
-        ? from.name
-          ? { email: from.email, name: from.name }
-          : from.email
-        : fromAddr;
-
-      // Resolve attachment files from disk just before sending
-      type SgAttachment = {
-        content: string;
-        filename: string;
-        type: string;
-        disposition: "attachment";
-      };
-      const sgAttachments: SgAttachment[] = [];
+      // Load attachment bytes once — used by both providers
+      type LoadedAttachment = { filename: string; mimeType: string; content: Buffer };
+      const loadedAttachments: LoadedAttachment[] = [];
 
       if (attachmentIds?.length) {
         const { default: prisma } = await import("../db");
@@ -81,12 +66,7 @@ export async function registerSendEmailWorker(boss: PgBoss): Promise<void> {
         for (const row of rows) {
           try {
             const buf = await loadFile(row.storageKey);
-            sgAttachments.push({
-              content: buf.toString("base64"),
-              filename: row.filename,
-              type: row.mimeType,
-              disposition: "attachment",
-            });
+            loadedAttachments.push({ filename: row.filename, mimeType: row.mimeType, content: buf });
           } catch {
             // File missing or unreadable — skip silently, don't fail the whole email
             console.warn(
@@ -103,19 +83,80 @@ export async function registerSendEmailWorker(boss: PgBoss): Promise<void> {
       if (inReplyTo) threadingHeaders["In-Reply-To"] = inReplyTo;
       if (references) threadingHeaders["References"] = references;
 
-      await sgMail.send({
-        to,
-        from: resolvedFrom,
-        subject,
-        text: body,
-        ...(cc?.length && { cc }),
-        ...(bcc?.length && { bcc }),
-        ...(bodyHtml && { html: bodyHtml }),
-        ...(Object.keys(threadingHeaders).length && { headers: threadingHeaders }),
-        ...(sgAttachments.length && { attachments: sgAttachments }),
-      });
+      if (provider === "smtp") {
+        const host = integrations.smtpHost || "";
+        const port = integrations.smtpPort || 587;
+        const user = integrations.smtpUser || "";
+        const pass = integrations.smtpPassword || "";
+        if (!host) throw new Error("SMTP host not configured");
 
-      console.log(`Email sent to ${to} — subject: "${subject}"`);
+        // port 465 → implicit TLS; otherwise STARTTLS upgrade (587/25)
+        const transporter = nodemailer.createTransport({
+          host,
+          port,
+          secure: port === 465,
+          ...(user || pass ? { auth: { user, pass } } : {}),
+        });
+
+        const fromHeader = from
+          ? from.name
+            ? `"${from.name.replace(/"/g, '\\"')}" <${from.email}>`
+            : from.email
+          : fromAddr;
+
+        await transporter.sendMail({
+          to,
+          from: fromHeader,
+          subject,
+          text: body,
+          ...(cc?.length && { cc }),
+          ...(bcc?.length && { bcc }),
+          ...(bodyHtml && { html: bodyHtml }),
+          ...(Object.keys(threadingHeaders).length && { headers: threadingHeaders }),
+          ...(loadedAttachments.length && {
+            attachments: loadedAttachments.map((a) => ({
+              filename: a.filename,
+              content: a.content,
+              contentType: a.mimeType,
+            })),
+          }),
+        });
+      } else if (provider === "ses") {
+        throw new Error("SES email provider is not yet implemented");
+      } else {
+        // SendGrid (default)
+        const apiKey = integrations.sendgridApiKey || process.env.SENDGRID_API_KEY || "";
+        if (!apiKey) throw new Error("SendGrid API key not configured");
+
+        sgMail.setApiKey(apiKey);
+
+        const resolvedFrom: string | { email: string; name: string } = from
+          ? from.name
+            ? { email: from.email, name: from.name }
+            : from.email
+          : fromAddr;
+
+        const sgAttachments = loadedAttachments.map((a) => ({
+          content: a.content.toString("base64"),
+          filename: a.filename,
+          type: a.mimeType,
+          disposition: "attachment" as const,
+        }));
+
+        await sgMail.send({
+          to,
+          from: resolvedFrom,
+          subject,
+          text: body,
+          ...(cc?.length && { cc }),
+          ...(bcc?.length && { bcc }),
+          ...(bodyHtml && { html: bodyHtml }),
+          ...(Object.keys(threadingHeaders).length && { headers: threadingHeaders }),
+          ...(sgAttachments.length && { attachments: sgAttachments }),
+        });
+      }
+
+      console.log(`Email sent to ${to} via ${provider} — subject: "${subject}"`);
     } catch (error) {
       Sentry.captureException(error, { tags: { queue: QUEUE_NAME } });
       throw error;

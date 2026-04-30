@@ -133,7 +133,7 @@ export default function SlaReport() {
         <KpiCard
           title="At SLA Risk"
           value={loadingHealth ? "…" : (health?.atRisk ?? 0).toLocaleString()}
-          sub="Breach within 2 hours"
+          sub="Approaching SLA deadline"
           variant={(health?.atRisk ?? 0) > 0 ? "warning" : "success"}
           icon={<AlertTriangle className="h-4 w-4" />}
         />

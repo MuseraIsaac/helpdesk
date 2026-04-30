@@ -7,7 +7,32 @@ import { ThemeProvider } from "./lib/theme";
 import "./index.css";
 import App from "./App.tsx";
 
-const queryClient = new QueryClient();
+/**
+ * Global TanStack Query defaults.
+ *
+ * `staleTime: 30s` — every query is considered fresh for 30 seconds after
+ * a successful fetch, so quick navigations (e.g. ticket detail → back to
+ * list) reuse cached data instead of paying a network round-trip. Mutations
+ * still invalidate by query key as usual.
+ *
+ * `gcTime: 5min` — keep cached data around for 5 min after the last
+ * subscriber unmounts, then garbage-collect.
+ *
+ * `refetchOnWindowFocus: false` — the helpdesk doesn't need refetch-on-tab-
+ * focus everywhere; pages that *do* need live data subscribe via SSE.
+ *
+ * Individual `useQuery` calls override these by passing their own values
+ * (e.g. dictionary endpoints with `staleTime: 5 * 60_000`).
+ */
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 // Record when the page started loading so we can enforce a minimum display time.
 const splashStart = performance.now();

@@ -36,6 +36,7 @@ import {
   fetchInsightsChangeRisk,
   fetchInsightsServiceHealth,
   fetchInsightsTickets,
+  fetchInsightsCiImpact,
 } from "@/lib/reports/api";
 import { periodToRange, rangeQS } from "@/lib/reports/utils";
 import { cn } from "@/lib/utils";
@@ -43,7 +44,7 @@ import {
   AlertTriangle, Server, Bug, GitBranch, Package, ArrowRight,
   CheckCircle2, XCircle, Clock, Zap, ShieldAlert, Network,
   TrendingUp, ExternalLink, Ticket as TicketIcon, Users, Moon, Sun,
-  Calendar, User, Link2, Hash,
+  Calendar, User, Link2, Hash, Boxes, Database,
 } from "lucide-react";
 
 // ── Palette ────────────────────────────────────────────────────────────────────
@@ -1567,11 +1568,249 @@ function TicketsTab({ qs }: { qs: string }) {
   );
 }
 
+// ── CI Relationships tab ───────────────────────────────────────────────────────
+
+const CI_TYPE_LABEL: Record<string, string> = {
+  application: "Application", database: "Database", server: "Server", network: "Network",
+  storage: "Storage", service: "Service", endpoint: "Endpoint", other: "Other",
+};
+
+const CRITICALITY_COLOR: Record<string, string> = {
+  critical: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
+  high:     "bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30",
+  medium:   "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
+  low:      "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
+};
+
+const MODULE_TINT = {
+  tickets:   { bar: "var(--chart-2)", icon: TicketIcon,   label: "Tickets"   },
+  incidents: { bar: "var(--chart-5)", icon: AlertTriangle,label: "Incidents" },
+  problems:  { bar: "var(--chart-7)", icon: Bug,          label: "Problems"  },
+  changes:   { bar: "var(--chart-1)", icon: GitBranch,    label: "Changes"   },
+  requests:  { bar: "var(--chart-3)", icon: Package,      label: "Requests"  },
+} as const;
+
+function CiImpactTab({ qs }: { qs: string }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["insights", "ci-impact", qs],
+    queryFn:  () => fetchInsightsCiImpact(qs),
+  });
+
+  if (isLoading) return <ReportLoading kpiCount={5} chartCount={3} />;
+  if (error)     return <ErrorAlert error={error as Error} fallback="Failed to load CI relationships" />;
+  if (!data)     return null;
+
+  const { totals, topCIs, byType, byCriticality } = data;
+  const linkedPct = totals.totalCIs > 0 ? Math.round((totals.linkedCIs / totals.totalCIs) * 100) : 0;
+  const totalImpact = totals.tickets + totals.incidents + totals.problems + totals.changes + totals.requests;
+
+  // Largest absolute count for header proportions
+  const maxRowTotal = topCIs.reduce((m, ci) => Math.max(m, ci.total), 0) || 1;
+
+  return (
+    <div className="space-y-5">
+
+      {/* ── KPI strip ──────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <KpiCard
+          title="CIs in CMDB"
+          value={totals.totalCIs.toLocaleString()}
+          sub={`${totals.linkedCIs.toLocaleString()} linked (${linkedPct}%)`}
+          icon={<Boxes className="h-4 w-4" />}
+          variant="info"
+        />
+        <KpiCard
+          title="Total Impact"
+          value={totalImpact.toLocaleString()}
+          sub="Records referencing a CI in this period"
+          icon={<Network className="h-4 w-4" />}
+          variant="default"
+        />
+        <KpiCard
+          title="Tickets"
+          value={totals.tickets.toLocaleString()}
+          icon={<TicketIcon className="h-4 w-4" />}
+          variant="info"
+        />
+        <KpiCard
+          title="Incidents"
+          value={totals.incidents.toLocaleString()}
+          sub={`${totals.problems.toLocaleString()} problems`}
+          icon={<AlertTriangle className="h-4 w-4" />}
+          variant="danger"
+        />
+        <KpiCard
+          title="Changes"
+          value={totals.changes.toLocaleString()}
+          sub={`${totals.requests.toLocaleString()} service requests`}
+          icon={<GitBranch className="h-4 w-4" />}
+          variant="warning"
+        />
+      </div>
+
+      {/* ── Top impacted CIs ───────────────────────────────────────────────── */}
+      <ChartCard
+        title="Most-impacted Configuration Items"
+        description="Top 15 CIs ranked by linked records across all ITSM modules in the period"
+        accentColor="bg-fuchsia-500"
+      >
+        {topCIs.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-8">
+            No CIs have been linked to tickets, incidents, problems, changes, or requests in this period.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-8">#</TableHead>
+                <TableHead>CI</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Criticality</TableHead>
+                <TableHead className="text-right">Tickets</TableHead>
+                <TableHead className="text-right">Incidents</TableHead>
+                <TableHead className="text-right">Problems</TableHead>
+                <TableHead className="text-right">Changes</TableHead>
+                <TableHead className="text-right">Requests</TableHead>
+                <TableHead className="text-right pr-3">Impact</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {topCIs.map((ci, idx) => {
+                const widthPct = (ci.total / maxRowTotal) * 100;
+                return (
+                  <TableRow key={ci.id} className="group">
+                    <TableCell className="text-muted-foreground text-xs">{idx + 1}</TableCell>
+                    <TableCell>
+                      <Link
+                        to={`/cmdb/${ci.id}`}
+                        className="font-medium hover:underline flex items-center gap-1.5"
+                        title={ci.ciNumber}
+                      >
+                        <Database className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="truncate max-w-[240px]">{ci.name}</span>
+                      </Link>
+                      <p className="text-[10px] text-muted-foreground font-mono mt-0.5">{ci.ciNumber}</p>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground capitalize">
+                      {CI_TYPE_LABEL[ci.type] ?? ci.type}
+                    </TableCell>
+                    <TableCell>
+                      <span className={cn(
+                        "inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border capitalize",
+                        CRITICALITY_COLOR[ci.criticality] ?? "bg-muted text-muted-foreground border-border",
+                      )}>
+                        {ci.criticality}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-sm">{ci.tickets || "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums text-sm">{ci.incidents || "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums text-sm">{ci.problems || "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums text-sm">{ci.changes || "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums text-sm">{ci.requests || "—"}</TableCell>
+                    <TableCell className="text-right pr-3">
+                      <div className="flex items-center justify-end gap-2">
+                        <div className="relative h-1.5 w-20 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className="absolute inset-y-0 left-0 bg-fuchsia-500/70"
+                            style={{ width: `${widthPct}%` }}
+                          />
+                        </div>
+                        <span className="text-sm font-semibold tabular-nums w-10 text-right">{ci.total}</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </ChartCard>
+
+      {/* ── Impact by type / by criticality ────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <ChartCard
+          title="Impact by CI Type"
+          description="Stacked module breakdown across all CIs of each type"
+          accentColor="bg-violet-500"
+        >
+          {byType.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">No data</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={Math.max(200, byType.length * 40)}>
+              <BarChart data={byType} layout="vertical" margin={{ top: 5, right: 16, left: 8, bottom: 5 }} stackOffset="sign">
+                <CartesianGrid horizontal={false} stroke="var(--border)" strokeOpacity={0.4} />
+                <XAxis type="number" tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" />
+                <YAxis
+                  type="category"
+                  dataKey="key"
+                  tick={{ fontSize: 11 }}
+                  stroke="var(--muted-foreground)"
+                  width={90}
+                  tickFormatter={(v: string) => CI_TYPE_LABEL[v] ?? v}
+                />
+                <RTooltip
+                  cursor={{ fill: "var(--muted)", fillOpacity: 0.3 }}
+                  contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }}
+                  formatter={(v: number, n: string) => [v.toLocaleString(), n]}
+                  labelFormatter={(v: string) => CI_TYPE_LABEL[v] ?? v}
+                />
+                <Legend wrapperStyle={{ fontSize: 10 }} iconSize={8} />
+                <Bar dataKey="tickets"   name="Tickets"   stackId="m" fill={MODULE_TINT.tickets.bar} />
+                <Bar dataKey="incidents" name="Incidents" stackId="m" fill={MODULE_TINT.incidents.bar} />
+                <Bar dataKey="problems"  name="Problems"  stackId="m" fill={MODULE_TINT.problems.bar} />
+                <Bar dataKey="changes"   name="Changes"   stackId="m" fill={MODULE_TINT.changes.bar} />
+                <Bar dataKey="requests"  name="Requests"  stackId="m" fill={MODULE_TINT.requests.bar} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        <ChartCard
+          title="Impact by Criticality"
+          description="Where the load lands on critical vs. lower-criticality CIs"
+          accentColor="bg-rose-500"
+        >
+          {byCriticality.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">No data</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={Math.max(200, byCriticality.length * 50)}>
+              <BarChart data={byCriticality} layout="vertical" margin={{ top: 5, right: 16, left: 8, bottom: 5 }}>
+                <CartesianGrid horizontal={false} stroke="var(--border)" strokeOpacity={0.4} />
+                <XAxis type="number" tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" />
+                <YAxis
+                  type="category"
+                  dataKey="key"
+                  tick={{ fontSize: 11 }}
+                  stroke="var(--muted-foreground)"
+                  width={80}
+                  tickFormatter={(v: string) => v.charAt(0).toUpperCase() + v.slice(1)}
+                />
+                <RTooltip
+                  cursor={{ fill: "var(--muted)", fillOpacity: 0.3 }}
+                  contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }}
+                  formatter={(v: number, n: string) => [v.toLocaleString(), n]}
+                />
+                <Legend wrapperStyle={{ fontSize: 10 }} iconSize={8} />
+                <Bar dataKey="tickets"   name="Tickets"   stackId="m" fill={MODULE_TINT.tickets.bar} />
+                <Bar dataKey="incidents" name="Incidents" stackId="m" fill={MODULE_TINT.incidents.bar} />
+                <Bar dataKey="problems"  name="Problems"  stackId="m" fill={MODULE_TINT.problems.bar} />
+                <Bar dataKey="changes"   name="Changes"   stackId="m" fill={MODULE_TINT.changes.bar} />
+                <Bar dataKey="requests"  name="Requests"  stackId="m" fill={MODULE_TINT.requests.bar} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 const TABS = [
   { value: "overview",            label: "Overview",             icon: Network      },
   { value: "asset-impact",        label: "Asset Impact",         icon: Server       },
+  { value: "ci-relationships",    label: "CI Relationships",     icon: Database     },
   { value: "problem-chains",      label: "Problem Chains",       icon: Bug          },
   { value: "change-risk",         label: "Change Risk",          icon: GitBranch    },
   { value: "service-health",      label: "Service Health",       icon: Package      },
@@ -1622,10 +1861,11 @@ export default function InsightsReport() {
           {[
             { icon: "1", text: "Start in Overview for a fleet-wide summary" },
             { icon: "2", text: "Asset Impact shows which assets drive the most issues" },
-            { icon: "3", text: "Problem Chains reveals chronic root causes" },
-            { icon: "4", text: "Change Risk correlates deployment scope with failure" },
-            { icon: "5", text: "Service Health shows catalog items at operational risk" },
-            { icon: "6", text: "Ticket Relationships reveals what drives the most tickets" },
+            { icon: "3", text: "CI Relationships ranks Configuration Items by linked tickets, incidents, problems, changes, and requests" },
+            { icon: "4", text: "Problem Chains reveals chronic root causes" },
+            { icon: "5", text: "Change Risk correlates deployment scope with failure" },
+            { icon: "6", text: "Service Health shows catalog items at operational risk" },
+            { icon: "7", text: "Ticket Relationships reveals what drives the most tickets" },
           ].map(s => (
             <span key={s.icon} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background/60 border border-border/60 text-muted-foreground">
               <span className="h-4 w-4 rounded-full bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-400 font-bold flex items-center justify-center text-[10px]">{s.icon}</span>
@@ -1654,6 +1894,7 @@ export default function InsightsReport() {
 
         <TabsContent value="overview"             className="mt-5"><OverviewTab       qs={qs} /></TabsContent>
         <TabsContent value="asset-impact"         className="mt-5"><AssetImpactTab   qs={qs} /></TabsContent>
+        <TabsContent value="ci-relationships"     className="mt-5"><CiImpactTab      qs={qs} /></TabsContent>
         <TabsContent value="problem-chains"       className="mt-5"><ProblemChainsTab qs={qs} /></TabsContent>
         <TabsContent value="change-risk"          className="mt-5"><ChangeRiskTab    qs={qs} /></TabsContent>
         <TabsContent value="service-health"       className="mt-5"><ServiceHealthTab qs={qs} /></TabsContent>

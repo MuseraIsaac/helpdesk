@@ -1195,4 +1195,158 @@ router.get("/tickets", async (req, res) => {
   });
 });
 
+// ── 7. CI IMPACT (CMDB ↔ ITSM modules) ────────────────────────────────────────
+//
+// GET /api/reports/insights/ci-impact
+//
+// Per-CI cross-module impact: how many tickets, incidents, problems, changes,
+// and requests reference each Configuration Item in the date window.
+//
+// Counting rules (within the period):
+//   tickets   = direct ticket_ci_link  + indirect via asset_ticket_link  → asset.ci_id
+//   incidents = direct incident_ci_link+ indirect via asset_incident_link→ asset.ci_id
+//   problems  = direct problem_ci_link + indirect via asset_problem_link → asset.ci_id
+//   changes   = direct change_ci_link  + indirect via asset_change_link  → asset.ci_id
+//                                      + change.configuration_item_id (primary CI)
+//   requests  = indirect via asset_request_link → asset.ci_id  (no direct CI link)
+// Direct + indirect counts are de-duplicated per (ci, parent record).
+
+router.get("/ci-impact", async (req, res) => {
+  const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+
+  interface PerCi {
+    id:           number;
+    ci_number:    string;
+    name:         string;
+    type:         string;
+    environment:  string;
+    criticality:  string;
+    status:       string;
+    tickets:      bigint;
+    incidents:    bigint;
+    problems:     bigint;
+    changes:      bigint;
+    requests:     bigint;
+    total:        bigint;
+  }
+
+  // Per-CI rollup. Each subquery uses SELECT DISTINCT to avoid double-counting
+  // a parent record that is linked to the same CI both directly and via an asset.
+  const rows = await prisma.$queryRawUnsafe<PerCi[]>(
+    `WITH t AS (
+       SELECT ci_id, ticket_id FROM ticket_ci_link tcl
+         JOIN ticket t ON t.id = tcl.ticket_id AND t."createdAt" BETWEEN $1 AND $2
+       UNION
+       SELECT a.ci_id, atl.ticket_id FROM asset_ticket_link atl
+         JOIN asset a ON a.id = atl.asset_id AND a.ci_id IS NOT NULL
+         JOIN ticket t ON t.id = atl.ticket_id AND t."createdAt" BETWEEN $1 AND $2
+     ),
+     i AS (
+       SELECT ci_id, incident_id FROM incident_ci_link icl
+         JOIN incident i ON i.id = icl.incident_id AND i."createdAt" BETWEEN $1 AND $2
+       UNION
+       SELECT a.ci_id, ail.incident_id FROM asset_incident_link ail
+         JOIN asset a ON a.id = ail.asset_id AND a.ci_id IS NOT NULL
+         JOIN incident i ON i.id = ail.incident_id AND i."createdAt" BETWEEN $1 AND $2
+     ),
+     p AS (
+       SELECT ci_id, problem_id FROM problem_ci_link pcl
+         JOIN problem p ON p.id = pcl.problem_id AND p."createdAt" BETWEEN $1 AND $2
+       UNION
+       SELECT a.ci_id, apl.problem_id FROM asset_problem_link apl
+         JOIN asset a ON a.id = apl.asset_id AND a.ci_id IS NOT NULL
+         JOIN problem p ON p.id = apl.problem_id AND p."createdAt" BETWEEN $1 AND $2
+     ),
+     c AS (
+       SELECT ci_id, change_id FROM change_ci_link ccl
+         JOIN change_request c ON c.id = ccl.change_id AND c."createdAt" BETWEEN $1 AND $2
+       UNION
+       SELECT a.ci_id, acl.change_id FROM asset_change_link acl
+         JOIN asset a ON a.id = acl.asset_id AND a.ci_id IS NOT NULL
+         JOIN change_request c ON c.id = acl.change_id AND c."createdAt" BETWEEN $1 AND $2
+       UNION
+       SELECT c2.configuration_item_id AS ci_id, c2.id AS change_id FROM change_request c2
+         WHERE c2.configuration_item_id IS NOT NULL AND c2."createdAt" BETWEEN $1 AND $2
+     ),
+     r AS (
+       SELECT a.ci_id, arl.request_id FROM asset_request_link arl
+         JOIN asset a ON a.id = arl.asset_id AND a.ci_id IS NOT NULL
+         JOIN service_request sr ON sr.id = arl.request_id AND sr."createdAt" BETWEEN $1 AND $2
+     )
+     SELECT
+       ci.id, ci.ci_number, ci.name, ci.type::text AS type,
+       ci.environment::text AS environment, ci.criticality::text AS criticality,
+       ci.status::text AS status,
+       COALESCE((SELECT COUNT(*) FROM t WHERE t.ci_id = ci.id), 0) AS tickets,
+       COALESCE((SELECT COUNT(*) FROM i WHERE i.ci_id = ci.id), 0) AS incidents,
+       COALESCE((SELECT COUNT(*) FROM p WHERE p.ci_id = ci.id), 0) AS problems,
+       COALESCE((SELECT COUNT(*) FROM c WHERE c.ci_id = ci.id), 0) AS changes,
+       COALESCE((SELECT COUNT(*) FROM r WHERE r.ci_id = ci.id), 0) AS requests,
+       COALESCE((SELECT COUNT(*) FROM t WHERE t.ci_id = ci.id), 0)
+       + COALESCE((SELECT COUNT(*) FROM i WHERE i.ci_id = ci.id), 0)
+       + COALESCE((SELECT COUNT(*) FROM p WHERE p.ci_id = ci.id), 0)
+       + COALESCE((SELECT COUNT(*) FROM c WHERE c.ci_id = ci.id), 0)
+       + COALESCE((SELECT COUNT(*) FROM r WHERE r.ci_id = ci.id), 0) AS total
+     FROM config_item ci
+     ORDER BY total DESC, ci.criticality DESC NULLS LAST, ci.name ASC`,
+    since, until,
+  );
+
+  const totalCIs   = rows.length;
+  const linkedCIs  = rows.filter((r) => Number(r.total) > 0).length;
+  const totals = rows.reduce(
+    (acc, r) => ({
+      tickets:   acc.tickets   + Number(r.tickets),
+      incidents: acc.incidents + Number(r.incidents),
+      problems:  acc.problems  + Number(r.problems),
+      changes:   acc.changes   + Number(r.changes),
+      requests:  acc.requests  + Number(r.requests),
+    }),
+    { tickets: 0, incidents: 0, problems: 0, changes: 0, requests: 0 },
+  );
+
+  const topCIs = rows.slice(0, 15).map((r) => ({
+    id:          r.id,
+    ciNumber:    r.ci_number,
+    name:        r.name,
+    type:        r.type,
+    environment: r.environment,
+    criticality: r.criticality,
+    status:      r.status,
+    tickets:     Number(r.tickets),
+    incidents:   Number(r.incidents),
+    problems:    Number(r.problems),
+    changes:     Number(r.changes),
+    requests:    Number(r.requests),
+    total:       Number(r.total),
+  }));
+
+  // Aggregate by CI type and by criticality (sum across all CIs in the type/criticality group).
+  const groupBy = (key: "type" | "criticality") => {
+    const map = new Map<string, { tickets: number; incidents: number; problems: number; changes: number; requests: number; total: number; ciCount: number }>();
+    for (const r of rows) {
+      const k = (r as unknown as Record<string, string>)[key]!;
+      const cur = map.get(k) ?? { tickets: 0, incidents: 0, problems: 0, changes: 0, requests: 0, total: 0, ciCount: 0 };
+      cur.tickets   += Number(r.tickets);
+      cur.incidents += Number(r.incidents);
+      cur.problems  += Number(r.problems);
+      cur.changes   += Number(r.changes);
+      cur.requests  += Number(r.requests);
+      cur.total     += Number(r.total);
+      cur.ciCount   += 1;
+      map.set(k, cur);
+    }
+    return [...map.entries()]
+      .map(([k, v]) => ({ key: k, ...v }))
+      .sort((a, b) => b.total - a.total);
+  };
+
+  res.json({
+    totals: { totalCIs, linkedCIs, ...totals },
+    topCIs,
+    byType:        groupBy("type"),
+    byCriticality: groupBy("criticality"),
+  });
+});
+
 export default router;

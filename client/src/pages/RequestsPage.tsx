@@ -267,7 +267,7 @@ export default function RequestsPage() {
                   </TableCell>
                   <TableCell className="font-mono text-xs font-medium text-muted-foreground">
                     <Link
-                      to={`/requests/${req.id}`}
+                      to={`/requests/${req.requestNumber}`}
                       className="hover:text-foreground transition-colors"
                     >
                       {req.requestNumber}
@@ -276,7 +276,7 @@ export default function RequestsPage() {
 
                   <TableCell>
                     <Link
-                      to={`/requests/${req.id}`}
+                      to={`/requests/${req.requestNumber}`}
                       className="hover:text-foreground/80 transition-colors"
                     >
                       <div className="font-medium truncate max-w-xs">{req.title}</div>
@@ -326,7 +326,7 @@ export default function RequestsPage() {
                   </TableCell>
 
                   <TableCell>
-                    <Link to={`/requests/${req.id}`}>
+                    <Link to={`/requests/${req.requestNumber}`}>
                       <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                     </Link>
                   </TableCell>

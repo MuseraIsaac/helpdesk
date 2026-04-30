@@ -28,7 +28,7 @@ import SearchableSelect, { type SelectOption } from "@/components/SearchableSele
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface Team   { id: number; name: string; color: string; members: { userId: string }[] }
+interface Team   { id: number; name: string; color: string; members: { id: string; name: string }[] }
 interface Agent  { id: string; name: string; email: string; role: string }
 
 interface Props {
@@ -72,7 +72,7 @@ export default function EscalateDialog({
   // When a team is selected, filter agents to members of that team
   const selectedTeam = teamsRaw.find((t) => String(t.id) === selectedTeamId);
   const memberIds = selectedTeam
-    ? new Set(selectedTeam.members.map((m) => m.userId))
+    ? new Set(selectedTeam.members.map((m) => m.id))
     : null;
 
   const visibleAgents = memberIds

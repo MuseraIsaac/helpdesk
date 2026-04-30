@@ -1,111 +1,140 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Toaster } from "sonner";
+import { Loader2 } from "lucide-react";
 import { Navigate, Route, Routes } from "react-router";
 import { useBranding } from "@/lib/useBranding";
 import { useMe } from "@/hooks/useMe";
+
+// Layouts and route guards stay eager — they wrap every route and are tiny.
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
 import CustomerRoute from "./components/CustomerRoute";
+import SupervisorRoute from "./components/SupervisorRoute";
+import PermissionRoute from "./components/PermissionRoute";
 import Layout from "./components/Layout";
 import PortalLayout from "./components/PortalLayout";
 import HelpLayout from "./components/HelpLayout";
+
+// LoginPage and HomePage stay eager so the most common first paints
+// (anonymous → /login, authenticated → /) don't wait on a chunk fetch.
 import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
-import UsersPage from "./pages/UsersPage";
-import RolesPage from "./pages/RolesPage";
-import MacrosPage from "./pages/MacrosPage";
-import TemplatesPage from "./pages/TemplatesPage";
-import FormBuilderPage from "./pages/FormBuilderPage";
-import CabGroupsPage from "./pages/CabGroupsPage";
-import TicketTypesPage from "./pages/TicketTypesPage";
-import TicketStatusConfigsPage from "./pages/TicketStatusConfigsPage";
-import KbPage from "./pages/KbPage";
-import KbArticleFormPage from "./pages/KbArticleFormPage";
-import TeamsPage from "./pages/TeamsPage";
-import SupervisorRoute from "./components/SupervisorRoute";
-import TicketsPage from "./pages/TicketsPage";
-import TicketDetailPage from "./pages/TicketDetailPage";
-import PlaceholderPage from "./pages/PlaceholderPage";
-import ApprovalsPage from "./pages/ApprovalsPage";
-import IncidentsPage from "./pages/IncidentsPage";
-import IncidentDetailPage from "./pages/IncidentDetailPage";
-import NewIncidentPage from "./pages/NewIncidentPage";
-import RequestsPage from "./pages/RequestsPage";
-import RequestDetailPage from "./pages/RequestDetailPage";
-import ProblemsPage from "./pages/ProblemsPage";
-import ProblemDetailPage from "./pages/ProblemDetailPage";
-import ProfilePage from "./pages/ProfilePage";
-import SettingsPage from "./pages/SettingsPage";
-import ScenariosPage from "./pages/ScenariosPage";
-import AutomationPlatformPage from "./pages/automations/AutomationPlatformPage";
-import AutomationRuleFormPage from "./pages/automations/AutomationRuleFormPage";
-import AutomationExecutionsPage from "./pages/automations/AutomationExecutionsPage";
-import OutboundWebhooksPage from "./pages/automations/OutboundWebhooksPage";
-import RoutingConfigPage from "./pages/automations/RoutingConfigPage";
-import ChangesPage from "./pages/ChangesPage";
-import ChangeDetailPage from "./pages/ChangeDetailPage";
-import NewChangePage from "./pages/NewChangePage";
-import NewTicketPage from "./pages/NewTicketPage";
-import NewProblemPage from "./pages/NewProblemPage";
-import NewRequestPage from "./pages/NewRequestPage";
-import PortalLoginPage from "./pages/portal/PortalLoginPage";
-import PortalRegisterPage from "./pages/portal/PortalRegisterPage";
-import PortalTicketsPage from "./pages/portal/PortalTicketsPage";
-import PortalTicketDetailPage from "./pages/portal/PortalTicketDetailPage";
-import PortalNewTicketPage from "./pages/portal/PortalNewTicketPage";
-import PortalRequestsPage from "./pages/portal/PortalRequestsPage";
-import PortalRequestDetailPage from "./pages/portal/PortalRequestDetailPage";
-import PortalNewRequestPage from "./pages/portal/PortalNewRequestPage";
-import PortalAccountPage from "./pages/portal/PortalAccountPage";
-import NotificationsPage from "./pages/NotificationsPage";
-import CmdbPage from "./pages/CmdbPage";
-import CmdbDetailPage from "./pages/CmdbDetailPage";
-import AssetsPage from "./pages/AssetsPage";
-import AssetDetailPage from "./pages/AssetDetailPage";
-import InventoryLocationsPage from "./pages/InventoryLocationsPage";
-import ContractsPage from "./pages/ContractsPage";
-import SoftwareLicensesPage from "./pages/SoftwareLicensesPage";
-import SoftwareLicenseDetailPage from "./pages/SoftwareLicenseDetailPage";
-import SaaSSubscriptionsPage from "./pages/SaaSSubscriptionsPage";
-import SaaSSubscriptionDetailPage from "./pages/SaaSSubscriptionDetailPage";
-import DiscoveryPage from "./pages/DiscoveryPage";
-import DiscoverySyncRunPage from "./pages/DiscoverySyncRunPage";
-import CatalogPage from "./pages/CatalogPage";
-import CatalogItemPage from "./pages/CatalogItemPage";
-import CatalogAdminPage from "./pages/CatalogAdminPage";
-import PortalCatalogPage from "./pages/portal/PortalCatalogPage";
-import PortalCatalogItemPage from "./pages/portal/PortalCatalogItemPage";
-import HelpCenterPage from "./pages/help/HelpCenterPage";
-import HelpArticlePage from "./pages/help/HelpArticlePage";
-import CustomersPage from "./pages/CustomersPage";
-import CustomerDetailPage from "./pages/CustomerDetailPage";
-import OrganizationsPage from "./pages/OrganizationsPage";
-import OrganizationDetailPage from "./pages/OrganizationDetailPage";
-import PermissionRoute from "./components/PermissionRoute";
-import ReportsLayout from "./pages/reports/ReportsLayout";
-import OverviewReport from "./pages/reports/OverviewReport";
-import TicketsReport from "./pages/reports/TicketsReport";
-import SlaReport from "./pages/reports/SlaReport";
-import IncidentsReport from "./pages/reports/IncidentsReport";
-import CsatReport from "./pages/reports/CsatReport";
-import AgentReport from "./pages/reports/AgentReport";
-import TeamReport from "./pages/reports/TeamReport";
-import KbReport from "./pages/reports/KbReport";
-import RealtimeReport from "./pages/reports/RealtimeReport";
-import CustomReportPage from "./pages/reports/CustomReportPage";
-import ReportLibraryPage from "./pages/reports/ReportLibraryPage";
-import RequestsReport    from "./pages/reports/RequestsReport";
-import ProblemsReport    from "./pages/reports/ProblemsReport";
-import ApprovalsReport   from "./pages/reports/ApprovalsReport";
-import ChangesReport     from "./pages/reports/ChangesReport";
-import AssetsReport      from "./pages/reports/AssetsReport";
-import InsightsReport    from "./pages/reports/InsightsReport";
-import DemoDataPage      from "./pages/DemoDataPage";
-import TrashPage         from "./pages/TrashPage";
-import AuditLogPage      from "./pages/AuditLogPage";
-import DutyPlanPage      from "./pages/DutyPlanPage";
-import DutyPlanTeamPage  from "./pages/DutyPlanTeamPage";
-import DutyPlanDetailPage from "./pages/DutyPlanDetailPage";
+
+// ── Lazy pages ────────────────────────────────────────────────────────────────
+//
+// Vite splits each `import()` into its own chunk. Modules grouped here are
+// kept on a single line where they're route-siblings (same product area)
+// so the developer can see at a glance which routes share a chunk.
+
+const UsersPage                 = lazy(() => import("./pages/UsersPage"));
+const RolesPage                 = lazy(() => import("./pages/RolesPage"));
+const MacrosPage                = lazy(() => import("./pages/MacrosPage"));
+const TemplatesPage             = lazy(() => import("./pages/TemplatesPage"));
+const FormBuilderPage           = lazy(() => import("./pages/FormBuilderPage"));
+const CabGroupsPage             = lazy(() => import("./pages/CabGroupsPage"));
+const TicketTypesPage           = lazy(() => import("./pages/TicketTypesPage"));
+const TicketStatusConfigsPage   = lazy(() => import("./pages/TicketStatusConfigsPage"));
+const KbPage                    = lazy(() => import("./pages/KbPage"));
+const KbArticleFormPage         = lazy(() => import("./pages/KbArticleFormPage"));
+const TeamsPage                 = lazy(() => import("./pages/TeamsPage"));
+const TicketsPage               = lazy(() => import("./pages/TicketsPage"));
+const TicketDetailPage          = lazy(() => import("./pages/TicketDetailPage"));
+const ApprovalsPage             = lazy(() => import("./pages/ApprovalsPage"));
+const IncidentsPage             = lazy(() => import("./pages/IncidentsPage"));
+const IncidentDetailPage        = lazy(() => import("./pages/IncidentDetailPage"));
+const NewIncidentPage           = lazy(() => import("./pages/NewIncidentPage"));
+const RequestsPage              = lazy(() => import("./pages/RequestsPage"));
+const RequestDetailPage         = lazy(() => import("./pages/RequestDetailPage"));
+const ProblemsPage              = lazy(() => import("./pages/ProblemsPage"));
+const ProblemDetailPage         = lazy(() => import("./pages/ProblemDetailPage"));
+const ProfilePage               = lazy(() => import("./pages/ProfilePage"));
+const SettingsPage              = lazy(() => import("./pages/SettingsPage"));
+const ScenariosPage             = lazy(() => import("./pages/ScenariosPage"));
+const AutomationPlatformPage    = lazy(() => import("./pages/automations/AutomationPlatformPage"));
+const AutomationRuleFormPage    = lazy(() => import("./pages/automations/AutomationRuleFormPage"));
+const AutomationExecutionsPage  = lazy(() => import("./pages/automations/AutomationExecutionsPage"));
+const OutboundWebhooksPage      = lazy(() => import("./pages/automations/OutboundWebhooksPage"));
+const RoutingConfigPage         = lazy(() => import("./pages/automations/RoutingConfigPage"));
+const ChangesPage               = lazy(() => import("./pages/ChangesPage"));
+const ChangeDetailPage          = lazy(() => import("./pages/ChangeDetailPage"));
+const NewChangePage             = lazy(() => import("./pages/NewChangePage"));
+const NewTicketPage             = lazy(() => import("./pages/NewTicketPage"));
+const NewProblemPage            = lazy(() => import("./pages/NewProblemPage"));
+const NewRequestPage            = lazy(() => import("./pages/NewRequestPage"));
+const PortalLoginPage           = lazy(() => import("./pages/portal/PortalLoginPage"));
+const PortalRegisterPage        = lazy(() => import("./pages/portal/PortalRegisterPage"));
+const PortalTicketsPage         = lazy(() => import("./pages/portal/PortalTicketsPage"));
+const PortalTicketDetailPage    = lazy(() => import("./pages/portal/PortalTicketDetailPage"));
+const PortalNewTicketPage       = lazy(() => import("./pages/portal/PortalNewTicketPage"));
+const PortalRequestsPage        = lazy(() => import("./pages/portal/PortalRequestsPage"));
+const PortalRequestDetailPage   = lazy(() => import("./pages/portal/PortalRequestDetailPage"));
+const PortalNewRequestPage      = lazy(() => import("./pages/portal/PortalNewRequestPage"));
+const PortalAccountPage         = lazy(() => import("./pages/portal/PortalAccountPage"));
+const NotificationsPage         = lazy(() => import("./pages/NotificationsPage"));
+const CmdbPage                  = lazy(() => import("./pages/CmdbPage"));
+const CmdbDetailPage            = lazy(() => import("./pages/CmdbDetailPage"));
+const AssetsPage                = lazy(() => import("./pages/AssetsPage"));
+const AssetDetailPage           = lazy(() => import("./pages/AssetDetailPage"));
+const InventoryLocationsPage    = lazy(() => import("./pages/InventoryLocationsPage"));
+const ContractsPage             = lazy(() => import("./pages/ContractsPage"));
+const SoftwareLicensesPage      = lazy(() => import("./pages/SoftwareLicensesPage"));
+const SoftwareLicenseDetailPage = lazy(() => import("./pages/SoftwareLicenseDetailPage"));
+const SaaSSubscriptionsPage     = lazy(() => import("./pages/SaaSSubscriptionsPage"));
+const SaaSSubscriptionDetailPage = lazy(() => import("./pages/SaaSSubscriptionDetailPage"));
+const DiscoveryPage             = lazy(() => import("./pages/DiscoveryPage"));
+const DiscoverySyncRunPage      = lazy(() => import("./pages/DiscoverySyncRunPage"));
+const CatalogPage               = lazy(() => import("./pages/CatalogPage"));
+const CatalogItemPage           = lazy(() => import("./pages/CatalogItemPage"));
+const CatalogAdminPage          = lazy(() => import("./pages/CatalogAdminPage"));
+const PortalCatalogPage         = lazy(() => import("./pages/portal/PortalCatalogPage"));
+const PortalCatalogItemPage     = lazy(() => import("./pages/portal/PortalCatalogItemPage"));
+const HelpCenterPage            = lazy(() => import("./pages/help/HelpCenterPage"));
+const HelpArticlePage           = lazy(() => import("./pages/help/HelpArticlePage"));
+const CustomersPage             = lazy(() => import("./pages/CustomersPage"));
+const CustomerDetailPage        = lazy(() => import("./pages/CustomerDetailPage"));
+const OrganizationsPage         = lazy(() => import("./pages/OrganizationsPage"));
+const OrganizationDetailPage    = lazy(() => import("./pages/OrganizationDetailPage"));
+
+// Reports — shipped as their own chunks so users who never open Reports
+// don't pay the cost of charting libraries and complex visual builders.
+const ReportsLayout             = lazy(() => import("./pages/reports/ReportsLayout"));
+const OverviewReport            = lazy(() => import("./pages/reports/OverviewReport"));
+const TicketsReport             = lazy(() => import("./pages/reports/TicketsReport"));
+const SlaReport                 = lazy(() => import("./pages/reports/SlaReport"));
+const IncidentsReport           = lazy(() => import("./pages/reports/IncidentsReport"));
+const CsatReport                = lazy(() => import("./pages/reports/CsatReport"));
+const AgentReport               = lazy(() => import("./pages/reports/AgentReport"));
+const TeamReport                = lazy(() => import("./pages/reports/TeamReport"));
+const KbReport                  = lazy(() => import("./pages/reports/KbReport"));
+const RealtimeReport            = lazy(() => import("./pages/reports/RealtimeReport"));
+const CustomReportPage          = lazy(() => import("./pages/reports/CustomReportPage"));
+const ReportLibraryPage         = lazy(() => import("./pages/reports/ReportLibraryPage"));
+const RequestsReport            = lazy(() => import("./pages/reports/RequestsReport"));
+const ProblemsReport            = lazy(() => import("./pages/reports/ProblemsReport"));
+const ApprovalsReport           = lazy(() => import("./pages/reports/ApprovalsReport"));
+const ChangesReport             = lazy(() => import("./pages/reports/ChangesReport"));
+const AssetsReport              = lazy(() => import("./pages/reports/AssetsReport"));
+const InsightsReport            = lazy(() => import("./pages/reports/InsightsReport"));
+
+const DemoDataPage              = lazy(() => import("./pages/DemoDataPage"));
+const TrashPage                 = lazy(() => import("./pages/TrashPage"));
+const AuditLogPage              = lazy(() => import("./pages/AuditLogPage"));
+const DutyPlanPage              = lazy(() => import("./pages/DutyPlanPage"));
+const DutyPlanTeamPage          = lazy(() => import("./pages/DutyPlanTeamPage"));
+const DutyPlanDetailPage        = lazy(() => import("./pages/DutyPlanDetailPage"));
+
+/**
+ * Suspense fallback shown briefly while a route's chunk loads from the
+ * server. Sized to fill the layout viewport area; deliberately quiet so
+ * a 50–200 ms chunk fetch doesn't flash a giant spinner at the user.
+ */
+function RouteSpinner() {
+  return (
+    <div className="flex items-center justify-center min-h-[50vh] w-full">
+      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/50" />
+    </div>
+  );
+}
 
 /**
  * Redirects "/" to the user's preferred landing page.
@@ -145,6 +174,7 @@ function App() {
   return (
     <>
       <BrandingEffect />
+      <Suspense fallback={<RouteSpinner />}>
       <Routes>
       {/* ── Agent / admin ───────────────────────────────────────────────── */}
       <Route path="/login" element={<LoginPage />} />
@@ -283,6 +313,7 @@ function App() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
     <Toaster richColors closeButton position="top-right" />
     </>
   );

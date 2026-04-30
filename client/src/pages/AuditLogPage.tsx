@@ -615,7 +615,7 @@ function EntityCell({ event }: { event: AuditEventRow }) {
   if (event.ticket) {
     return (
       <Link
-        to={`/tickets/${event.ticketId}`}
+        to={`/tickets/${event.ticket.ticketNumber}`}
         className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
         onClick={(e) => e.stopPropagation()}
       >

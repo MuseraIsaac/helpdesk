@@ -449,6 +449,12 @@ router.get("/", requireAuth, async (req, res) => {
       const lastReplyRow = raw.replies?.[0] ?? null;
       const lastNoteRow  = raw.notes?.[0]   ?? null;
 
+      // The hover preview only renders a short excerpt — truncate so a single
+      // huge inbound email body doesn't bloat the list response by megabytes.
+      const PREVIEW_LEN = 280;
+      const truncate = (s: string) =>
+        s.length > PREVIEW_LEN ? s.slice(0, PREVIEW_LEN) + "…" : s;
+
       return {
         ...withSlaInfo(t),
         organization: t.customer?.organization?.name ?? null,
@@ -456,13 +462,13 @@ router.get("/", requireAuth, async (req, res) => {
         replies:      undefined,
         notes:        undefined,
         lastReply: lastReplyRow ? {
-          body:       lastReplyRow.body,
+          body:       truncate(lastReplyRow.body),
           senderType: lastReplyRow.senderType as "agent" | "customer",
           authorName: lastReplyRow.user?.name ?? null,
           createdAt:  lastReplyRow.createdAt.toISOString(),
         } : null,
         lastNote: lastNoteRow ? {
-          body:       lastNoteRow.body,
+          body:       truncate(lastNoteRow.body),
           authorName: lastNoteRow.author?.name ?? null,
           createdAt:  lastNoteRow.createdAt.toISOString(),
         } : null,
@@ -521,8 +527,13 @@ router.get("/:id", requireAuth, async (req, res) => {
       escalationEvents: { orderBy: { createdAt: "asc" } },
       escalatedToTeam: { select: { id: true, name: true, color: true } },
       escalatedToUser: { select: { id: true, name: true } },
+      // Cap audit history to the most recent 200 events (chronological in
+      // response). Tickets with thousands of automation/system events were
+      // dominating detail-page latency. Older events can be loaded on demand
+      // via a future paginated endpoint.
       auditEvents: {
-        orderBy: { createdAt: "asc" },
+        orderBy: { createdAt: "desc" },
+        take: 200,
         include: { actor: { select: { id: true, name: true } } },
       },
       customer: {
@@ -615,10 +626,12 @@ router.get("/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  // Rename customer.tickets → customer.recentTickets to match the CustomerSummary type
-  const { customer, ...rest } = ticket;
+  // Rename customer.tickets → customer.recentTickets to match the CustomerSummary type.
+  // Reverse audit events so they're returned oldest-first (DB query is desc + take).
+  const { customer, auditEvents, ...rest } = ticket;
   const shaped = {
     ...rest,
+    auditEvents: auditEvents.slice().reverse(),
     customer: customer
       ? { ...customer, recentTickets: customer.tickets, tickets: undefined }
       : null,
@@ -719,11 +732,7 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
     ...("severity" in data && { severity: data.severity }),
     ...("impact" in data && { impact: data.impact }),
     ...("urgency" in data && { urgency: data.urgency }),
-    ...("teamId" in data && {
-      team: data.teamId == null
-        ? { disconnect: true }
-        : { connect: { id: data.teamId } },
-    }),
+    ...("teamId" in data && { teamId: data.teamId ?? null }),
     ...("customTicketTypeId" in data && { customTicketTypeId: data.customTicketTypeId ?? null }),
     ...("customStatusId" in data && {
       customStatusId: data.customStatusId ?? null,
@@ -775,8 +784,99 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
     updateData.statusChangedAt = new Date() as any;
   }
 
+  // The "effective" target status is whichever of these arrives first:
+  //   1. `data.status` if explicitly set
+  //   2. `resolvedWorkflowState` (set when a custom status maps to resolved/closed)
+  // Both paths must enforce the required-field policy below.
+  const effectiveTargetStatus =
+    "status" in data && data.status != null ? data.status : resolvedWorkflowState;
+
   // Stamp resolvedAt when moving to a terminal status
-  if ("status" in data && (data.status === "resolved" || data.status === "closed")) {
+  if (effectiveTargetStatus === "resolved" || effectiveTargetStatus === "closed") {
+    // ── Required-field enforcement ─────────────────────────────────────────
+    //
+    // Admins can configure (in Settings → Tickets) a list of fields that
+    // must have a non-empty value before an agent is allowed to mark a
+    // ticket resolved or closed. This guarantees consistent post-mortem
+    // data — e.g. category + root cause filled before sign-off.
+    const ticketSettings = await getSection("tickets");
+    const requiredKeys =
+      effectiveTargetStatus === "resolved"
+        ? ticketSettings.resolveRequiredFields
+        : ticketSettings.closeRequiredFields;
+
+    if (Array.isArray(requiredKeys) && requiredKeys.length > 0) {
+      // Merge incoming patch with existing ticket so a value being set in
+      // the same request also satisfies the requirement.
+      type AnyTicket = typeof ticket & { customFields?: Record<string, unknown> };
+      const fullTicket = await prisma.ticket.findUnique({
+        where: { id },
+        select: { customFields: true },
+      });
+      const merged: Record<string, unknown> = {
+        priority:       "priority"        in data ? data.priority        : ticket.priority,
+        severity:       "severity"        in data ? data.severity        : ticket.severity,
+        impact:         "impact"          in data ? data.impact          : ticket.impact,
+        urgency:        "urgency"         in data ? data.urgency         : ticket.urgency,
+        category:       "category"        in data ? data.category        : ticket.category,
+        ticketType:     "ticketType"      in data ? data.ticketType      : ticket.ticketType,
+        assignedToId:   "assignedToId"    in data ? data.assignedToId    : ticket.assignedToId,
+        teamId:         "teamId"          in data ? data.teamId          : ticket.teamId,
+        affectedSystem: "affectedSystem"  in data ? data.affectedSystem  : ticket.affectedSystem,
+      };
+      const customFields = (fullTicket?.customFields as Record<string, unknown> | null) ?? {};
+      const incomingCustom = (data as { customFields?: Record<string, unknown> }).customFields ?? {};
+      const mergedCustom = { ...customFields, ...incomingCustom };
+
+      const isEmpty = (v: unknown): boolean =>
+        v === undefined || v === null || v === "" ||
+        (Array.isArray(v) && v.length === 0);
+
+      const missing: string[] = [];
+      for (const key of requiredKeys) {
+        if (typeof key !== "string") continue;
+        if (key.startsWith("cf.")) {
+          const cfKey = key.slice(3);
+          if (isEmpty(mergedCustom[cfKey])) missing.push(key);
+        } else if (key in merged) {
+          if (isEmpty(merged[key])) missing.push(key);
+        }
+      }
+
+      if (missing.length > 0) {
+        // Resolve human labels — built-in keys are static, custom-field
+        // keys are looked up from the CustomField table for nice messages.
+        const BUILTIN_LABEL: Record<string, string> = {
+          priority:       "Priority",
+          severity:       "Severity",
+          impact:         "Impact",
+          urgency:        "Urgency",
+          category:       "Category",
+          ticketType:     "Ticket type",
+          assignedToId:   "Assigned agent",
+          teamId:         "Team",
+          affectedSystem: "Affected system",
+        };
+        const cfKeys = missing.filter((k) => k.startsWith("cf.")).map((k) => k.slice(3));
+        const cfRows = cfKeys.length > 0
+          ? await prisma.customField.findMany({
+              where:  { entityType: "ticket", key: { in: cfKeys } },
+              select: { key: true, label: true },
+            })
+          : [];
+        const cfLabel = new Map(cfRows.map((c) => [c.key, c.label]));
+        const labels = missing.map((k) =>
+          k.startsWith("cf.") ? (cfLabel.get(k.slice(3)) ?? k.slice(3)) : (BUILTIN_LABEL[k] ?? k)
+        );
+        res.status(400).json({
+          error: `Cannot ${effectiveTargetStatus === "resolved" ? "resolve" : "close"} ticket — required field${labels.length === 1 ? "" : "s"} missing: ${labels.join(", ")}.`,
+          missingFields: missing,
+          missingFieldLabels: labels,
+        });
+        return;
+      }
+    }
+
     const now = new Date();
     updateData.resolvedAt = now;
     if (ticket.resolutionDueAt && now > ticket.resolutionDueAt) {

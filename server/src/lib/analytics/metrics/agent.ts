@@ -352,6 +352,11 @@ const agentWorkload: MetricDefinition = {
     async leaderboard(ctx) {
       const limit = ctx.limit ?? 10;
       interface Row { agent_id: string; agent_name: string; open: bigint; in_progress: bigint }
+      // ORDER BY uses COUNT(*) directly — PostgreSQL won't resolve column
+      // aliases inside an expression in ORDER BY (it tries to look them up
+      // as base columns and fails with 42703 `column "open" does not
+      // exist`). Since the WHERE clause already restricts to open and
+      // in_progress, COUNT(*) is equivalent to (open + in_progress).
       const rows = await ctx.db.$queryRawUnsafe<Row[]>(
         `SELECT u.id AS agent_id, u.name AS agent_name,
                 COUNT(*) FILTER (WHERE t.status = 'open')        AS open,
@@ -362,7 +367,7 @@ const agentWorkload: MetricDefinition = {
            AND u."deletedAt" IS NULL
            AND t.status IN ('open','in_progress')
          GROUP BY u.id, u.name
-         ORDER BY (open + in_progress) DESC LIMIT $1`,
+         ORDER BY COUNT(*) DESC LIMIT $1`,
         limit,
       );
       return {

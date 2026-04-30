@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import axios from "axios";
@@ -210,8 +210,10 @@ describe("UsersPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Delete Bob Agent" }));
 
-    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
-    expect(screen.getByText(/Are you sure you want to delete Bob Agent/)).toBeInTheDocument();
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: /delete this user/i })).toBeInTheDocument();
+    expect(within(dialog).getByText("Bob Agent")).toBeInTheDocument();
   });
 
   it("should close confirmation dialog when clicking Cancel", async () => {
@@ -246,7 +248,7 @@ describe("UsersPage", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Delete Bob Agent" }));
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await user.click(screen.getByRole("button", { name: /yes, delete user/i }));
 
     await waitFor(() => {
       expect(mockedAxios.delete).toHaveBeenCalledWith("/api/users/2");
@@ -264,7 +266,7 @@ describe("UsersPage", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Delete Bob Agent" }));
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await user.click(screen.getByRole("button", { name: /yes, delete user/i }));
 
     await waitFor(() => {
       expect(mockedAxios.get).toHaveBeenCalledTimes(2);

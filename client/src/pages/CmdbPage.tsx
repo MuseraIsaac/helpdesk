@@ -218,7 +218,7 @@ export default function CmdbPage() {
             {data?.items.map((ci) => (
               <tr key={ci.id} className="hover:bg-muted/30 transition-colors">
                 <td className="px-4 py-3">
-                  <Link to={`/cmdb/${ci.id}`} className="hover:underline">
+                  <Link to={`/cmdb/${ci.ciNumber}`} className="hover:underline">
                     <p className="font-medium">{ci.name}</p>
                     <p className="text-[11px] font-mono text-muted-foreground">{ci.ciNumber}</p>
                   </Link>

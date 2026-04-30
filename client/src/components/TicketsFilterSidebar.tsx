@@ -241,33 +241,42 @@ function SectionHeader({
 // ── Main component ───────────────────────────────────────────────────────────
 
 export default function TicketsFilterSidebar({ filters, onChange, onClear, onSaveAsView }: Props) {
+  // Dictionary queries: data changes at most a few times an hour, so a 5-min
+  // staleTime + 30-min gcTime keeps repeat dialogs / page mounts on the same
+  // cache entry. Shared queryKeys mean the global Tickets page query and
+  // this sidebar dedupe into one fetch.
   const { data: teamsData } = useQuery({
-    queryKey: ["teams"],
+    queryKey: ["dict", "teams"],
     queryFn:  () => axios.get<{ teams: Team[] }>("/api/teams").then((r) => r.data.teams),
+    staleTime: 5 * 60_000,
+    gcTime:    30 * 60_000,
   });
   const teams = teamsData ?? [];
 
   const { data: usersData } = useQuery({
-    queryKey: ["agents-sidebar"],
+    queryKey: ["dict", "agents"],
     queryFn:  async () => {
       const { data } = await axios.get<{ agents: UserOpt[] }>("/api/agents");
       return data.agents;
     },
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
+    gcTime:    30 * 60_000,
   });
   const users = usersData ?? [];
 
   const { data: customStatusesRaw } = useQuery({
-    queryKey: ["ticket-status-configs"],
+    queryKey: ["dict", "ticket-status-configs"],
     queryFn:  () => axios.get<{ configs: CustomStatusConfig[] }>("/api/ticket-status-configs").then((r) => r.data.configs),
-    staleTime: 60_000,
+    staleTime: 10 * 60_000,
+    gcTime:    30 * 60_000,
   });
   const customStatuses = (customStatusesRaw ?? []).filter((s) => s.isActive);
 
   const { data: customTypesRaw } = useQuery({
-    queryKey: ["ticket-types"],
+    queryKey: ["dict", "ticket-types"],
     queryFn:  () => axios.get<{ ticketTypes: CustomTicketTypeConfig[] }>("/api/ticket-types").then((r) => r.data.ticketTypes),
-    staleTime: 60_000,
+    staleTime: 10 * 60_000,
+    gcTime:    30 * 60_000,
   });
   const customTypes = (customTypesRaw ?? []).filter((t) => t.isActive);
 

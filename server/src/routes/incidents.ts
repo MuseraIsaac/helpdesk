@@ -349,13 +349,24 @@ router.patch(
       },
     });
     if (!current) { res.status(404).json({ error: "Incident not found" }); return; }
-    if (current.status === "closed") {
-      res.status(422).json({ error: "Closed incidents cannot be modified" });
+
+    // Force overrides — admins/supervisors can bypass workflow constraints.
+    // Used for legitimate edge cases: reopening a closed incident, jumping
+    // a step forward, or correcting an accidental transition.
+    const isForce = data.force === true;
+    const canForce = req.user.role === "admin" || req.user.role === "supervisor";
+    if (isForce && !canForce) {
+      res.status(403).json({ error: "Only admins and supervisors can override the incident workflow" });
       return;
     }
 
-    // Validate status transition
-    if (data.status && data.status !== current.status) {
+    if (current.status === "closed" && !isForce) {
+      res.status(422).json({ error: "Closed incidents cannot be modified. Use force override to reopen." });
+      return;
+    }
+
+    // Validate status transition (skipped when force=true)
+    if (data.status && data.status !== current.status && !isForce) {
       const allowed = incidentStatusTransitions[current.status as IncidentStatus];
       if (!allowed.includes(data.status as IncidentStatus)) {
         res

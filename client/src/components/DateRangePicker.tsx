@@ -35,6 +35,8 @@ import { cn } from "@/lib/utils";
 // ── Period definitions ────────────────────────────────────────────────────────
 
 export const PERIOD_OPTIONS = [
+  { value: "today",      label: "Today"        },
+  { value: "yesterday",  label: "Yesterday"    },
   { value: "7",          label: "Last 7 days"  },
   { value: "30",         label: "Last 30 days" },
   { value: "90",         label: "Last 90 days" },

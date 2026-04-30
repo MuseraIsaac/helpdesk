@@ -247,7 +247,7 @@ export default function ProblemsPage() {
                   </TableCell>
                   <TableCell className="font-mono text-xs font-medium text-muted-foreground">
                     <Link
-                      to={`/problems/${problem.id}`}
+                      to={`/problems/${problem.problemNumber}`}
                       className="hover:text-foreground transition-colors"
                     >
                       {problem.problemNumber}
@@ -256,7 +256,7 @@ export default function ProblemsPage() {
 
                   <TableCell>
                     <Link
-                      to={`/problems/${problem.id}`}
+                      to={`/problems/${problem.problemNumber}`}
                       className="hover:text-foreground/80 transition-colors"
                     >
                       <div className="flex items-center gap-2">
@@ -308,7 +308,7 @@ export default function ProblemsPage() {
                   </TableCell>
 
                   <TableCell>
-                    <Link to={`/problems/${problem.id}`}>
+                    <Link to={`/problems/${problem.problemNumber}`}>
                       <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                     </Link>
                   </TableCell>

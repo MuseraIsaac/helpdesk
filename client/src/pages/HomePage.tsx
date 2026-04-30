@@ -176,6 +176,7 @@ function DashboardWidget({
 }) {
   const label        = appearance?.titleOverride || WIDGET_META[id]?.label || id;
   const accentColor  = appearance?.accentColor;
+  const scale        = appearance?.scale ?? 1;
 
   return (
     <div
@@ -246,9 +247,21 @@ function DashboardWidget({
         </div>
       )}
 
-      {/* Widget content */}
+      {/* Widget content — when scale != 1 we wrap in a transform-scale layer.
+          The inner content still lays out at full cell size (so MetricCard's
+          h-full fills the cell), then transform-scale visibly shrinks/grows
+          it from the top-left corner. This gives the user "the small
+          rectangle inside the widget" growing or shrinking, while the
+          outer cell stays the size they laid out. */}
       <div className={`flex-1 min-h-0 overflow-auto ${editMode ? "pointer-events-none" : ""}`}>
-        {children}
+        {scale !== 1 ? (
+          <div
+            className="origin-top-left h-full w-full"
+            style={{ transform: `scale(${scale})` }}
+          >
+            {children}
+          </div>
+        ) : children}
       </div>
     </div>
   );
@@ -557,11 +570,15 @@ interface MetricCardProps {
   accentColor?: string;
   /** Small sub-label below the value */
   sub?: string;
+  /** Stretch the card to fill its parent grid cell — used when a MetricCard
+   *  is rendered as a standalone dashboard widget rather than nested inside
+   *  a composite container. */
+  fillCard?: boolean;
 }
 
 function MetricCard({
   title, value, icon: Icon, hint, loading,
-  variant = "default", href, accentColor, sub,
+  variant = "default", href, accentColor, sub, fillCard = false,
 }: MetricCardProps) {
   const density = useDensity();
 
@@ -581,6 +598,11 @@ function MetricCard({
         "relative overflow-hidden transition-all duration-200 group/metric",
         href ? "hover:shadow-lg hover:-translate-y-0.5 cursor-pointer" : "",
         "shadow-sm",
+        // Inside AutoFitBox the card lays out at its intrinsic content
+        // size (max-content) and the scaler fits it to the cell — no
+        // h-full needed, which would otherwise produce a 0/auto height
+        // inside a max-content parent.
+        fillCard ? "flex flex-col w-[240px]" : "",
       ].join(" ")}
       style={resolvedColor ? {
         borderTopColor: resolvedColor,
@@ -607,7 +629,7 @@ function MetricCard({
         <div className="flex items-start justify-between gap-2">
           {/* Icon badge with glow ring */}
           <div
-            className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0 transition-transform duration-200 group-hover/metric:scale-105"
+            className="metric-card-icon-badge h-10 w-10 rounded-xl flex items-center justify-center shrink-0 transition-transform duration-200 group-hover/metric:scale-105"
             style={resolvedColor
               ? {
                   background: `linear-gradient(135deg, ${resolvedColor}22, ${resolvedColor}0f)`,
@@ -618,7 +640,7 @@ function MetricCard({
             }
           >
             <Icon
-              className="h-4.5 w-4.5"
+              className="metric-card-icon h-4.5 w-4.5"
               style={resolvedColor ? { color: resolvedColor } : { color: "hsl(var(--muted-foreground))" }}
             />
           </div>
@@ -634,7 +656,7 @@ function MetricCard({
             </TooltipProvider>
           )}
         </div>
-        <CardTitle className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70 leading-tight mt-2.5">
+        <CardTitle className="metric-card-title text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70 leading-tight mt-2.5">
           {title}
         </CardTitle>
       </CardHeader>
@@ -645,7 +667,7 @@ function MetricCard({
         ) : (
           <div>
             <p
-              className={`font-black tracking-tight leading-none tabular-nums ${density === "compact" ? "text-2xl" : "text-[2rem]"}`}
+              className={`metric-card-value font-black tracking-tight leading-none tabular-nums ${density === "compact" ? "text-2xl" : "text-[2rem]"}`}
               style={valueStyle}
             >
               {value ?? "—"}
@@ -657,14 +679,84 @@ function MetricCard({
     </Card>
   );
 
-  if (href) {
-    return (
-      <Link to={href} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl">
-        {card}
-      </Link>
-    );
+  const linkClassName =
+    "block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl";
+
+  const wrapped = href ? (
+    <Link to={href} className={linkClassName}>{card}</Link>
+  ) : card;
+
+  // When this MetricCard is rendered as a standalone dashboard widget
+  // (fillCard), wrap it in an auto-fit scaler so the whole card — icon,
+  // label, value, padding — grows and shrinks proportionally with the cell
+  // in BOTH axes. The card itself renders at a fixed natural size and a
+  // ResizeObserver-driven transform: scale() fits it into whatever the
+  // grid cell is currently. This is what makes dragging the corner of a
+  // widget actually scale the contents instead of just stretching the
+  // outer border.
+  if (fillCard) {
+    return <AutoFitBox>{wrapped}</AutoFitBox>;
   }
-  return card;
+  return wrapped;
+}
+
+/**
+ * Wraps a child of arbitrary natural size in a layer that uses
+ * `transform: scale()` to fit it inside the available cell while
+ * preserving aspect ratio.
+ *
+ * The natural size is *measured*, not declared — the child renders at its
+ * intrinsic content size (offsetWidth/Height), and a ResizeObserver
+ * computes the scale needed to fit that box into the current cell. So
+ * cells smaller than the content shrink the content; cells larger than
+ * the content grow it. No clipped numbers, no fixed magic dimensions.
+ */
+function AutoFitBox({ children }: { children: React.ReactNode }) {
+  const outerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    const outer = outerRef.current;
+    const inner = innerRef.current;
+    if (!outer || !inner) return;
+    const compute = () => {
+      const cell = outer.getBoundingClientRect();
+      // offsetWidth/Height return the *pre-transform* layout size, so
+      // they're stable across our scale changes. getBoundingClientRect on
+      // the inner would feed back into the calculation and oscillate.
+      const natW = inner.offsetWidth;
+      const natH = inner.offsetHeight;
+      if (cell.width === 0 || cell.height === 0 || natW === 0 || natH === 0) return;
+      const s = Math.min(cell.width / natW, cell.height / natH, 4);
+      setScale(s);
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(outer);
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div ref={outerRef} className="h-full w-full overflow-hidden flex items-center justify-center">
+      <div
+        ref={innerRef}
+        style={{
+          // Let the child take its intrinsic content size — neither
+          // stretched by flex nor clamped by a parent. transform: scale
+          // then fits whatever that intrinsic size happens to be.
+          width:  "max-content",
+          height: "max-content",
+          transform: `scale(${scale})`,
+          transformOrigin: "center center",
+          flexShrink: 0,
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
 }
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
@@ -1302,7 +1394,21 @@ export default function HomePage() {
     () => new Set(activeConfig.widgets.filter(w => w.visible).map(w => w.id)),
     [activeConfig.widgets],
   );
-  const isVisible = (id: string) => visibleWidgets.has(id);
+  // A composite widget's queries should also fire when any of its atomic
+  // split-outs is visible — users who migrated to the atomic widgets
+  // (breakdown_category, csat_avg_rating, etc.) hide the composite, but the
+  // atomics still depend on the composite's API response.
+  const COMPOSITE_ATOMICS: Record<string, readonly string[]> = {
+    volume:      ["volume_total", "volume_open", "volume_resolved", "volume_escalated", "volume_reopened"],
+    performance: ["perf_mtta", "perf_mttr", "perf_ai_resolution", "perf_sla_compliance", "perf_sla_breached"],
+    breakdowns:  ["breakdown_category", "breakdown_priority", "breakdown_aging", "by_assignee"],
+    csat:        ["csat_avg_rating", "csat_positive_rate", "csat_negative_rate", "csat_response_rate", "csat_distribution", "csat_recent"],
+  };
+  const isVisible = (id: string) => {
+    if (visibleWidgets.has(id)) return true;
+    const atomics = COMPOSITE_ATOMICS[id];
+    return !!atomics && atomics.some((a) => visibleWidgets.has(a));
+  };
 
   const { data: overview, isLoading: overviewLoading, error: overviewError } =
     useQuery<OverviewStats>({
@@ -1331,7 +1437,7 @@ export default function HomePage() {
     useQuery<{ aging: AgingBucket[] }>({
       queryKey: ["reports-aging"],
       queryFn: async () => (await axios.get("/api/reports/aging")).data,
-      enabled:   isVisible("breakdowns"),  // rendered inside the breakdowns widget
+      enabled:   isVisible("breakdowns") || isVisible("breakdown_aging"),
       staleTime: STALE_TIME,
     });
 
@@ -2684,12 +2790,12 @@ export default function HomePage() {
                     {topOpen.tickets.map(t => (
                       <TableRow key={t.id} className={t.slaBreached ? "bg-destructive/5 hover:bg-destructive/10" : undefined}>
                         <TableCell className="font-mono text-[11px] text-muted-foreground pr-0">
-                          <Link to={`/tickets/${t.id}`} className="hover:text-primary hover:underline">
+                          <Link to={`/tickets/${t.ticketNumber}`} className="hover:text-primary hover:underline">
                             {t.ticketNumber}
                           </Link>
                         </TableCell>
                         <TableCell className="max-w-[220px]">
-                          <Link to={`/tickets/${t.id}`} className="font-medium text-[13px] hover:underline line-clamp-1 block">
+                          <Link to={`/tickets/${t.ticketNumber}`} className="font-medium text-[13px] hover:underline line-clamp-1 block">
                             {t.subject}
                           </Link>
                         </TableCell>
@@ -2937,6 +3043,170 @@ export default function HomePage() {
         );
       }
 
+      // ── Atomic volume tiles ───────────────────────────────────────────────
+      case "volume_total":
+        return (
+          <MetricCard key="volume_total"     fillCard title="Total Tickets"   value={overview?.totalTickets}     icon={TicketIcon}    loading={overviewLoading} accentColor="#6366F1" hint="All non-system tickets in the selected period." href={ticketsUrl()} />
+        );
+      case "volume_open":
+        return (
+          <MetricCard key="volume_open"      fillCard title="Open Tickets"    value={overview?.openTickets}      icon={CircleDot}     loading={overviewLoading} accentColor="#F97316" hint="Tickets currently awaiting agent response."  href={ticketsUrl({ status: "open" })} />
+        );
+      case "volume_resolved":
+        return (
+          <MetricCard key="volume_resolved"  fillCard title="Resolved Tickets" value={overview?.resolvedTickets}  icon={TrendingUp}    loading={overviewLoading} accentColor="#22C55E" hint="Tickets marked resolved or closed."          href={ticketsUrl({ status: "resolved" })} />
+        );
+      case "volume_escalated":
+        return (
+          <MetricCard key="volume_escalated" fillCard title="Escalated Tickets" value={overview?.escalatedTickets} icon={AlertTriangle} loading={overviewLoading} accentColor={overview?.escalatedTickets ? "#EF4444" : "#94A3B8"} hint="Tickets that were escalated at any point." href={ticketsUrl({ escalated: true })} />
+        );
+      case "volume_reopened":
+        return (
+          <MetricCard key="volume_reopened"  fillCard title="Reopened Tickets" value={overview?.reopenedTickets}  icon={RotateCcw}     loading={overviewLoading} accentColor={overview?.reopenedTickets ? "#A855F7" : "#94A3B8"} hint="Resolved tickets that received a new reply and returned to open." href={ticketsUrl({ status: "open" })} />
+        );
+
+      // ── Atomic performance tiles ─────────────────────────────────────────
+      case "perf_mtta":
+        return (
+          <MetricCard key="perf_mtta" fillCard title="MTTA" value={formatDuration(overview?.avgFirstResponseSeconds)} icon={Timer}    loading={overviewLoading} accentColor="#3B82F6" hint="Mean Time To Acknowledge — avg time from creation to first agent reply." href={ticketsUrl({ status: "open" })} />
+        );
+      case "perf_mttr":
+        return (
+          <MetricCard key="perf_mttr" fillCard title="MTTR" value={formatDuration(overview?.avgResolutionSeconds)}    icon={Hourglass} loading={overviewLoading} accentColor="#6366F1" hint="Mean Time To Resolve — avg time from creation to resolution." href={ticketsUrl({ status: "open" })} />
+        );
+      case "perf_ai_resolution":
+        return (
+          <MetricCard key="perf_ai_resolution" fillCard title="AI Resolution" value={overview ? `${overview.aiResolutionRate}%` : undefined} icon={Sparkles} loading={overviewLoading} accentColor="#A855F7" hint="Percentage of resolved tickets handled entirely by the AI agent." href={ticketsUrl({ status: "resolved" })} />
+        );
+      case "perf_sla_compliance": {
+        const slaColor =
+          slaVariant === "good" ? "#22C55E" :
+          slaVariant === "warn" ? "#F59E0B" :
+          slaVariant === "bad"  ? "#EF4444" : "#3B82F6";
+        return (
+          <MetricCard key="perf_sla_compliance" fillCard title="SLA Compliance" value={pct(overview?.slaComplianceRate)} icon={ShieldCheck} loading={overviewLoading} accentColor={slaColor} hint="% of SLA-tracked tickets resolved within deadline." href={ticketsUrl({ view: "overdue" })} />
+        );
+      }
+      case "perf_sla_breached":
+        return (
+          <MetricCard key="perf_sla_breached" fillCard title="SLA Breached" value={overview?.breachedTickets} icon={ShieldAlert} loading={overviewLoading} accentColor={overview?.breachedTickets ? "#EF4444" : "#94A3B8"} hint="Tickets that exceeded their SLA resolution deadline." href={ticketsUrl({ view: "overdue" })} />
+        );
+
+      // ── Atomic breakdown charts ──────────────────────────────────────────
+      case "breakdown_category":
+        return (
+          <Card key="breakdown_category" className="h-full flex flex-col">
+            <CardHeader>
+              <CardTitle className="text-sm">By Category</CardTitle>
+              <CardDescription>Ticket distribution · {PRESET_LABELS[preset]} · click a bar to filter</CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1">
+              {breakdownsLoading ? <Skeleton className="h-full w-full min-h-[160px]" /> : (
+                <HorizontalBarChart data={breakdowns?.byCategory ?? []} dataKey="total" labelKey="label" config={barChartConfig} onBarClick={handleCategoryBarClick} />
+              )}
+            </CardContent>
+          </Card>
+        );
+      case "breakdown_priority":
+        return (
+          <Card key="breakdown_priority" className="h-full flex flex-col">
+            <CardHeader>
+              <CardTitle className="text-sm">By Priority</CardTitle>
+              <CardDescription>Ticket distribution · {PRESET_LABELS[preset]} · click a bar to filter</CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1">
+              {breakdownsLoading ? <Skeleton className="h-full w-full min-h-[160px]" /> : (
+                <HorizontalBarChart data={breakdowns?.byPriority ?? []} dataKey="total" labelKey="label" config={barChartConfig} colorKey="priority" onBarClick={handlePriorityBarClick} />
+              )}
+            </CardContent>
+          </Card>
+        );
+      case "breakdown_aging":
+        return (
+          <Card key="breakdown_aging" className="h-full flex flex-col">
+            <CardHeader>
+              <CardTitle className="text-sm">Ticket Aging</CardTitle>
+              <CardDescription>Currently open tickets by age · click to view</CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1">
+              {agingLoading ? <Skeleton className="h-full w-full min-h-[160px]" /> : (
+                <HorizontalBarChart data={agingData?.aging ?? []} dataKey="count" labelKey="bucket" config={agingChartConfig} sortKey="sort" colorMap={AGING_COLORS} onBarClick={() => navigate(ticketsUrl({ status: "open" }))} />
+              )}
+            </CardContent>
+          </Card>
+        );
+
+      // ── Atomic CSAT tiles & cards ────────────────────────────────────────
+      case "csat_avg_rating":
+        return (
+          <MetricCard key="csat_avg_rating" fillCard title="Avg Rating"    value={csat?.avgRating != null ? `${csat.avgRating} / 5` : "—"} icon={Star}      loading={csatLoading} variant={csatAvgVariant}      hint="Average CSAT score across all submitted ratings." />
+        );
+      case "csat_positive_rate":
+        return (
+          <MetricCard key="csat_positive_rate" fillCard title="Positive Rate" value={pct(csat?.positiveRate)} icon={ThumbsUp}   loading={csatLoading} variant={csatPositiveVariant} hint="Percentage of ratings that were 4★ or 5★." />
+        );
+      case "csat_negative_rate":
+        return (
+          <MetricCard key="csat_negative_rate" fillCard title="Negative Rate" value={pct(csat?.negativeRate)} icon={ThumbsDown} loading={csatLoading} variant={csatNegativeVariant} hint="Percentage of ratings that were 1★ or 2★." />
+        );
+      case "csat_response_rate":
+        return (
+          <MetricCard key="csat_response_rate" fillCard title="Response Rate" value={csat != null ? `${csat.responseRate}%` : "—"} icon={BarChart2} loading={csatLoading} hint="Percentage of resolved/closed tickets that received a rating." />
+        );
+      case "csat_distribution":
+        return (
+          <Card key="csat_distribution" className="h-full flex flex-col">
+            <CardHeader>
+              <CardTitle className="text-sm">Rating Distribution</CardTitle>
+              <CardDescription>{csat?.totalRatings ? `${csat.totalRatings} rating${csat.totalRatings === 1 ? "" : "s"} total` : "No ratings yet"}</CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1">
+              {csatLoading ? (
+                <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-5 w-full" />)}</div>
+              ) : !csat?.totalRatings ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">No CSAT ratings yet.</p>
+              ) : (
+                <RatingDistribution distribution={csat.distribution} total={csat.totalRatings} />
+              )}
+            </CardContent>
+          </Card>
+        );
+      case "csat_recent":
+        return (
+          <Card key="csat_recent" className="h-full flex flex-col">
+            <CardHeader>
+              <CardTitle className="text-sm">Recent Ratings</CardTitle>
+              <CardDescription>Last 10 submissions</CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1 overflow-auto">
+              {csatLoading ? (
+                <div className="space-y-3">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+              ) : !csat?.recentRatings.length ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">No CSAT ratings have been submitted yet.</p>
+              ) : (
+                <div className="divide-y">
+                  {csat.recentRatings.map((r) => (
+                    <div key={r.id} className="py-3 flex items-start gap-3">
+                      <StarRow rating={r.rating} />
+                      <div className="flex-1 min-w-0">
+                        <Link to={`/tickets/${r.ticketId}`} className="text-sm font-medium hover:underline truncate block">
+                          #{r.ticketId} — {r.ticketSubject}
+                        </Link>
+                        {r.comment && (
+                          <p className="text-xs text-muted-foreground mt-0.5 italic line-clamp-1">"{r.comment}"</p>
+                        )}
+                      </div>
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {new Date(r.submittedAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+
       default:
         return null;
     }
@@ -3020,6 +3290,14 @@ export default function HomePage() {
                       dashboardId: null,
                       name,
                       config: { ...activeConfig, period: presetToPeriod(preset) },
+                    })
+                  }
+                  onTemplate={template =>
+                    saveDashboard.mutate({
+                      dashboardId: null,
+                      name: template.name,
+                      description: template.description,
+                      config: { ...template.config, period: presetToPeriod(preset) },
                     })
                   }
                   onClone={() => {

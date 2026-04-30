@@ -1,10 +1,9 @@
 import { type Ticket } from "core/constants/ticket.ts";
-import RichTextRenderer from "@/components/RichTextRenderer";
 import { PriorityBadge, SeverityBadge, ImpactBadge, UrgencyBadge } from "@/components/TriageBadge";
 import { SlaBadge, SlaDeadlineRow } from "@/components/SlaBadge";
 import { EscalationBadge } from "@/components/EscalationBadge";
 import EscalationHistory from "@/components/EscalationHistory";
-import { Server, Clock, AlertTriangle, FileText } from "lucide-react";
+import { Server, Clock, AlertTriangle, Users, User } from "lucide-react";
 
 function SectionCard({
   icon: Icon, title, children, className = "",
@@ -121,17 +120,40 @@ export default function TicketDetail({ ticket }: TicketDetailProps) {
                 }).format(new Date(ticket.escalatedAt))}
               </p>
             )}
-            <EscalationHistory events={ticket.escalationEvents ?? []} />
+            {(ticket.escalatedToTeam || ticket.escalatedToUser) && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                {ticket.escalatedToTeam && (
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <Users className="h-3 w-3" />
+                    Team:{" "}
+                    <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: ticket.escalatedToTeam.color }}
+                      />
+                      {ticket.escalatedToTeam.name}
+                    </span>
+                  </span>
+                )}
+                {ticket.escalatedToUser && (
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <User className="h-3 w-3" />
+                    Agent:{" "}
+                    <span className="font-medium text-foreground">
+                      {ticket.escalatedToUser.name}
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
+            <EscalationHistory
+              events={ticket.escalationEvents ?? []}
+              escalatedToTeam={ticket.escalatedToTeam}
+              escalatedToUser={ticket.escalatedToUser}
+            />
           </div>
         </div>
       )}
-
-      {/* Body */}
-      <SectionCard icon={FileText} title="Message">
-        <div className="prose prose-sm dark:prose-invert max-w-none">
-          <RichTextRenderer content={ticket.bodyHtml ?? ticket.body} />
-        </div>
-      </SectionCard>
     </div>
   );
 }

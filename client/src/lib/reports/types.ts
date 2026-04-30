@@ -1,6 +1,6 @@
 // ── Shared param types ────────────────────────────────────────────────────────
 
-export type PeriodOption = "7" | "30" | "90" | "this_month" | "last_month";
+export type PeriodOption = "today" | "yesterday" | "7" | "30" | "90" | "this_month" | "last_month";
 
 export interface DateRangeParams {
   from: string; // YYYY-MM-DD
@@ -432,6 +432,53 @@ export interface InsightsTickets {
     fieldName:      string;
     totalResponses: number;
     values:         { value: string; count: number }[];
+  }[];
+}
+
+export interface InsightsCiImpact {
+  totals: {
+    totalCIs:  number;
+    linkedCIs: number;
+    tickets:   number;
+    incidents: number;
+    problems:  number;
+    changes:   number;
+    requests:  number;
+  };
+  topCIs: {
+    id:          number;
+    ciNumber:    string;
+    name:        string;
+    type:        string;
+    environment: string;
+    criticality: string;
+    status:      string;
+    tickets:     number;
+    incidents:   number;
+    problems:    number;
+    changes:     number;
+    requests:    number;
+    total:       number;
+  }[];
+  byType: {
+    key:       string;
+    ciCount:   number;
+    tickets:   number;
+    incidents: number;
+    problems:  number;
+    changes:   number;
+    requests:  number;
+    total:     number;
+  }[];
+  byCriticality: {
+    key:       string;
+    ciCount:   number;
+    tickets:   number;
+    incidents: number;
+    problems:  number;
+    changes:   number;
+    requests:  number;
+    total:     number;
   }[];
 }
 

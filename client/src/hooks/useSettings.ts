@@ -67,6 +67,11 @@ export function useUpdateSettings<S extends SettingsSection>(section: S) {
       // current section as stale, trigger a background refetch, call reset(),
       // and silently flip isDirty back to false while the user is still editing.
       queryClient.invalidateQueries({ queryKey: ["settings"], exact: true });
+      // Saving integrations may toggle Google Sign-In — invalidate the public
+      // auth-providers query so login pages see the change without a reload.
+      if (section === "integrations") {
+        queryClient.invalidateQueries({ queryKey: ["public-auth-providers"] });
+      }
     },
   });
 }

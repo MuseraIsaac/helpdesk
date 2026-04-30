@@ -10,9 +10,12 @@ import { ticketTypes } from "../constants/ticket-type";
 export const inboundEmailSchema = z.object({
   from: z.email("Invalid email address"),
   fromName: z.string().trim().min(1, "Sender name is required").max(255, "Sender name is too long"),
-  subject: z.string().trim().min(1, "Subject is required").max(255, "Subject is too long"),
-  body: z.string().min(1, "Body is required").max(1000, "Body is too long"),
-  bodyHtml: z.string().max(2000, "HTML body is too long").optional(),
+  subject: z.string().trim().min(1, "Subject is required").max(500, "Subject is too long"),
+  // Real-world emails routinely exceed the original 1000/2000 caps —
+  // signatures, quoted threads, and HTML markup all push past those limits.
+  // The DB columns are TEXT so 100 KB / 500 KB is comfortable.
+  body: z.string().max(100_000, "Body is too long").default(""),
+  bodyHtml: z.string().max(500_000, "HTML body is too long").optional(),
 });
 
 export type InboundEmailInput = z.infer<typeof inboundEmailSchema>;
@@ -66,6 +69,10 @@ export const updateTicketSchema = z.object({
   urgency: z.enum(ticketUrgencies).nullable().optional(),
   /** true = manual escalate, false = de-escalate */
   escalate: z.boolean().optional(),
+  /** Optional manual-escalation target — team to escalate to */
+  escalateToTeamId: z.number().int().positive().optional(),
+  /** Optional manual-escalation target — agent to escalate to */
+  escalateToUserId: z.string().optional(),
   /** null = remove from team; positive int = assign to team */
   teamId: z.number().int().positive().nullable().optional(),
   /** null = clear custom status; positive int = apply custom status ID */

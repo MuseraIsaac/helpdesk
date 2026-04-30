@@ -71,11 +71,14 @@
   --border: oklch(0.92 0.003 270);
   --input: oklch(0.92 0.003 270);
   --ring: oklch(0.527 0.280 287);
-  --chart-1: oklch(0.527 0.280 287);
-  --chart-2: oklch(0.623 0.214 259);
-  --chart-3: oklch(0.696 0.17 162.48);
-  --chart-4: oklch(0.78 0.17 75);
-  --chart-5: oklch(0.645 0.246 16.439);
+  --chart-1: oklch(0.58 0.24 277);   /* indigo-violet */
+  --chart-2: oklch(0.66 0.18 235);   /* sky blue      */
+  --chart-3: oklch(0.72 0.17 162);   /* emerald       */
+  --chart-4: oklch(0.78 0.17 75);    /* amber         */
+  --chart-5: oklch(0.66 0.24 12);    /* rose          */
+  --chart-6: oklch(0.70 0.18 195);   /* teal/cyan     */
+  --chart-7: oklch(0.62 0.22 320);   /* magenta       */
+  --chart-8: oklch(0.74 0.18 130);   /* lime          */
   --sidebar: oklch(0.972 0.007 287);
   --sidebar-foreground: oklch(0.24 0.022 270);
   --sidebar-primary: oklch(0.527 0.280 287);
@@ -92,29 +95,34 @@
 }
 
 .dark {
-  --background: oklch(0.13 0.01 270);
-  --foreground: oklch(0.93 0.003 270);
-  --card: oklch(0.17 0.01 270);
-  --card-foreground: oklch(0.93 0.003 270);
-  --popover: oklch(0.17 0.01 270);
-  --popover-foreground: oklch(0.93 0.003 270);
-  --primary: oklch(0.60 0.27 287);
+  /* Deep blue-violet canvas — cooler than neutral grey, never flat black */
+  --background: oklch(0.115 0.020 268);
+  --foreground: oklch(0.945 0.005 268);
+  /* Clear hierarchy: bg < card < popover so floating UI reads as floating */
+  --card: oklch(0.165 0.022 268);
+  --card-foreground: oklch(0.945 0.005 268);
+  --popover: oklch(0.205 0.024 268);
+  --popover-foreground: oklch(0.945 0.005 268);
+  --primary: oklch(0.635 0.275 287);
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.21 0.01 270);
-  --secondary-foreground: oklch(0.93 0.003 270);
-  --muted: oklch(0.21 0.01 270);
-  --muted-foreground: oklch(0.55 0.008 270);
-  --accent: oklch(0.21 0.01 270);
-  --accent-foreground: oklch(0.93 0.003 270);
+  --secondary: oklch(0.205 0.020 268);
+  --secondary-foreground: oklch(0.945 0.005 268);
+  --muted: oklch(0.195 0.018 268);
+  --muted-foreground: oklch(0.640 0.014 268);
+  --accent: oklch(0.225 0.024 268);
+  --accent-foreground: oklch(0.96 0.005 268);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(0.25 0.01 270);
-  --input: oklch(0.21 0.01 270);
-  --ring: oklch(0.60 0.27 287);
-  --chart-1: oklch(0.60 0.27 287);
-  --chart-2: oklch(0.623 0.214 259);
-  --chart-3: oklch(0.696 0.17 162.48);
-  --chart-4: oklch(0.78 0.17 75);
-  --chart-5: oklch(0.645 0.246 16.439);
+  --border: oklch(0.255 0.022 270);
+  --input: oklch(0.205 0.022 268);
+  --ring: oklch(0.690 0.270 287);
+  --chart-1: oklch(0.70 0.24 280);   /* indigo-violet */
+  --chart-2: oklch(0.74 0.18 235);   /* sky blue      */
+  --chart-3: oklch(0.78 0.17 162);   /* emerald       */
+  --chart-4: oklch(0.82 0.17 75);    /* amber         */
+  --chart-5: oklch(0.74 0.22 12);    /* rose          */
+  --chart-6: oklch(0.78 0.17 195);   /* teal/cyan     */
+  --chart-7: oklch(0.72 0.22 320);   /* magenta       */
+  --chart-8: oklch(0.80 0.18 130);   /* lime          */
   --sidebar: oklch(0.093 0.022 277);
   --sidebar-foreground: oklch(0.86 0.007 268);
   --sidebar-primary: oklch(0.655 0.265 287);
@@ -180,6 +188,43 @@
   input:-webkit-autofill:focus {
     -webkit-background-clip: text;
     -webkit-text-fill-color: var(--foreground);
+  }
+
+  /* Subtle ambient backdrop — a faint violet wash from the top, helps the
+     canvas feel like a lit surface instead of paint */
+  .dark body {
+    background-image:
+      radial-gradient(ellipse 90% 50% at 50% -10%, oklch(0.20 0.055 285 / 0.55) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 100% 100%, oklch(0.17 0.045 250 / 0.35) 0%, transparent 65%);
+    background-attachment: fixed;
+  }
+
+  /* Pro "elevated surface" trick: hairline highlight along the top edge of
+     cards/popovers/dialogs in dark mode. Used by Linear, Vercel, Raycast.
+     The gradient overlay sits inside the border-radius via background-clip. */
+  .dark [data-slot="card"],
+  .dark [data-slot="popover-content"],
+  .dark [data-slot="dialog-content"],
+  .dark [data-slot="dropdown-menu-content"],
+  .dark [data-slot="select-content"],
+  .dark [data-slot="command"] {
+    background-image:
+      linear-gradient(180deg,
+        oklch(1 0 0 / 0.035) 0%,
+        oklch(1 0 0 / 0.012) 1px,
+        transparent 1px,
+        transparent 100%);
+    box-shadow:
+      0 0 0 1px oklch(1 0 0 / 0.02),
+      0 1px 2px oklch(0 0 0 / 0.4),
+      0 8px 24px -8px oklch(0 0 0 / 0.5);
+  }
+
+  /* Focus rings get a soft outer glow in dark mode on interactive elements —
+     matches the violet primary. Scoped to inputs/buttons/links to avoid bleed
+     onto table rows or non-interactive tabindex containers. */
+  .dark :is(button, a, input, textarea, select, [role="button"], [role="link"]):focus-visible {
+    box-shadow: 0 0 0 3px oklch(0.690 0.270 287 / 0.20);
   }
 }
 
@@ -804,4 +849,51 @@
 @keyframes kpi-in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Widget appearance editor — content-size slider.
+   Native range inputs need vendor pseudo-elements to style the track + thumb. */
+.widget-scale-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+  transition: filter 150ms ease;
+}
+.widget-scale-slider:hover { filter: brightness(1.05); }
+.widget-scale-slider:focus-visible {
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.2);
+}
+.widget-scale-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  width: 16px;
+  border-radius: 9999px;
+  background: hsl(var(--background));
+  border: 2px solid hsl(var(--primary));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15), 0 0 0 0 hsl(var(--primary) / 0.25);
+  cursor: grab;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.widget-scale-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 0 0 4px hsl(var(--primary) / 0.18);
+}
+.widget-scale-slider:active::-webkit-slider-thumb { cursor: grabbing; }
+.widget-scale-slider::-moz-range-thumb {
+  height: 16px;
+  width: 16px;
+  border-radius: 9999px;
+  background: hsl(var(--background));
+  border: 2px solid hsl(var(--primary));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+  cursor: grab;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.widget-scale-slider::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 0 0 4px hsl(var(--primary) / 0.18);
 }

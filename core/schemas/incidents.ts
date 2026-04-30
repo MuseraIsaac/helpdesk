@@ -27,6 +27,12 @@ export const updateIncidentSchema = z.object({
   commanderId: z.string().nullable().optional(),
   assignedToId: z.string().nullable().optional(),
   teamId: z.number().int().positive().nullable().optional(),
+  /**
+   * Bypass the standard status workflow validation. Admin/supervisor only —
+   * use sparingly for legitimate cases like reopening a closed incident or
+   * skipping intermediate states. The server enforces the role check.
+   */
+  force: z.boolean().optional(),
 });
 export type UpdateIncidentInput = z.infer<typeof updateIncidentSchema>;
 

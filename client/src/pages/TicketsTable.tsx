@@ -69,7 +69,7 @@ const ALL_COLUMN_DEFS: Record<ColumnId, ColumnDef<Ticket>> = {
     enableSorting: false,
     cell: ({ row }) => (
       <Link
-        to={`/tickets/${row.original.id}`}
+        to={`/tickets/${row.original.ticketNumber}`}
         className="font-mono text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
       >
         {row.original.ticketNumber}
@@ -86,7 +86,7 @@ const ALL_COLUMN_DEFS: Record<ColumnId, ColumnDef<Ticket>> = {
         lastNote={row.original.lastNote}
       >
         <div className="flex items-center gap-1.5">
-          <Link to={`/tickets/${row.original.id}`} className="link font-medium">
+          <Link to={`/tickets/${row.original.ticketNumber}`} className="link font-medium">
             {row.original.subject}
           </Link>
           {row.original.isEscalated && (
@@ -336,10 +336,11 @@ export default function TicketsTable({ filters, viewConfig, onSelectionChange, s
       });
       return data;
     },
-    // Avoid an immediate refetch when the user toggles a filter sidebar
-    // panel and React re-mounts a sibling — the same query key gets a hit
-    // for 15s before going stale.
-    staleTime: 15_000,
+    // Cache the list for a minute. Mutations from inside the app already
+    // invalidate ["tickets"] on success, so this only changes the behaviour
+    // for plain navigation (filter panel toggles, drill into detail and
+    // back) — exactly the cases where we don't need a fresh round-trip.
+    staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
 

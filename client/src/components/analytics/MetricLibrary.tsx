@@ -5,7 +5,7 @@
  */
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, Plus, BarChart2, TrendingUp, Activity, Users, BookOpen, Star, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { Search, Plus, BarChart2, TrendingUp, Activity, Users, BookOpen, Star, AlertTriangle, ChevronDown, ChevronRight, Package } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -26,12 +26,78 @@ const DOMAIN_META: Record<string, { label: string; icon: React.ElementType }> = 
   kb:       { label: "Knowledge Base",icon: BookOpen },
   realtime: { label: "Real-time",     icon: Activity },
   approvals:{ label: "Approvals",     icon: BarChart2 },
+  assets:   { label: "Assets & CMDB", icon: Package },
 };
 
 const DOMAIN_ORDER = [
   "tickets", "incidents", "requests", "problems", "changes",
-  "agents", "teams", "csat", "kb", "realtime", "approvals",
+  "agents", "teams", "csat", "kb", "assets", "realtime", "approvals",
 ];
+
+// ── Subcategories ─────────────────────────────────────────────────────────────
+//
+// Each domain is split into smaller, themed groups (mirrors the dashboard's
+// WIDGET_CATEGORIES breakdown). Metric ids that don't appear in any group
+// fall through to "Other" so nothing disappears if a new metric is added
+// server-side.
+
+interface SubGroup { label: string; ids: string[] }
+
+const SUBCATEGORIES: Record<string, SubGroup[]> = {
+  tickets: [
+    { label: "Volume",       ids: ["tickets.volume", "tickets.backlog", "tickets.aging", "tickets.assigned_not_replied", "tickets.overdue"] },
+    { label: "Performance",  ids: ["tickets.first_response_time", "tickets.resolution_time", "tickets.fcr", "tickets.ai_resolution_rate"] },
+    { label: "Breakdowns",   ids: ["tickets.by_agent", "tickets.by_team", "tickets.priority_distribution", "tickets.status_distribution"] },
+    { label: "SLA & Quality", ids: ["tickets.sla_compliance"] },
+    { label: "Top Lists",    ids: ["tickets.top_open"] },
+  ],
+  agents: [
+    { label: "Throughput",   ids: ["agent.tickets_resolved", "agent.volume_trend", "agent.workload"] },
+    { label: "Performance",  ids: ["agent.first_response_time", "agent.avg_resolution_time", "agent.fcr_rate"] },
+    { label: "Quality",      ids: ["agent.csat_score", "agent.sla_compliance"] },
+  ],
+  teams: [
+    { label: "Throughput",   ids: ["team.tickets_resolved", "team.volume_trend", "team.queue_depth"] },
+    { label: "Performance",  ids: ["team.first_response_time", "team.avg_resolution_time"] },
+    { label: "Quality",      ids: ["team.csat_score", "team.sla_compliance"] },
+  ],
+  incidents: [
+    { label: "Volume",       ids: ["incidents.volume", "incidents.major_count"] },
+    { label: "Performance",  ids: ["incidents.mtta", "incidents.mttr", "incidents.sla_compliance"] },
+  ],
+  requests: [
+    { label: "Volume",       ids: ["requests.volume", "requests.top_items"] },
+    { label: "Performance",  ids: ["requests.fulfillment_time", "requests.sla_compliance"] },
+  ],
+  problems: [
+    { label: "Volume",       ids: ["problems.volume", "problems.known_errors", "problems.recurring"] },
+    { label: "Performance",  ids: ["problems.avg_resolution_days"] },
+  ],
+  changes: [
+    { label: "Volume",       ids: ["changes.volume", "changes.by_type", "changes.by_risk"] },
+    { label: "Performance",  ids: ["changes.approval_time", "changes.success_rate"] },
+  ],
+  approvals: [
+    { label: "Queue",        ids: ["approvals.pending_queue", "approvals.volume"] },
+    { label: "Performance",  ids: ["approvals.turnaround_time"] },
+  ],
+  kb: [
+    { label: "Volume",       ids: ["kb.article_count", "kb.published_trend", "kb.view_count"] },
+    { label: "Quality",      ids: ["kb.helpful_ratio", "kb.feedback_trend"] },
+    { label: "Top Lists",    ids: ["kb.top_articles", "kb.most_helpful"] },
+  ],
+  realtime: [
+    { label: "Tickets",      ids: ["realtime.open_tickets", "realtime.unassigned_tickets", "realtime.overdue_tickets", "realtime.assigned_not_replied"] },
+    { label: "SLA",          ids: ["realtime.sla_at_risk", "realtime.sla_breached_open"] },
+    { label: "Other Modules", ids: ["realtime.active_incidents", "realtime.open_problems", "realtime.open_requests", "realtime.changes_in_progress", "realtime.pending_approvals"] },
+    { label: "Agents",       ids: ["realtime.agent_workload_snapshot"] },
+  ],
+  assets: [
+    { label: "Inventory",    ids: ["assets.total", "assets.by_status", "assets.by_type", "assets.by_location", "assets.by_team"] },
+    { label: "Lifecycle",    ids: ["assets.warranty_expiring", "assets.retirement_due", "assets.retirement_trend", "assets.stale"] },
+    { label: "Discovery & Issues", ids: ["assets.discovery_trend", "assets.with_open_incidents"] },
+  ],
+};
 
 // ── Default widget sizes per visualization ────────────────────────────────────
 
@@ -136,22 +202,56 @@ export function MetricLibrary({ onAddMetric, existingIds }: Props) {
                   <span className="ml-auto text-[10px] text-muted-foreground/60">{items.length}</span>
                 </button>
 
-                {/* Metric rows */}
+                {/* Metric rows — split into subcategories when configured */}
                 {isOpen && (
                   <div>
-                    {items.map(metric => {
-                      const alreadyAdded = existingIds.some(id => {
-                        // id is the widget instance id, not metricId — so we check differently
-                        return false; // always allow adding duplicates
-                      });
-                      return (
-                        <MetricRow
-                          key={metric.id}
-                          metric={metric}
-                          onAdd={() => onAddMetric(metric)}
-                        />
-                      );
-                    })}
+                    {(() => {
+                      const subs = SUBCATEGORIES[domain];
+                      // No subcategory config OR a search is active → flat list
+                      // (search results would be confusingly hidden under empty subgroups).
+                      if (!subs || query.trim()) {
+                        return items.map(metric => (
+                          <MetricRow
+                            key={metric.id}
+                            metric={metric}
+                            onAdd={() => onAddMetric(metric)}
+                          />
+                        ));
+                      }
+
+                      const seen = new Set<string>();
+                      const groups: { label: string; metrics: MetricMeta[] }[] = [];
+                      for (const sub of subs) {
+                        const matched = items.filter(m => sub.ids.includes(m.id));
+                        if (matched.length === 0) continue;
+                        for (const m of matched) seen.add(m.id);
+                        groups.push({ label: sub.label, metrics: matched });
+                      }
+                      const leftover = items.filter(m => !seen.has(m.id));
+                      if (leftover.length > 0) {
+                        groups.push({ label: "Other", metrics: leftover });
+                      }
+
+                      return groups.map(g => (
+                        <div key={g.label} className="mb-1 last:mb-0">
+                          <div className="flex items-center gap-1.5 px-3 pt-1 pb-0.5">
+                            <span className="h-px flex-1 bg-border/40" />
+                            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                              {g.label}
+                            </span>
+                            <span className="text-[9px] text-muted-foreground/40 tabular-nums">{g.metrics.length}</span>
+                            <span className="h-px flex-1 bg-border/40" />
+                          </div>
+                          {g.metrics.map(metric => (
+                            <MetricRow
+                              key={metric.id}
+                              metric={metric}
+                              onAdd={() => onAddMetric(metric)}
+                            />
+                          ))}
+                        </div>
+                      ));
+                    })()}
                   </div>
                 )}
               </div>

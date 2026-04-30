@@ -5,6 +5,7 @@ import { requirePermission } from "../middleware/require-permission";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
 import prisma from "../db";
+import { setMediumCache } from "../lib/cache-control";
 
 const router = Router();
 
@@ -30,6 +31,7 @@ const updateStatusConfigSchema = z.object({
 
 // GET /api/ticket-status-configs
 router.get("/", requireAuth, async (_req, res) => {
+  setMediumCache(res);
   const configs = await prisma.ticketStatusConfig.findMany({
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
     select: {

@@ -63,6 +63,20 @@ export async function registerSlaCheckerWorker(boss: PgBoss): Promise<void> {
         console.log(`[check-sla] Marked ${breachingTickets.length} ticket(s) as SLA breached`);
       }
 
+      // Mark service requests as breached when their SLA due-at has passed
+      // and the request is still in a non-terminal state.
+      const breachingRequests = await prisma.serviceRequest.updateMany({
+        where: {
+          slaBreached: false,
+          slaDueAt: { lt: now },
+          status: { notIn: ["fulfilled", "closed", "rejected", "cancelled"] },
+        },
+        data: { slaBreached: true },
+      });
+      if (breachingRequests.count > 0) {
+        console.log(`[check-sla] Marked ${breachingRequests.count} service request(s) as SLA breached`);
+      }
+
       // Step 2: escalate all tickets that meet escalation criteria
       // (includes newly breached, urgent, and sev1 tickets not yet escalated)
       const escalatedCount = await escalateBreachedTickets();

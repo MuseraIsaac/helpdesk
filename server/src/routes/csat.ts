@@ -8,7 +8,7 @@ router.use(requireAuth);
 
 // GET /api/csat/summary — aggregate CSAT metrics for the dashboard
 router.get("/summary", async (_req, res) => {
-  const [ratings, resolvedCount] = await Promise.all([
+  const [ratings, resolvedCount, ratedResolvedCount] = await Promise.all([
     prisma.csatRating.findMany({
       select: {
         id: true,
@@ -19,8 +19,20 @@ router.get("/summary", async (_req, res) => {
       },
       orderBy: { submittedAt: "desc" },
     }),
+    // Currently resolved/closed tickets — denominator for response rate.
     prisma.ticket.count({
       where: { status: { in: ["resolved", "closed"] } },
+    }),
+    // Resolved/closed tickets that received at least one CSAT rating —
+    // numerator. Counting tickets (not ratings) avoids the >100% bug
+    // where multiple ratings per ticket would inflate the rate, and
+    // gating on current status excludes ratings on tickets that have
+    // since been reopened.
+    prisma.ticket.count({
+      where: {
+        status:     { in: ["resolved", "closed"] },
+        csatRating: { isNot: null },
+      },
     }),
   ]);
 
@@ -31,7 +43,7 @@ router.get("/summary", async (_req, res) => {
   const positiveCount = ratings.filter((r) => r.rating >= 4).length;
   const negativeCount = ratings.filter((r) => r.rating <= 2).length;
   const responseRate = resolvedCount > 0
-    ? Math.round((total / resolvedCount) * 100)
+    ? Math.min(100, Math.round((ratedResolvedCount / resolvedCount) * 100))
     : 0;
 
   const distribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
