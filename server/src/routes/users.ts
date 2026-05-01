@@ -108,12 +108,20 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   const data = validate(updateUserSchema, req.body, res);
   if (!data) return;
 
-  const { name, email, password, role } = data;
+  const { name, password, role } = data;
   if (!(await ensureAssignableRole(role, res))) return;
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing && existing.id !== id) {
-    res.status(409).json({ error: "Email already exists" });
+  // Email is the user's stable identifier for sign-in and OAuth account
+  // linking — changing it would orphan linked Google accounts and surprise
+  // anyone who's bookmarked / muscle-memoried it. Ignore whatever the client
+  // sends and keep the existing value. The form should render email as
+  // read-only; this is defense in depth.
+  const target = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true, email: true },
+  });
+  if (!target) {
+    res.status(404).json({ error: "User not found" });
     return;
   }
 
@@ -121,7 +129,6 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     where: { id: id },
     data: {
       name,
-      email,
       updatedAt: new Date(),
       ...(role !== undefined && { role }),
       ...(data.globalTicketView !== undefined && { globalTicketView: data.globalTicketView }),
@@ -130,10 +137,28 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 
   if (password) {
     const hashedPassword = await hashPassword(password);
-    await prisma.account.updateMany({
+    // Update the existing credential row if there is one. If the user only
+    // has OAuth accounts (e.g. signed in via Google, no credential row), the
+    // updateMany would silently do nothing — so create the credential row in
+    // that case so the admin-set password actually takes effect on next login.
+    const updated = await prisma.account.updateMany({
       where: { userId: id, providerId: "credential" },
       data: { password: hashedPassword, updatedAt: new Date() },
     });
+    if (updated.count === 0) {
+      const now = new Date();
+      await prisma.account.create({
+        data: {
+          id: crypto.randomUUID(),
+          accountId: id,
+          providerId: "credential",
+          userId: id,
+          password: hashedPassword,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    }
   }
 
   const user = await prisma.user.findUnique({
@@ -143,7 +168,6 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 
   const changes: string[] = [];
   if (name  !== undefined) changes.push("name");
-  if (email !== undefined) changes.push("email");
   if (role  !== undefined) changes.push("role");
   if (data.globalTicketView !== undefined) changes.push("globalTicketView");
   if (password)            changes.push("password");

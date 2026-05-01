@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -90,6 +90,19 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [serverError, setServerError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
+  // "Remember me" — opt-in for browser credential management. Defaults to OFF
+  // so password-manager prompts and auto-fill don't appear unless the user
+  // explicitly asks for them. The choice is persisted across visits in
+  // localStorage so a user who once opted in stays opted in.
+  const [rememberMe, setRememberMe] = useState<boolean>(() => {
+    try { return localStorage.getItem("helpdesk:remember-login") === "1"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("helpdesk:remember-login", rememberMe ? "1" : "0"); }
+    catch { /* private mode / quota — no-op */ }
+  }, [rememberMe]);
   const { data: branding } = useBranding();
   const { data: authProviders } = useAuthProviders();
   const googleEnabled = authProviders?.google ?? false;
@@ -282,8 +295,22 @@ export default function LoginPage() {
             </>
           )}
 
-          {/* Form */}
-          <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+          {/* Form
+           *
+           * autoComplete strategy:
+           *   - rememberMe OFF (default) → "off" / "new-password" — strongest
+           *     hint to browsers to suppress autofill and the save-password
+             *     prompt. Some browsers still try; this is the best we can do
+             *     without breaking accessibility.
+           *   - rememberMe ON → "email" / "current-password" — standard signin
+           *     hints, browser is free to autofill and offer to save.
+           */}
+          <form
+            onSubmit={handleSubmit(onSubmit)}
+            noValidate
+            autoComplete={rememberMe ? "on" : "off"}
+            className="space-y-4"
+          >
 
             {/* Email */}
             <div className="space-y-1.5">
@@ -294,6 +321,7 @@ export default function LoginPage() {
                   id="email"
                   type="email"
                   placeholder="you@company.com"
+                  autoComplete={rememberMe ? "email" : "off"}
                   className="pl-10 h-11 bg-muted/30 border-border/60 focus:bg-background transition-colors"
                   {...register("email")}
                 />
@@ -314,6 +342,7 @@ export default function LoginPage() {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
+                  autoComplete={rememberMe ? "current-password" : "new-password"}
                   className="pl-10 pr-12 h-11 bg-muted/30 border-border/60 focus:bg-background transition-colors"
                   {...register("password")}
                 />
@@ -331,6 +360,27 @@ export default function LoginPage() {
                   <span>•</span> {errors.password.message}
                 </p>
               )}
+            </div>
+
+            {/* Remember me + Forgot password */}
+            <div className="flex items-center justify-between">
+              <label className="inline-flex items-center gap-2 cursor-pointer select-none group">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
+                />
+                <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">
+                  Remember me on this device
+                </span>
+              </label>
+              <Link
+                to="/forgot-password"
+                className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Forgot password?
+              </Link>
             </div>
 
             {/* Submit */}

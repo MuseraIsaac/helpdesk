@@ -214,6 +214,8 @@ export interface SoftwareLicenseSummary {
   version:          string | null;
   platform:         SoftwarePlatform;
   licenseType:      SoftwareLicenseType;
+  customLicenseTypeId: number | null;
+  customLicenseType:   { id: number; name: string; color: string | null } | null;
   status:           SoftwareLicenseStatus;
   totalSeats:       number | null;
   consumedSeats:    number;
@@ -264,6 +266,8 @@ export interface SaaSSubscriptionSummary {
   appName:            string;
   vendor:             string | null;
   category:           SaaSCategory;
+  customCategoryId:   number | null;
+  customCategory:     { id: number; name: string; color: string | null } | null;
   status:             SaaSSubscriptionStatus;
   plan:               string | null;
   billingCycle:       SaaSBillingCycle;

@@ -183,7 +183,12 @@ export default function PortalRegisterPage() {
           {mutation.error && (
             <div className="mb-5 flex items-start gap-3 rounded-xl border border-destructive/25 bg-destructive/8 px-4 py-3 text-sm text-destructive">
               <span className="shrink-0 mt-0.5">⚠</span>
-              <span>Registration failed. Please try again.</span>
+              <span>
+                {axios.isAxiosError(mutation.error)
+                  ? (mutation.error.response?.data as { error?: string })?.error
+                    ?? "Registration failed. Please try again."
+                  : "Registration failed. Please try again."}
+              </span>
             </div>
           )}
 

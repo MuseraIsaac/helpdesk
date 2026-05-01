@@ -27,6 +27,8 @@ export const createSoftwareLicenseSchema = z.object({
   version:        z.string().max(50).nullish(),
   platform:       z.enum(SOFTWARE_PLATFORMS as [Platform, ...Platform[]]).default("cross_platform"),
   licenseType:    z.enum(SOFTWARE_LICENSE_TYPES as [LicType, ...LicType[]]).default("perpetual"),
+  /** Optional reference to an admin-defined extension of the built-in licenseType enum. */
+  customLicenseTypeId: z.number().int().positive().nullable().optional(),
   status:         z.enum(SOFTWARE_LICENSE_STATUSES as [LicStatus, ...LicStatus[]]).default("active"),
 
   licenseKey:       z.string().max(500).nullish(),
@@ -95,6 +97,8 @@ export const createSaaSSubscriptionSchema = z.object({
   appName:     z.string().min(1, "App name is required").max(200),
   vendor:      z.string().max(200).nullish(),
   category:    z.enum(SAAS_CATEGORIES     as [SaasCategory,  ...SaasCategory[]]).default("other"),
+  /** Optional reference to an admin-defined extension of the built-in category enum. */
+  customCategoryId: z.number().int().positive().nullable().optional(),
   status:      z.enum(SAAS_SUBSCRIPTION_STATUSES as [SaasStatus, ...SaasStatus[]]).default("active"),
   plan:        z.string().max(100).nullish(),
   billingCycle: z.enum(SAAS_BILLING_CYCLES as [BillingCycle, ...BillingCycle[]]).default("annual"),

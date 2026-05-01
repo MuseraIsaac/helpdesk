@@ -17,7 +17,7 @@ import {
   Ticket, Server, BookOpen, AlertCircle, ArrowUpDown,
   Inbox, CheckCircle2, Search, Filter, Clock, Shield,
   ChevronDown, RefreshCw, PackageOpen, CalendarClock,
-  XCircle, Info, Settings,
+  XCircle, Info, Settings, Cloud, Key,
 } from "lucide-react";
 import { Link } from "react-router";
 import { Button }     from "@/components/ui/button";
@@ -42,7 +42,10 @@ import ErrorAlert from "@/components/ErrorAlert";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type EntityType = "ticket" | "incident" | "request" | "problem" | "change" | "asset" | "kb_article";
+type EntityType =
+  | "ticket" | "incident" | "request" | "problem"
+  | "change" | "asset" | "kb_article"
+  | "saas_subscription" | "software_license";
 
 interface TrashItem {
   type:          EntityType;
@@ -58,13 +61,15 @@ interface TrashItem {
 
 interface TrashSummary {
   counts: {
-    tickets:    number;
-    incidents:  number;
-    requests:   number;
-    problems:   number;
-    changes:    number;
-    assets:     number;
-    kbArticles: number;
+    tickets:           number;
+    incidents:         number;
+    requests:          number;
+    problems:          number;
+    changes:           number;
+    assets:            number;
+    kbArticles:        number;
+    saasSubscriptions: number;
+    softwareLicenses:  number;
   };
   total:          number;
   retentionDays:  number;
@@ -74,13 +79,15 @@ interface TrashSummary {
 // ── Entity metadata ───────────────────────────────────────────────────────────
 
 const ENTITY_META: Record<EntityType, { label: string; plural: string; icon: React.ElementType; color: string; bg: string }> = {
-  ticket:     { label: "Ticket",          plural: "Tickets",          icon: Ticket,       color: "text-blue-600 dark:text-blue-400",   bg: "bg-blue-100 dark:bg-blue-900/30"   },
-  incident:   { label: "Incident",        plural: "Incidents",        icon: AlertTriangle,color: "text-red-600 dark:text-red-400",     bg: "bg-red-100 dark:bg-red-900/30"     },
-  request:    { label: "Service Request", plural: "Service Requests", icon: Inbox,        color: "text-violet-600 dark:text-violet-400",bg: "bg-violet-100 dark:bg-violet-900/30"},
-  problem:    { label: "Problem",         plural: "Problems",         icon: AlertCircle,  color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-100 dark:bg-amber-900/30" },
-  change:     { label: "Change",          plural: "Changes",          icon: ArrowUpDown,  color: "text-emerald-600 dark:text-emerald-400",bg:"bg-emerald-100 dark:bg-emerald-900/30"},
-  asset:      { label: "Asset",           plural: "Assets",           icon: Server,       color: "text-sky-600 dark:text-sky-400",     bg: "bg-sky-100 dark:bg-sky-900/30"     },
-  kb_article: { label: "KB Article",      plural: "KB Articles",      icon: BookOpen,     color: "text-pink-600 dark:text-pink-400",   bg: "bg-pink-100 dark:bg-pink-900/30"   },
+  ticket:            { label: "Ticket",          plural: "Tickets",          icon: Ticket,       color: "text-blue-600 dark:text-blue-400",   bg: "bg-blue-100 dark:bg-blue-900/30"   },
+  incident:          { label: "Incident",        plural: "Incidents",        icon: AlertTriangle,color: "text-red-600 dark:text-red-400",     bg: "bg-red-100 dark:bg-red-900/30"     },
+  request:           { label: "Service Request", plural: "Service Requests", icon: Inbox,        color: "text-violet-600 dark:text-violet-400",bg: "bg-violet-100 dark:bg-violet-900/30"},
+  problem:           { label: "Problem",         plural: "Problems",         icon: AlertCircle,  color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-100 dark:bg-amber-900/30" },
+  change:            { label: "Change",          plural: "Changes",          icon: ArrowUpDown,  color: "text-emerald-600 dark:text-emerald-400",bg:"bg-emerald-100 dark:bg-emerald-900/30"},
+  asset:             { label: "Asset",           plural: "Assets",           icon: Server,       color: "text-sky-600 dark:text-sky-400",     bg: "bg-sky-100 dark:bg-sky-900/30"     },
+  kb_article:        { label: "KB Article",      plural: "KB Articles",      icon: BookOpen,     color: "text-pink-600 dark:text-pink-400",   bg: "bg-pink-100 dark:bg-pink-900/30"   },
+  saas_subscription: { label: "SaaS Subscription", plural: "SaaS Subscriptions", icon: Cloud,    color: "text-sky-600 dark:text-sky-400",     bg: "bg-sky-100 dark:bg-sky-900/30"     },
+  software_license:  { label: "Software License",  plural: "Software Licenses",  icon: Key,      color: "text-indigo-600 dark:text-indigo-400", bg: "bg-indigo-100 dark:bg-indigo-900/30" },
 };
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -416,14 +423,16 @@ export default function TrashPage() {
       ) : summary && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: "Tickets",     count: summary.counts.tickets,    type: "ticket"     as EntityType },
-            { label: "Incidents",   count: summary.counts.incidents,  type: "incident"   as EntityType },
-            { label: "Requests",    count: summary.counts.requests,   type: "request"    as EntityType },
-            { label: "Problems",    count: summary.counts.problems,   type: "problem"    as EntityType },
-            { label: "Changes",     count: summary.counts.changes,    type: "change"     as EntityType },
-            { label: "Assets",      count: summary.counts.assets,     type: "asset"      as EntityType },
-            { label: "KB Articles", count: summary.counts.kbArticles, type: "kb_article" as EntityType },
-            { label: "Total",       count: summary.total,             type: undefined                  },
+            { label: "Tickets",       count: summary.counts.tickets,           type: "ticket"            as EntityType },
+            { label: "Incidents",     count: summary.counts.incidents,         type: "incident"          as EntityType },
+            { label: "Requests",      count: summary.counts.requests,          type: "request"           as EntityType },
+            { label: "Problems",      count: summary.counts.problems,          type: "problem"           as EntityType },
+            { label: "Changes",       count: summary.counts.changes,           type: "change"            as EntityType },
+            { label: "Assets",        count: summary.counts.assets,            type: "asset"             as EntityType },
+            { label: "KB Articles",   count: summary.counts.kbArticles,        type: "kb_article"        as EntityType },
+            { label: "SaaS",          count: summary.counts.saasSubscriptions, type: "saas_subscription" as EntityType },
+            { label: "Licenses",      count: summary.counts.softwareLicenses,  type: "software_license"  as EntityType },
+            { label: "Total",         count: summary.total,                    type: undefined                          },
           ].filter((s) => s.count > 0 || s.type === undefined).slice(0, 4).map(({ label, count, type }) => {
             const meta   = type ? ENTITY_META[type] : null;
             const Icon   = meta?.icon ?? PackageOpen;

@@ -28,22 +28,33 @@ import type { TicketType } from "../generated/prisma/client";
 
 // ── Series mapping ────────────────────────────────────────────────────────────
 
-export type TicketSeries = "ticket" | "change_request" | "problem";
+/**
+ * One counter series per ITSM module. Each gets its own prefix and sequence
+ * configurable from Settings → Ticket Numbering.
+ */
+export type TicketSeries =
+  | "ticket"
+  | "incident"
+  | "service_request"
+  | "change_request"
+  | "problem"
+  | "asset"
+  | "ci";
 
 /**
- * Maps a Prisma TicketType to its counter series.
- *
- * Incidents, service requests, and untyped tickets all share the "ticket"
- * series so their numbers are interleaved (TKT0001, TKT0002, …) rather than
- * counted separately. Change requests and problems keep dedicated series.
+ * Maps a Prisma TicketType to its counter series. Each module now has its
+ * own dedicated series (no more shared "ticket" counter for incidents and
+ * service requests) so administrators can configure prefixes per module.
  */
 export function ticketTypeToSeries(
   ticketType: TicketType | null | undefined
 ): TicketSeries {
   switch (ticketType) {
-    case "change_request": return "change_request";
-    case "problem":        return "problem";
-    default:               return "ticket"; // incident, service_request, generic
+    case "incident":        return "incident";
+    case "service_request": return "service_request";
+    case "change_request":  return "change_request";
+    case "problem":         return "problem";
+    default:                return "ticket"; // generic / untyped
   }
 }
 
@@ -82,8 +93,19 @@ export async function generateTicketNumber(
   ticketType: TicketType | null | undefined,
   now = new Date()
 ): Promise<string> {
+  return generateNumberForSeries(ticketTypeToSeries(ticketType), now);
+}
+
+/**
+ * Returns the next formatted number for an arbitrary series (e.g. "asset",
+ * "ci") — used by entity routes that aren't keyed by a TicketType.
+ * Safe to call from concurrent requests.
+ */
+export async function generateNumberForSeries(
+  series: TicketSeries,
+  now = new Date()
+): Promise<string> {
   const settings = await getSection("ticket_numbering");
-  const series   = ticketTypeToSeries(ticketType);
   const config   = settings[series];
 
   const pk = buildPeriodKey(config.resetPeriod, now);

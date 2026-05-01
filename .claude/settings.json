@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(DATABASE_URL='postgresql://postgres:tf2Fo7MRJjqEXbgKL1tSfGbw@138.199.153.57:5432/helpdesk?schema=public' bun changes-validate.ts)",
+      "Bash(DATABASE_URL='postgresql://postgres:tf2Fo7MRJjqEXbgKL1tSfGbw@138.199.153.57:5432/helpdesk?schema=public' bun triage-test.ts)",
+      "Bash(awk '/^router.patch/,0' server/src/routes/tickets.ts)",
+      "Bash(DATABASE_URL='postgresql://postgres:tf2Fo7MRJjqEXbgKL1tSfGbw@138.199.153.57:5432/helpdesk?schema=public' bun triage-route-test.ts)",
+      "Bash(grep -rn 'to=`/tickets/\\\\${' client/src --include='*.tsx')",
+      "Bash(grep -rn \"to=.\\\\/tickets\\\\/\\\\|to=\\\\`/tickets\\\\/\" client/src --include='*.tsx')",
+      "Bash(grep -rn \"ticketsUrl\\\\|navigateToTicket\\\\|/tickets/\\\\${\" client/src --include='*.tsx' --include='*.ts')",
+      "Bash(grep -rn \"to:.*\\\\`/tickets/\\\\|\\\\`/tickets/\\\\${\" client/src/lib --include='*.ts' --include='*.tsx')",
+      "Bash(grep -rn \"tickets/\\\\${ticket\\\\.\" client/src)",
+      "Bash(grep -n \"navigate.*tickets\\\\|ticket.ticketNumber\\\\|navigate.*\\\\`\" client/src/pages/TicketsPage.tsx)"
+    ]
+  }
+}

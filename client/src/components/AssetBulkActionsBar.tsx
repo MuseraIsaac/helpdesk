@@ -341,6 +341,7 @@ export default function AssetBulkActionsBar({ selectedIds, onClearSelection }: A
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["assets"] });
       qc.invalidateQueries({ queryKey: ["assets-stats"] });
+      qc.invalidateQueries({ queryKey: ["trash-summary"] });
       setDeleteOpen(false);
       onClearSelection();
     },
@@ -408,7 +409,7 @@ export default function AssetBulkActionsBar({ selectedIds, onClearSelection }: A
               className="h-8 gap-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/15"
               onClick={() => setDeleteOpen(true)}>
               <Trash2 className="h-3.5 w-3.5" />
-              Delete
+              Move to trash
             </Button>
           </div>
         </div>
@@ -418,10 +419,10 @@ export default function AssetBulkActionsBar({ selectedIds, onClearSelection }: A
       <AlertDialog open={deleteOpen} onOpenChange={v => { setDeleteOpen(v); if (!v) deleteMutation.reset(); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {count} asset{count !== 1 ? "s" : ""}?</AlertDialogTitle>
+            <AlertDialogTitle>Move {count} asset{count !== 1 ? "s" : ""} to trash?</AlertDialogTitle>
             <AlertDialogDescription>
-              Active assets (deployed or in use) cannot be deleted. All others will be permanently removed.
-              This cannot be undone.
+              Active assets (deployed or in use) cannot be deleted — retire or return them first.
+              All others will be moved to the trash and can be restored from Settings → Trash within the configured retention window before they're permanently purged.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteMutation.isError && <ErrorAlert error={deleteMutation.error} fallback="Failed to delete assets" />}
@@ -431,7 +432,7 @@ export default function AssetBulkActionsBar({ selectedIds, onClearSelection }: A
               className="bg-destructive text-white hover:bg-destructive/90"
               onClick={() => deleteMutation.mutate()}
             >
-              {deleteMutation.isPending ? "Deleting…" : `Delete ${count} asset${count !== 1 ? "s" : ""}`}
+              {deleteMutation.isPending ? "Moving…" : `Move ${count} asset${count !== 1 ? "s" : ""} to trash`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -29,6 +29,7 @@ import { generateTicketNumber as generateRequestNumber } from "../lib/ticket-num
 import { computeRequestSlaDueAt } from "../lib/request-sla";
 import { logRequestEvent } from "../lib/request-events";
 import { createApproval } from "../lib/approval-engine";
+import { getSection } from "../lib/settings";
 import type { Prisma as PrismaTypes } from "../generated/prisma/client";
 
 const router = Router();
@@ -731,6 +732,14 @@ const PORTAL_CATALOG_ITEM_DETAIL_SELECT = {
 
 /** GET /api/portal/catalog — list active catalog items grouped by category */
 router.get("/catalog", requireCustomer, async (_req, res) => {
+  // Honor the global "Public service catalog" setting — when off, the portal
+  // catalog is empty regardless of per-item visibility.
+  const requests = await getSection("requests");
+  if (!requests.catalogPubliclyVisible) {
+    res.json({ catalog: [] });
+    return;
+  }
+
   const [categories, items] = await Promise.all([
     prisma.catalogCategory.findMany({
       where: { isActive: true },
@@ -738,7 +747,7 @@ router.get("/catalog", requireCustomer, async (_req, res) => {
       select: PORTAL_CATALOG_CATEGORY_SELECT,
     }),
     prisma.catalogItem.findMany({
-      where: { isActive: true },
+      where: { isActive: true, visibility: { in: ["portal", "both"] } },
       orderBy: [{ categoryId: "asc" }, { position: "asc" }],
       select: PORTAL_CATALOG_ITEM_SELECT,
     }),
@@ -763,8 +772,14 @@ router.get("/catalog/:id", requireCustomer, async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
 
-  const item = await prisma.catalogItem.findUnique({
-    where: { id, isActive: true },
+  const requests = await getSection("requests");
+  if (!requests.catalogPubliclyVisible) {
+    res.status(404).json({ error: "Catalog item not found" });
+    return;
+  }
+
+  const item = await prisma.catalogItem.findFirst({
+    where: { id, isActive: true, visibility: { in: ["portal", "both"] } },
     select: PORTAL_CATALOG_ITEM_DETAIL_SELECT,
   });
 
@@ -781,8 +796,14 @@ router.post("/catalog/:id/request", requireCustomer, async (req, res) => {
   const data = validate(submitCatalogRequestSchema, req.body, res);
   if (!data) return;
 
-  const item = await prisma.catalogItem.findUnique({
-    where: { id, isActive: true },
+  const requestsCfg = await getSection("requests");
+  if (!requestsCfg.catalogPubliclyVisible) {
+    res.status(404).json({ error: "Catalog item not found" });
+    return;
+  }
+
+  const item = await prisma.catalogItem.findFirst({
+    where: { id, isActive: true, visibility: { in: ["portal", "both"] } },
     select: {
       id: true,
       name: true,

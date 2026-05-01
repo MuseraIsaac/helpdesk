@@ -26,10 +26,12 @@ const router = Router();
 
 export type TrashEntityType =
   | "ticket" | "incident" | "request" | "problem"
-  | "change" | "asset"    | "kb_article";
+  | "change" | "asset"    | "kb_article"
+  | "saas_subscription" | "software_license";
 
 const ENTITY_TYPES: TrashEntityType[] = [
   "ticket", "incident", "request", "problem", "change", "asset", "kb_article",
+  "saas_subscription", "software_license",
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -214,6 +216,52 @@ async function fetchDeleted(
         daysLeft: daysLeft(r.deletedAt!, retentionDays),
       }));
     }
+
+    case "saas_subscription": {
+      const rows = await prisma.saaSSubscription.findMany({
+        where, take: limit, skip: offset,
+        orderBy: { deletedAt: "desc" },
+        select: {
+          id: true, subscriptionNumber: true, appName: true,
+          vendor: true, status: true, billingCycle: true,
+          deletedAt: true, deletedByName: true,
+          owner: { select: { name: true } },
+        },
+      });
+      return rows.map((r) => ({
+        type: "saas_subscription" as const, id: r.id,
+        entityNumber: r.subscriptionNumber,
+        title: r.appName,
+        meta: `${r.vendor ?? "—"} · ${r.status.replace(/_/g, " ")} · ${r.billingCycle.replace(/_/g, " ")}`,
+        assignedTo: r.owner?.name ?? null,
+        deletedAt: r.deletedAt!.toISOString(),
+        deletedByName: r.deletedByName ?? null,
+        daysLeft: daysLeft(r.deletedAt!, retentionDays),
+      }));
+    }
+
+    case "software_license": {
+      const rows = await prisma.softwareLicense.findMany({
+        where, take: limit, skip: offset,
+        orderBy: { deletedAt: "desc" },
+        select: {
+          id: true, licenseNumber: true, productName: true,
+          vendor: true, licenseType: true, status: true,
+          deletedAt: true, deletedByName: true,
+          owner: { select: { name: true } },
+        },
+      });
+      return rows.map((r) => ({
+        type: "software_license" as const, id: r.id,
+        entityNumber: r.licenseNumber,
+        title: r.productName,
+        meta: `${r.vendor ?? "—"} · ${r.licenseType.replace(/_/g, " ")} · ${r.status.replace(/_/g, " ")}`,
+        assignedTo: r.owner?.name ?? null,
+        deletedAt: r.deletedAt!.toISOString(),
+        deletedByName: r.deletedByName ?? null,
+        daysLeft: daysLeft(r.deletedAt!, retentionDays),
+      }));
+    }
   }
 }
 
@@ -233,6 +281,7 @@ interface TrashItem {
 
 const entityTypeSchema = z.enum([
   "ticket","incident","request","problem","change","asset","kb_article",
+  "saas_subscription","software_license",
 ]);
 
 const listQuerySchema = z.object({
@@ -286,6 +335,7 @@ router.get("/summary", requireAuth, requireAdmin, async (req, res) => {
 
   const [
     tickets, incidents, requests, problems, changes, assets, kbArticles,
+    saasSubscriptions, softwareLicenses,
   ] = await Promise.all([
     prisma.ticket.count({ where }),
     prisma.incident.count({ where }),
@@ -294,9 +344,14 @@ router.get("/summary", requireAuth, requireAdmin, async (req, res) => {
     prisma.change.count({ where }),
     prisma.asset.count({ where }),
     prisma.kbArticle.count({ where }),
+    prisma.saaSSubscription.count({ where }),
+    prisma.softwareLicense.count({ where }),
   ]);
 
-  const counts = { tickets, incidents, requests, problems, changes, assets, kbArticles };
+  const counts = {
+    tickets, incidents, requests, problems, changes, assets, kbArticles,
+    saasSubscriptions, softwareLicenses,
+  };
   const total  = Object.values(counts).reduce((s, v) => s + v, 0);
 
   res.json({ counts, total, retentionDays, enabled: settings.enabled });
@@ -313,13 +368,15 @@ router.post("/restore", requireAuth, requireAdmin, async (req, res) => {
 
   for (const { type, id } of data.items) {
     switch (type) {
-      case "ticket":      await prisma.ticket.update({ where: { id }, data: clear }); break;
-      case "incident":    await prisma.incident.update({ where: { id }, data: clear }); break;
-      case "request":     await prisma.serviceRequest.update({ where: { id }, data: clear }); break;
-      case "problem":     await prisma.problem.update({ where: { id }, data: clear }); break;
-      case "change":      await prisma.change.update({ where: { id }, data: clear }); break;
-      case "asset":       await prisma.asset.update({ where: { id }, data: clear }); break;
-      case "kb_article":  await prisma.kbArticle.update({ where: { id }, data: clear }); break;
+      case "ticket":            await prisma.ticket.update({ where: { id }, data: clear }); break;
+      case "incident":          await prisma.incident.update({ where: { id }, data: clear }); break;
+      case "request":           await prisma.serviceRequest.update({ where: { id }, data: clear }); break;
+      case "problem":           await prisma.problem.update({ where: { id }, data: clear }); break;
+      case "change":            await prisma.change.update({ where: { id }, data: clear }); break;
+      case "asset":             await prisma.asset.update({ where: { id }, data: clear }); break;
+      case "kb_article":        await prisma.kbArticle.update({ where: { id }, data: clear }); break;
+      case "saas_subscription": await prisma.saaSSubscription.update({ where: { id }, data: clear }); break;
+      case "software_license":  await prisma.softwareLicense.update({ where: { id }, data: clear }); break;
     }
     restored++;
   }
@@ -340,7 +397,7 @@ router.delete("/", requireAuth, requireAdmin, async (req, res) => {
   if (data.emptyAll) {
     const where = { where: { deletedAt: { not: null } } };
     // Delete in FK-safe order (child records first where needed)
-    const [t, i, req_, p, c, a, kb] = await Promise.all([
+    const [t, i, req_, p, c, a, kb, sa, sl] = await Promise.all([
       prisma.ticket.deleteMany(where),
       prisma.incident.deleteMany(where),
       prisma.serviceRequest.deleteMany(where),
@@ -348,18 +405,22 @@ router.delete("/", requireAuth, requireAdmin, async (req, res) => {
       prisma.change.deleteMany(where),
       prisma.asset.deleteMany(where),
       prisma.kbArticle.deleteMany(where),
+      prisma.saaSSubscription.deleteMany(where),
+      prisma.softwareLicense.deleteMany(where),
     ]);
-    deleted = t.count + i.count + req_.count + p.count + c.count + a.count + kb.count;
+    deleted = t.count + i.count + req_.count + p.count + c.count + a.count + kb.count + sa.count + sl.count;
   } else if (data.items?.length) {
     for (const { type, id } of data.items) {
       switch (type) {
-        case "ticket":      await prisma.ticket.delete({ where: { id } }); break;
-        case "incident":    await prisma.incident.delete({ where: { id } }); break;
-        case "request":     await prisma.serviceRequest.delete({ where: { id } }); break;
-        case "problem":     await prisma.problem.delete({ where: { id } }); break;
-        case "change":      await prisma.change.delete({ where: { id } }); break;
-        case "asset":       await prisma.asset.delete({ where: { id } }); break;
-        case "kb_article":  await prisma.kbArticle.delete({ where: { id } }); break;
+        case "ticket":            await prisma.ticket.delete({ where: { id } }); break;
+        case "incident":          await prisma.incident.delete({ where: { id } }); break;
+        case "request":           await prisma.serviceRequest.delete({ where: { id } }); break;
+        case "problem":           await prisma.problem.delete({ where: { id } }); break;
+        case "change":            await prisma.change.delete({ where: { id } }); break;
+        case "asset":             await prisma.asset.delete({ where: { id } }); break;
+        case "kb_article":        await prisma.kbArticle.delete({ where: { id } }); break;
+        case "saas_subscription": await prisma.saaSSubscription.delete({ where: { id } }); break;
+        case "software_license":  await prisma.softwareLicense.delete({ where: { id } }); break;
       }
       deleted++;
     }

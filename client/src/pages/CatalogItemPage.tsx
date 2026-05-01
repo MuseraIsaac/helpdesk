@@ -40,12 +40,15 @@ export default function CatalogItemPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const { data, isLoading, error } = useQuery<{ item: CatalogItemDetail }>({
+  // The server returns the catalog item directly (`res.json(item)` in
+  // routes/catalog.ts), not wrapped in `{ item }`. Reading `data.item`
+  // resolved to undefined and the page short-circuited into the
+  // "Failed to load catalog item" branch even on a 200 response.
+  const { data: item, isLoading, error } = useQuery<CatalogItemDetail>({
     queryKey: ["catalog-item", id],
-    queryFn: () => axios.get(`/api/catalog/items/${id}`).then((r) => r.data),
+    queryFn: () => axios.get<CatalogItemDetail>(`/api/catalog/items/${id}`).then((r) => r.data),
+    enabled: !!id,
   });
-
-  const item = data?.item;
 
   const {
     register,
@@ -61,11 +64,14 @@ export default function CatalogItemPage() {
 
   const priority = watch("priority");
 
+  // Server responds with the created Request directly (status 201), not
+  // wrapped in `{ request }` — match its shape so we can navigate to
+  // /requests/<id> after submission.
   const mutation = useMutation({
     mutationFn: (values: RequestFormValues) =>
-      axios.post(`/api/catalog/items/${id}/request`, values).then((r) => r.data),
-    onSuccess: (data) => {
-      navigate(`/requests/${data.request.id}`);
+      axios.post<{ id: number }>(`/api/catalog/items/${id}/request`, values).then((r) => r.data),
+    onSuccess: (request) => {
+      navigate(`/requests/${request.id}`);
     },
   });
 

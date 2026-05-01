@@ -1,9 +1,10 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
+import { useParams } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { type Ticket } from "core/constants/ticket.ts";
 import { ticketTypes, ticketTypeLabel } from "core/constants/ticket-type.ts";
-import { AlertTriangle, CheckCircle, Tag, BarChart2, Users, Clock, Server } from "lucide-react";
+import { AlertTriangle, CheckCircle, Tag, BarChart2, Users, Clock, Server, Save, Undo2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { agentTicketStatuses, statusLabel } from "core/constants/ticket-status.ts";
@@ -156,26 +157,41 @@ interface CustomStatusConfig { id: number; label: string; color: string; workflo
 interface CustomTicketTypeConfig { id: number; name: string; slug: string; color: string; isActive: boolean; }
 interface Team { id: number; name: string; color: string; members: Agent[]; }
 
-function AffectedSystemInput({ ticket, onSave }: { ticket: Ticket; onSave: (val: string | null) => void; }) {
+function AffectedSystemInput({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string | null;
+  onChange: (val: string | null) => void;
+  disabled?: boolean;
+}) {
   const ref = useRef<HTMLInputElement>(null);
+  // Local draft so users can type freely; we commit to the parent's pending
+  // state on blur (or Enter), and revert with Escape.
+  const [draft, setDraft] = useState(value ?? "");
+  useEffect(() => { setDraft(value ?? ""); }, [value]);
+
   return (
     <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 h-9">
       <Server className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
       <Input
         ref={ref}
         size={1}
-        defaultValue={ticket.affectedSystem ?? ""}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        disabled={disabled}
         placeholder="e.g. Payment gateway"
         className="h-7 text-sm border-0 p-0 shadow-none focus-visible:ring-0"
-        onBlur={(e) => {
-          const val = e.target.value.trim();
-          const prev = ticket.affectedSystem ?? "";
-          if (val !== prev) onSave(val || null);
+        onBlur={() => {
+          const val = draft.trim();
+          const prev = value ?? "";
+          if (val !== prev) onChange(val || null);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") ref.current?.blur();
           if (e.key === "Escape") {
-            if (ref.current) ref.current.value = ticket.affectedSystem ?? "";
+            setDraft(value ?? "");
             ref.current?.blur();
           }
         }}
@@ -189,6 +205,37 @@ function AffectedSystemInput({ ticket, onSave }: { ticket: Ticket; onSave: (val:
 export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
   const queryClient = useQueryClient();
   const [escalateDialogOpen, setEscalateDialogOpen] = useState(false);
+
+  // The TicketDetailPage caches the ticket under `["ticket", urlId]` where
+  // urlId is whatever the URL contained — could be the numeric DB id ("36")
+  // or the human-readable ticket number ("DEMO-TKT-0005"). The mutation
+  // needs to update that exact cache entry, otherwise saves appear to
+  // "revert" on tickets opened via their human-readable number.
+  const { id: urlId } = useParams<{ id: string }>();
+
+  // ── Pending-changes buffer ───────────────────────────────────────────────
+  //
+  // Field edits accumulate here instead of firing a PATCH per change. The
+  // sticky save bar at the top of the panel exposes how many fields are
+  // dirty and lets the agent commit (or discard) them in one round-trip.
+  // Escalate / De-escalate are intentionally NOT batched — they're explicit
+  // workflow actions and should still feel like discrete commits.
+  const [pending, setPending] = useState<Record<string, unknown>>({});
+  const pendingCount = Object.keys(pending).length;
+  const isDirty = pendingCount > 0;
+
+  function queueUpdate(patch: Record<string, unknown>) {
+    setPending((prev) => ({ ...prev, ...patch }));
+  }
+  function discardChanges() {
+    setPending({});
+  }
+  /** Read the displayed value for a key — pending edit wins over the
+   *  server-side ticket value. Uses `in` so explicit `null` (clear field) is
+   *  preserved correctly. */
+  function val<T>(key: string, fallback: T): T {
+    return (key in pending ? (pending[key] as T) : fallback);
+  }
 
   const { data: agentsData } = useQuery({
     queryKey: ["agents"],
@@ -275,10 +322,19 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
     // server's authoritative response replaces the optimistic value on success;
     // on error we roll back to the pre-mutation snapshot.
     onMutate: async (patch) => {
-      const keys = [
+      // Include every cache key the ticket could be under: the numeric id as
+      // both string and number form, plus the URL slug that the page-level
+      // query was actually keyed by (e.g. "DEMO-TKT-0005"). Without the
+      // urlId entry, saves on tickets opened via their human-readable number
+      // would write to a different cache than the page is reading from, and
+      // fields would appear to revert on success.
+      const keys: (readonly [string, string | number])[] = [
         ["ticket", String(ticket.id)] as const,
         ["ticket", ticket.id] as const,
       ];
+      if (urlId && urlId !== String(ticket.id)) {
+        keys.push(["ticket", urlId] as const);
+      }
       await Promise.all(
         keys.map((k) => queryClient.cancelQueries({ queryKey: k })),
       );
@@ -297,15 +353,41 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
       }
     },
     onSuccess: (updated) => {
-      // Replace the optimistic value with the server's authoritative response.
+      // Replace the optimistic value with the server's authoritative response
+      // on every cache key the ticket might live under.
       queryClient.setQueryData(["ticket", String(ticket.id)], updated);
       queryClient.setQueryData(["ticket", ticket.id], updated);
+      if (urlId && urlId !== String(ticket.id)) {
+        queryClient.setQueryData(["ticket", urlId], updated);
+      }
       void queryClient.invalidateQueries({ queryKey: ["tickets"] });
     },
   });
 
+  function saveChanges() {
+    if (!isDirty) return;
+    updateMutation.mutate(pending, {
+      onSuccess: () => setPending({}),
+    });
+  }
+
   const activeCustomTicketTypes = (customTicketTypesData ?? []).filter((t) => t.isActive);
-  const selectedTeam = teamsData?.find((t) => t.id === ticket.teamId) ?? null;
+  // Merged values — pending edits override the server snapshot so the UI
+  // reflects what the user has queued, not what's persisted.
+  const mergedTeamId        = val<number | null>("teamId", ticket.teamId ?? null);
+  const mergedAssignedToId  = val<string | null>("assignedToId", ticket.assignedTo?.id ?? null);
+  const mergedCategory      = val<string | null>("category", ticket.category ?? null);
+  const mergedAffectedSys   = val<string | null>("affectedSystem", ticket.affectedSystem ?? null);
+  const mergedPriority      = val<string | null>("priority", ticket.priority ?? null);
+  const mergedSeverity      = val<string | null>("severity", ticket.severity ?? null);
+  const mergedImpact        = val<string | null>("impact", ticket.impact ?? null);
+  const mergedUrgency       = val<string | null>("urgency", ticket.urgency ?? null);
+  const mergedTicketType    = val<string | null>("ticketType", ticket.ticketType ?? null);
+  const mergedCustomTypeId  = val<number | null>("customTicketTypeId", ticket.customTicketTypeId ?? null);
+  const mergedCustomStatusId = val<number | null>("customStatusId", ticket.customStatusId ?? null);
+  const mergedStatus        = val<string>("status", ticket.status);
+
+  const selectedTeam = teamsData?.find((t) => t.id === mergedTeamId) ?? null;
   const availableAgents: Agent[] = selectedTeam
     ? selectedTeam.members
     : agentsData ?? [];
@@ -313,12 +395,16 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
   function handleTeamChange(value: string) {
     const newTeamId = value === "none" ? null : Number(value);
     const newTeam = teamsData?.find((t) => t.id === newTeamId) ?? null;
+    const currentAssigneeId = val<string | null>(
+      "assignedToId",
+      ticket.assignedTo?.id ?? null,
+    );
     const assigneeInNewTeam =
       !newTeam ||
-      newTeam.members.some((m) => m.id === ticket.assignedTo?.id);
-    const update: Record<string, unknown> = { teamId: newTeamId };
-    if (ticket.assignedTo && !assigneeInNewTeam) update.assignedToId = null;
-    updateMutation.mutate(update);
+      newTeam.members.some((m) => m.id === currentAssigneeId);
+    const patch: Record<string, unknown> = { teamId: newTeamId };
+    if (currentAssigneeId && !assigneeInNewTeam) patch.assignedToId = null;
+    queueUpdate(patch);
   }
 
   // ── Build options ────────────────────────────────────────────────────────
@@ -344,9 +430,9 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
   ];
 
   const typeValue =
-    ticket.customTicketTypeId != null
-      ? `custom_${ticket.customTicketTypeId}`
-      : ticket.ticketType ?? "none";
+    mergedCustomTypeId != null
+      ? `custom_${mergedCustomTypeId}`
+      : mergedTicketType ?? "none";
 
   const typeOptions = [
     { value: "none", label: "Generic" },
@@ -413,26 +499,124 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
   ];
 
   const statusValue =
-    ticket.customStatusId != null ? `custom_${ticket.customStatusId}` : ticket.status;
+    mergedCustomStatusId != null ? `custom_${mergedCustomStatusId}` : mergedStatus;
 
   function handleTypeChange(value: string) {
-    if (value === "none") updateMutation.mutate({ ticketType: null, customTicketTypeId: null });
+    if (value === "none") queueUpdate({ ticketType: null, customTicketTypeId: null });
     else if (value.startsWith("custom_"))
-      updateMutation.mutate({ ticketType: null, customTicketTypeId: parseInt(value.replace("custom_", ""), 10) });
-    else updateMutation.mutate({ ticketType: value, customTicketTypeId: null });
+      queueUpdate({ ticketType: null, customTicketTypeId: parseInt(value.replace("custom_", ""), 10) });
+    else queueUpdate({ ticketType: value, customTicketTypeId: null });
   }
 
   function handleStatusChange(value: string) {
     if (value.startsWith("custom_")) {
       const id = parseInt(value.replace("custom_", ""), 10);
-      updateMutation.mutate({ customStatusId: id });
+      queueUpdate({ customStatusId: id });
     } else {
-      updateMutation.mutate({ status: value, customStatusId: null });
+      queueUpdate({ status: value, customStatusId: null });
     }
   }
 
   return (
     <div className="space-y-3">
+
+      {/* ── Save bar ─────────────────────────────────────────────────────
+       *
+       * Always visible at the top of the panel so the save affordance is
+       * obvious. Edits are batched into local state; this bar is the user's
+       * only commit point. When dirty: highlighted, both buttons enabled.
+       * When clean: muted with a "All changes saved" status pill, buttons
+       * disabled. */}
+      <div
+        className={`sticky top-0 z-10 rounded-xl border shadow-sm overflow-hidden transition-colors ${
+          isDirty
+            ? "border-primary/30 bg-primary/[0.05] dark:bg-primary/[0.08]"
+            : "border-border bg-card"
+        }`}
+      >
+        <div className="flex items-center gap-2 px-3 py-2.5">
+          {isDirty ? (
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/15 text-primary shrink-0">
+              <span className="text-[11px] font-bold tabular-nums">{pendingCount}</span>
+            </span>
+          ) : (
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
+              <CheckCircle className="h-3.5 w-3.5" />
+            </span>
+          )}
+          <p className="text-xs font-medium flex-1 min-w-0">
+            {isDirty ? (
+              <>
+                <span className="text-foreground">Unsaved change{pendingCount === 1 ? "" : "s"}</span>
+                <span className="text-muted-foreground"> — review and save below</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">
+                All changes saved
+              </span>
+            )}
+          </p>
+        </div>
+        <div className={`flex items-stretch border-t ${isDirty ? "border-primary/15" : "border-border"}`}>
+          <button
+            type="button"
+            onClick={discardChanges}
+            disabled={!isDirty || updateMutation.isPending}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+          >
+            <Undo2 className="h-3.5 w-3.5" />
+            Discard
+          </button>
+          <div className={`w-px ${isDirty ? "bg-primary/15" : "bg-border"}`} />
+          <button
+            type="button"
+            onClick={saveChanges}
+            disabled={!isDirty || updateMutation.isPending}
+            className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
+              isDirty
+                ? "text-primary hover:bg-primary/10"
+                : "text-muted-foreground"
+            }`}
+          >
+            {updateMutation.isPending ? (
+              <>
+                <span className="h-3.5 w-3.5 rounded-full border-2 border-primary/40 border-t-primary animate-spin" />
+                Saving…
+              </>
+            ) : (
+              <>
+                <Save className="h-3.5 w-3.5" />
+                Save changes
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Mutation feedback — surfaces a save error inline so the user
+          notices when an update silently rolled back (e.g. permission
+          denied, validation rejection). Without this the optimistic
+          update would briefly show the new value, the onError rollback
+          would revert it, and the user would conclude "the dropdown
+          isn't saving" with no way to see why. */}
+      {updateMutation.error && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/[0.06] px-3 py-2 text-xs text-destructive flex items-start gap-2">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="font-semibold">Couldn't save your change</p>
+            <p className="text-destructive/80 break-words mt-0.5">
+              {(() => {
+                const e = updateMutation.error as unknown;
+                if (axios.isAxiosError(e)) {
+                  const data = e.response?.data as { error?: string } | undefined;
+                  return data?.error ?? e.message;
+                }
+                return e instanceof Error ? e.message : "Unknown error";
+              })()}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Details ── */}
       <SidebarSection icon={Tag} title="Details">
@@ -446,8 +630,8 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
         </FieldRow>
         <FieldRow label="Category">
           <SearchableSelect
-            value={ticket.category ?? "none"}
-            onChange={(val) => updateMutation.mutate({ category: val === "none" ? null : val })}
+            value={mergedCategory ?? "none"}
+            onChange={(v) => queueUpdate({ category: v === "none" ? null : v })}
             options={categoryOptions}
             disabled={updateMutation.isPending}
           />
@@ -460,11 +644,12 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
             disabled={updateMutation.isPending}
           />
         </FieldRow>
-        {ticket.ticketType === "incident" && (
+        {mergedTicketType === "incident" && (
           <FieldRow label="Affected System">
             <AffectedSystemInput
-              ticket={ticket}
-              onSave={(val) => updateMutation.mutate({ affectedSystem: val })}
+              value={mergedAffectedSys}
+              onChange={(v) => queueUpdate({ affectedSystem: v })}
+              disabled={updateMutation.isPending}
             />
           </FieldRow>
         )}
@@ -474,32 +659,32 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
       <SidebarSection icon={BarChart2} title="Triage">
         <FieldRow label="Priority">
           <SearchableSelect
-            value={ticket.priority ?? "none"}
-            onChange={(val) => updateMutation.mutate({ priority: val === "none" ? null : val })}
+            value={mergedPriority ?? "none"}
+            onChange={(v) => queueUpdate({ priority: v === "none" ? null : v })}
             options={priorityOptions}
             disabled={updateMutation.isPending}
           />
         </FieldRow>
         <FieldRow label="Severity">
           <SearchableSelect
-            value={ticket.severity ?? "none"}
-            onChange={(val) => updateMutation.mutate({ severity: val === "none" ? null : val })}
+            value={mergedSeverity ?? "none"}
+            onChange={(v) => queueUpdate({ severity: v === "none" ? null : v })}
             options={severityOptions}
             disabled={updateMutation.isPending}
           />
         </FieldRow>
         <FieldRow label="Impact">
           <SearchableSelect
-            value={ticket.impact ?? "none"}
-            onChange={(val) => updateMutation.mutate({ impact: val === "none" ? null : val })}
+            value={mergedImpact ?? "none"}
+            onChange={(v) => queueUpdate({ impact: v === "none" ? null : v })}
             options={impactOptions}
             disabled={updateMutation.isPending}
           />
         </FieldRow>
         <FieldRow label="Urgency">
           <SearchableSelect
-            value={ticket.urgency ?? "none"}
-            onChange={(val) => updateMutation.mutate({ urgency: val === "none" ? null : val })}
+            value={mergedUrgency ?? "none"}
+            onChange={(v) => queueUpdate({ urgency: v === "none" ? null : v })}
             options={urgencyOptions}
             disabled={updateMutation.isPending}
           />
@@ -510,7 +695,7 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
       <SidebarSection icon={Users} title="Routing">
         <FieldRow label="Team">
           <SearchableSelect
-            value={ticket.teamId != null ? String(ticket.teamId) : "none"}
+            value={mergedTeamId != null ? String(mergedTeamId) : "none"}
             onChange={handleTeamChange}
             options={teamOptions}
             disabled={updateMutation.isPending}
@@ -518,8 +703,8 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
         </FieldRow>
         <FieldRow label={selectedTeam ? `Agent · ${selectedTeam.name}` : "Agent"}>
           <SearchableSelect
-            value={ticket.assignedTo?.id ?? "unassigned"}
-            onChange={(val) => updateMutation.mutate({ assignedToId: val === "unassigned" ? null : val })}
+            value={mergedAssignedToId ?? "unassigned"}
+            onChange={(v) => queueUpdate({ assignedToId: v === "unassigned" ? null : v })}
             options={agentOptions}
             disabled={updateMutation.isPending}
           />

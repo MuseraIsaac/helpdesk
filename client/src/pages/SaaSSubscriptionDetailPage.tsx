@@ -21,62 +21,198 @@ import { Input } from "@/components/ui/input";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import ErrorAlert from "@/components/ErrorAlert";
+import SearchableSelect, { type SelectOption } from "@/components/SearchableSelect";
 import {
   Cloud, ChevronLeft, ExternalLink, UserPlus, UserMinus,
-  DollarSign, Calendar, Shield, Users, AlertTriangle,
+  DollarSign, Calendar, Shield, Users, AlertTriangle, Mail, Sparkles,
 } from "lucide-react";
 
 // ── Provision user dialog ─────────────────────────────────────────────────────
 
-function ProvisionUserDialog({ subscriptionId, onProvisioned }: { subscriptionId: number; onProvisioned: () => void }) {
+interface AgentLite { id: string; name: string; email: string }
+
+/** Stable colour for the initials avatar — derived from the first letter so a
+ *  user always gets the same hue across the app. */
+const AVATAR_TONES = [
+  "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+  "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  "bg-teal-500/15 text-teal-700 dark:text-teal-300",
+  "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  "bg-blue-500/15 text-blue-700 dark:text-blue-300",
+  "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
+  "bg-purple-500/15 text-purple-700 dark:text-purple-300",
+  "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+];
+
+function avatarTone(name: string): string {
+  const code = name.charCodeAt(0) || 0;
+  return AVATAR_TONES[code % AVATAR_TONES.length]!;
+}
+
+function ProvisionUserDialog({
+  subscriptionId,
+  onProvisioned,
+  seatsRemaining,
+}: {
+  subscriptionId: number;
+  onProvisioned: () => void;
+  seatsRemaining?: number | null;
+}) {
   const [open, setOpen] = useState(false);
   const form = useForm<AssignSaaSUserInput>({
     resolver: zodResolver(assignSaaSUserSchema),
-    defaultValues: {},
+    defaultValues: { userId: "", role: "", note: "" },
   });
+
+  // Pull the internal-user roster — admins/supervisors/agents/readonly. The
+  // /api/agents endpoint excludes customers and the AI agent and is safe for
+  // any authenticated session, so the picker works even for non-admin
+  // software managers.
+  const { data: agents = [], isLoading: loadingAgents } = useQuery<AgentLite[]>({
+    queryKey: ["agents"],
+    queryFn: () => axios.get<{ agents: AgentLite[] }>("/api/agents").then(r => r.data.agents),
+    staleTime: 60_000,
+    enabled: open,
+  });
+
+  const userOptions: SelectOption[] = agents.map((a) => ({
+    value: a.id,
+    label: a.name,
+    hint: a.email,
+    prefix: (
+      <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold shrink-0 ${avatarTone(a.name)}`}>
+        {a.name.charAt(0).toUpperCase()}
+      </span>
+    ),
+  }));
 
   const mutation = useMutation({
     mutationFn: (data: AssignSaaSUserInput) =>
       axios.post(`/api/saas-subscriptions/${subscriptionId}/users`, data).then(r => r.data),
-    onSuccess: () => { onProvisioned(); setOpen(false); form.reset(); },
+    onSuccess: () => { onProvisioned(); setOpen(false); form.reset(); mutation.reset(); },
   });
+
+  const selectedUserId = form.watch("userId");
+  const selectedAgent = agents.find((a) => a.id === selectedUserId);
+  const canSubmit = !!selectedUserId && !mutation.isPending;
+
+  function handleClose() {
+    setOpen(false);
+    form.reset();
+    mutation.reset();
+  }
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
-        <UserPlus className="w-4 h-4 mr-1.5" />Provision User
+      <Button size="sm" onClick={() => setOpen(true)} className="gap-1.5 shadow-sm">
+        <UserPlus className="h-4 w-4" />Provision User
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Provision User</DialogTitle>
+      <Dialog
+        open={open}
+        onOpenChange={(v) => { if (!v) handleClose(); else setOpen(true); }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="space-y-2">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-violet-500/30 bg-violet-500/10 shrink-0">
+                <UserPlus className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+              </span>
+              <div>
+                <DialogTitle className="text-base">Provision User</DialogTitle>
+                {seatsRemaining != null && seatsRemaining > 0 && (
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {seatsRemaining} seat{seatsRemaining === 1 ? "" : "s"} remaining
+                  </p>
+                )}
+              </div>
+            </div>
           </DialogHeader>
+
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(d => mutation.mutate(d))} className="space-y-3">
+            <form onSubmit={form.handleSubmit(d => mutation.mutate(d))} className="space-y-4">
+
+              {/* User picker */}
               <FormField control={form.control} name="userId" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>User ID *</FormLabel>
-                  <FormControl><Input placeholder="Enter user ID" {...field} /></FormControl>
+                  <FormLabel className="flex items-center gap-1.5">
+                    <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                    User
+                    <span className="text-destructive">*</span>
+                  </FormLabel>
+                  <FormControl>
+                    <SearchableSelect
+                      options={userOptions}
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      placeholder={loadingAgents ? "Loading users…" : "Select a user…"}
+                      searchPlaceholder="Search by name or email…"
+                      disabled={loadingAgents}
+                      className="w-full"
+                    />
+                  </FormControl>
+                  {selectedAgent && (
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1">
+                      <Mail className="h-3 w-3" />
+                      {selectedAgent.email}
+                    </p>
+                  )}
                   <FormMessage />
                 </FormItem>
               )} />
+
+              {/* Role in App */}
               <FormField control={form.control} name="role" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Role in App</FormLabel>
-                  <FormControl><Input placeholder="e.g. admin, editor, viewer" {...field} value={field.value ?? ""} /></FormControl>
+                  <FormLabel className="flex items-center gap-1.5">
+                    <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+                    Role in app
+                    <span className="text-[10px] font-normal text-muted-foreground/70 ml-auto">optional</span>
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="e.g. admin, editor, viewer"
+                      {...field}
+                      value={field.value ?? ""}
+                    />
+                  </FormControl>
                 </FormItem>
               )} />
+
+              {/* Note */}
               <FormField control={form.control} name="note" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Note</FormLabel>
-                  <FormControl><Input placeholder="Optional note" {...field} value={field.value ?? ""} /></FormControl>
+                  <FormLabel className="flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
+                    Note
+                    <span className="text-[10px] font-normal text-muted-foreground/70 ml-auto">optional</span>
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="e.g. project alpha, contractor until Jun"
+                      {...field}
+                      value={field.value ?? ""}
+                    />
+                  </FormControl>
                 </FormItem>
               )} />
-              <ErrorAlert error={mutation.error} fallback="Failed to provision user" />
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-                <Button type="submit" disabled={mutation.isPending}>
-                  {mutation.isPending ? "Provisioning…" : "Provision"}
+
+              {mutation.error && (
+                <ErrorAlert error={mutation.error} fallback="Failed to provision user" />
+              )}
+
+              <DialogFooter className="gap-2">
+                <Button type="button" variant="outline" onClick={handleClose}>Cancel</Button>
+                <Button type="submit" disabled={!canSubmit} className="gap-1.5">
+                  {mutation.isPending
+                    ? <>
+                        <span className="h-3.5 w-3.5 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground animate-spin" />
+                        Provisioning…
+                      </>
+                    : <>
+                        <UserPlus className="h-3.5 w-3.5" />
+                        Provision
+                      </>
+                  }
                 </Button>
               </DialogFooter>
             </form>
@@ -206,7 +342,7 @@ export default function SaaSSubscriptionDetailPage() {
             <h1 className="text-xl font-semibold">{sub.appName}</h1>
             <p className="text-sm text-muted-foreground">
               {sub.vendor && `${sub.vendor} · `}
-              {sub.subscriptionNumber} · {SAAS_CATEGORY_LABEL[sub.category]}
+              {sub.subscriptionNumber} · {sub.customCategory?.name ?? SAAS_CATEGORY_LABEL[sub.category]}
             </p>
           </div>
         </div>
@@ -342,7 +478,15 @@ export default function SaaSSubscriptionDetailPage() {
                   {sub.totalSeats !== null ? ` of ${sub.totalSeats} licensed seats` : ""}
                 </p>
               </div>
-              <ProvisionUserDialog subscriptionId={Number(id)} onProvisioned={invalidate} />
+              <ProvisionUserDialog
+                subscriptionId={Number(id)}
+                onProvisioned={invalidate}
+                seatsRemaining={
+                  sub.totalSeats !== null
+                    ? Math.max(0, sub.totalSeats - sub.consumedSeats)
+                    : null
+                }
+              />
             </div>
             <div className="px-4">
               {sub.userAssignments.length === 0 ? (

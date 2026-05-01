@@ -1,15 +1,15 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import {
   SOFTWARE_LICENSE_TYPE_LABEL, SOFTWARE_LICENSE_STATUS_LABEL,
   SOFTWARE_LICENSE_STATUS_COLOR, SOFTWARE_PLATFORM_LABEL,
-  SOFTWARE_LICENSE_TYPES, SOFTWARE_LICENSE_STATUSES,
+  SOFTWARE_LICENSE_TYPES,
   type SoftwareLicenseSummary, type SoftwareLicenseStatus,
 } from "core/constants/software.ts";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -18,13 +18,21 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Form, FormField, FormItem, FormLabel, FormControl, FormMessage,
 } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createSoftwareLicenseSchema, type CreateSoftwareLicenseInput } from "core/schemas/software.ts";
 import ErrorAlert from "@/components/ErrorAlert";
-import { Key, Search, ChevronLeft, ChevronRight, Plus, AlertTriangle, CheckCircle2, Clock, Ban } from "lucide-react";
+import CustomTagPicker from "@/components/CustomTagPicker";
+import {
+  Key, Search, ChevronLeft, ChevronRight, Plus, AlertTriangle,
+  CheckCircle2, Clock, Ban, Trash2, X,
+} from "lucide-react";
 
 interface Stats {
   total: number;
@@ -80,6 +88,7 @@ function NewLicenseDialog({ onCreated }: { onCreated: () => void }) {
       axios.post<SoftwareLicenseSummary>("/api/software-licenses", data).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["software-licenses"] });
+      queryClient.invalidateQueries({ queryKey: ["software-licenses-stats"] });
       setOpen(false);
       form.reset();
       onCreated();
@@ -88,7 +97,7 @@ function NewLicenseDialog({ onCreated }: { onCreated: () => void }) {
 
   return (
     <>
-      <Button onClick={() => setOpen(true)} size="sm">
+      <Button onClick={() => setOpen(true)} size="sm" className="shadow-sm">
         <Plus className="w-4 h-4 mr-1.5" />New License
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
@@ -123,14 +132,25 @@ function NewLicenseDialog({ onCreated }: { onCreated: () => void }) {
                 <FormField control={form.control} name="licenseType" render={({ field }) => (
                   <FormItem>
                     <FormLabel>License Type</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        {SOFTWARE_LICENSE_TYPES.map(t => (
-                          <SelectItem key={t} value={t}>{SOFTWARE_LICENSE_TYPE_LABEL[t]}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FormControl>
+                      <CustomTagPicker
+                        endpoint="/api/license-types"
+                        queryKey="license-types"
+                        builtins={SOFTWARE_LICENSE_TYPES.map((t) => ({ value: t, label: SOFTWARE_LICENSE_TYPE_LABEL[t] }))}
+                        builtinValue={field.value}
+                        customId={form.watch("customLicenseTypeId") ?? null}
+                        noun="license type"
+                        onChange={(sel) => {
+                          if (sel.kind === "builtin") {
+                            field.onChange(sel.value);
+                            form.setValue("customLicenseTypeId", null);
+                          } else {
+                            field.onChange("other");
+                            form.setValue("customLicenseTypeId", sel.id);
+                          }
+                        }}
+                      />
+                    </FormControl>
                   </FormItem>
                 )} />
                 <FormField control={form.control} name="totalSeats" render={({ field }) => (
@@ -208,7 +228,10 @@ export default function SoftwareLicensesPage() {
   const [search,      setSearch]      = useState("");
   const [typeFilter,  setTypeFilter]  = useState<string>("");
   const [page,        setPage]        = useState(1);
+  const [selected,    setSelected]    = useState<Set<number>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState<{ ids: number[]; label: string } | null>(null);
   const PAGE_SIZE = 25;
+  const queryClient = useQueryClient();
 
   const params: Record<string, string> = {
     page: String(page), pageSize: String(PAGE_SIZE),
@@ -233,23 +256,62 @@ export default function SoftwareLicensesPage() {
     placeholderData: prev => prev,
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async (ids: number[]) => {
+      if (ids.length === 1) {
+        await axios.delete(`/api/software-licenses/${ids[0]}`);
+      } else {
+        await axios.post("/api/software-licenses/bulk-delete", { ids });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["software-licenses"] });
+      queryClient.invalidateQueries({ queryKey: ["software-licenses-stats"] });
+      setSelected(new Set());
+      setConfirmDelete(null);
+    },
+  });
+
   function handleChip(key: string) {
     setChipKey(key);
     setPage(1);
+    setSelected(new Set());
+  }
+
+  const pageIds = useMemo(() => data?.items.map(i => i.id) ?? [], [data]);
+  const allSelected = pageIds.length > 0 && pageIds.every(id => selected.has(id));
+  const someSelected = pageIds.some(id => selected.has(id)) && !allSelected;
+
+  function toggleAll() {
+    if (allSelected) {
+      const next = new Set(selected);
+      for (const id of pageIds) next.delete(id);
+      setSelected(next);
+    } else {
+      setSelected(new Set([...selected, ...pageIds]));
+    }
+  }
+
+  function toggleOne(id: number) {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelected(next);
   }
 
   return (
     <div className="p-6 space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-gradient-to-br from-indigo-500/15 to-violet-600/15 border border-indigo-500/20">
             <Key className="w-6 h-6 text-indigo-500" />
-            Software Licenses
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Track software entitlements, seat allocation, and renewals.
-          </p>
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Software Licenses</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Track software entitlements, seat allocation, and renewals.
+            </p>
+          </div>
         </div>
         <NewLicenseDialog onCreated={() => {}} />
       </div>
@@ -258,15 +320,17 @@ export default function SoftwareLicensesPage() {
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: "Total",        value: stats.total,      icon: Key,            color: "text-muted-foreground" },
-            { label: "Active",       value: stats.active,     icon: CheckCircle2,   color: "text-emerald-600" },
-            { label: "Expiring <30d", value: stats.expiring30, icon: Clock,          color: "text-amber-600" },
-            { label: "Expired",      value: stats.expired,    icon: Ban,            color: "text-destructive" },
+            { label: "Total",         value: stats.total,      icon: Key,          accent: "from-slate-500/10 to-slate-500/5",     iconColor: "text-slate-500" },
+            { label: "Active",        value: stats.active,     icon: CheckCircle2, accent: "from-emerald-500/10 to-emerald-500/5", iconColor: "text-emerald-600" },
+            { label: "Expiring <30d", value: stats.expiring30, icon: Clock,        accent: "from-amber-500/10 to-amber-500/5",     iconColor: "text-amber-600" },
+            { label: "Expired",       value: stats.expired,    icon: Ban,          accent: "from-rose-500/10 to-rose-500/5",       iconColor: "text-destructive" },
           ].map(s => (
-            <div key={s.label} className="rounded-lg border bg-card p-4 flex items-center gap-3">
-              <s.icon className={`w-5 h-5 shrink-0 ${s.color}`} />
+            <div key={s.label} className={`relative overflow-hidden rounded-xl border bg-gradient-to-br ${s.accent} p-4 flex items-center gap-3 hover:shadow-md transition-shadow`}>
+              <div className="p-2 rounded-lg bg-card border shadow-sm">
+                <s.icon className={`w-4 h-4 ${s.iconColor}`} />
+              </div>
               <div>
-                <p className="text-2xl font-semibold tabular-nums">{s.value}</p>
+                <p className="text-2xl font-semibold tabular-nums leading-tight">{s.value}</p>
                 <p className="text-xs text-muted-foreground">{s.label}</p>
               </div>
             </div>
@@ -315,32 +379,76 @@ export default function SoftwareLicensesPage() {
         </div>
       </div>
 
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="flex items-center justify-between rounded-lg border bg-primary/5 border-primary/30 px-4 py-2.5 shadow-sm">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-medium">{selected.size} selected</span>
+            <span className="text-muted-foreground">·</span>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+            >
+              <X className="w-3.5 h-3.5" /> Clear
+            </button>
+          </div>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={() => setConfirmDelete({ ids: [...selected], label: `${selected.size} licenses` })}
+          >
+            <Trash2 className="w-4 h-4 mr-1.5" /> Delete selected
+          </Button>
+        </div>
+      )}
+
       {/* Error */}
       {error && <ErrorAlert error={error} fallback="Failed to load licenses" />}
 
       {/* Table */}
-      <div className="rounded-lg border bg-card overflow-hidden">
+      <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/40">
+              <th className="px-3 py-2.5 w-10">
+                <Checkbox
+                  checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                  onCheckedChange={toggleAll}
+                  aria-label="Select all"
+                />
+              </th>
               {["License #", "Product", "Vendor", "Type", "Platform", "Seats", "Renewal", "Status"].map(h => (
                 <th key={h} className="px-4 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
               ))}
+              <th className="px-2 py-2.5 w-10"></th>
             </tr>
           </thead>
           <tbody>
             {isLoading && Array.from({ length: 8 }).map((_, i) => (
               <tr key={i} className="border-b animate-pulse">
+                <td className="px-3 py-3"><div className="h-4 w-4 bg-muted rounded" /></td>
                 {Array.from({ length: 8 }).map((_, j) => (
                   <td key={j} className="px-4 py-3"><div className="h-4 bg-muted rounded w-24" /></td>
                 ))}
+                <td />
               </tr>
             ))}
             {!isLoading && data?.items.map(lic => {
               const statusColor = SOFTWARE_LICENSE_STATUS_COLOR[lic.status];
               const isExpiringSoon = lic.daysUntilExpiry !== null && lic.daysUntilExpiry <= 30 && lic.daysUntilExpiry >= 0;
+              const isSelected = selected.has(lic.id);
               return (
-                <tr key={lic.id} className="border-b hover:bg-muted/30 transition-colors group">
+                <tr
+                  key={lic.id}
+                  className={`border-b transition-colors group ${isSelected ? "bg-primary/5" : "hover:bg-muted/30"}`}
+                >
+                  <td className="px-3 py-3">
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => toggleOne(lic.id)}
+                      aria-label={`Select ${lic.productName}`}
+                    />
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
                     <Link to={`/software/licenses/${lic.id}`} className="hover:text-foreground hover:underline">
                       {lic.licenseNumber}
@@ -353,7 +461,18 @@ export default function SoftwareLicensesPage() {
                     {lic.edition && <span className="text-xs text-muted-foreground ml-1">({lic.edition})</span>}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{lic.vendor ?? "—"}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{SOFTWARE_LICENSE_TYPE_LABEL[lic.licenseType]}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {lic.customLicenseType ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        {lic.customLicenseType.color && (
+                          <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: lic.customLicenseType.color }} />
+                        )}
+                        {lic.customLicenseType.name}
+                      </span>
+                    ) : (
+                      SOFTWARE_LICENSE_TYPE_LABEL[lic.licenseType]
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">{SOFTWARE_PLATFORM_LABEL[lic.platform]}</td>
                   <td className="px-4 py-3 w-36">
                     <UtilizationBar consumed={lic.consumedSeats} total={lic.totalSeats} />
@@ -371,12 +490,21 @@ export default function SoftwareLicensesPage() {
                       {SOFTWARE_LICENSE_STATUS_LABEL[lic.status]}
                     </span>
                   </td>
+                  <td className="px-2 py-3">
+                    <button
+                      onClick={() => setConfirmDelete({ ids: [lic.id], label: lic.productName })}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                      aria-label={`Delete ${lic.productName}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
                 </tr>
               );
             })}
             {!isLoading && data?.items.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
+                <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
                   No licenses match your filters.
                 </td>
               </tr>
@@ -400,6 +528,35 @@ export default function SoftwareLicensesPage() {
           </div>
         </div>
       )}
+
+      {/* Confirm delete dialog */}
+      <AlertDialog open={!!confirmDelete} onOpenChange={open => !open && setConfirmDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Move {confirmDelete?.label} to trash?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmDelete && confirmDelete.ids.length > 1
+                ? `${confirmDelete.ids.length} licenses will be moved to the trash. `
+                : "This license will be moved to the trash. "}
+              You can restore it from Settings → Trash within the configured retention window before it's permanently purged.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteMutation.error && <ErrorAlert error={deleteMutation.error} fallback="Failed to delete" />}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteMutation.isPending}
+              onClick={e => {
+                e.preventDefault();
+                if (confirmDelete) deleteMutation.mutate(confirmDelete.ids);
+              }}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? "Moving…" : "Move to trash"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

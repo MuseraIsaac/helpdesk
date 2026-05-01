@@ -17,16 +17,12 @@ import type { Prisma, CiType, CiEnvironment, CiCriticality, CiStatus } from "../
 const router = Router();
 
 // ── CI number generation ──────────────────────────────────────────────────────
+// Reads prefix/padding/reset rules from Settings → Ticket Numbering → CMDB.
+
+import { generateNumberForSeries } from "../lib/ticket-number";
 
 async function generateCiNumber(): Promise<string> {
-  const [row] = await prisma.$queryRaw<[{ last_value: number }]>`
-    INSERT INTO ticket_counter (series, period_key, last_value)
-    VALUES ('ci', '', 1)
-    ON CONFLICT (series, period_key)
-    DO UPDATE SET last_value = ticket_counter.last_value + 1
-    RETURNING last_value
-  `;
-  return `CI-${String(row.last_value).padStart(4, "0")}`;
+  return generateNumberForSeries("ci");
 }
 
 // ── Shared select projections ─────────────────────────────────────────────────

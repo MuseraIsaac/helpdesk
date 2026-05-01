@@ -38,6 +38,7 @@ const ITEM_SUMMARY_SELECT = {
   shortDescription: true,
   icon:             true,
   isActive:         true,
+  visibility:       true,
   requiresApproval: true,
   category:         { select: CATEGORY_SELECT },
   fulfillmentTeam:  { select: { id: true, name: true, color: true } },
@@ -114,6 +115,8 @@ router.get(
     const where: Prisma.CatalogItemWhereInput = {};
     if (query.isActive !== undefined) where.isActive = query.isActive;
     else where.isActive = true; // default to active only
+    // Agent catalog: exclude items that are portal-only
+    where.visibility = { in: ["internal", "both"] };
     if (query.categoryId) where.categoryId = query.categoryId;
     if (query.search) {
       where.OR = [
@@ -149,8 +152,8 @@ router.get(
     const id = parseId(req.params.id);
     if (id === null) { res.status(400).json({ error: "Invalid ID" }); return; }
 
-    const item = await prisma.catalogItem.findUnique({
-      where: { id },
+    const item = await prisma.catalogItem.findFirst({
+      where: { id, visibility: { in: ["internal", "both"] } },
       select: ITEM_DETAIL_SELECT,
     });
     if (!item) { res.status(404).json({ error: "Catalog item not found" }); return; }
@@ -171,8 +174,8 @@ router.post(
     const data = validate(submitCatalogRequestSchema, req.body, res);
     if (!data) return;
 
-    const item = await prisma.catalogItem.findUnique({
-      where: { id, isActive: true },
+    const item = await prisma.catalogItem.findFirst({
+      where: { id, isActive: true, visibility: { in: ["internal", "both"] } },
       select: ITEM_DETAIL_SELECT,
     });
     if (!item) { res.status(404).json({ error: "Catalog item not found or inactive" }); return; }
@@ -402,6 +405,7 @@ router.post(
         description:           data.description ?? null,
         categoryId:            data.categoryId ?? null,
         isActive:              data.isActive,
+        visibility:            data.visibility,
         requestorInstructions: data.requestorInstructions ?? null,
         fulfillmentTeamId:     data.fulfillmentTeamId ?? null,
         requiresApproval:      data.requiresApproval,
@@ -458,6 +462,7 @@ router.patch(
     if (data.description           !== undefined) updateData.description           = data.description;
     if (data.categoryId            !== undefined) updateData.category              = data.categoryId ? { connect: { id: data.categoryId } } : { disconnect: true };
     if (data.isActive              !== undefined) updateData.isActive              = data.isActive;
+    if (data.visibility            !== undefined) updateData.visibility            = data.visibility;
     if (data.requestorInstructions !== undefined) updateData.requestorInstructions = data.requestorInstructions;
     if (data.fulfillmentTeamId     !== undefined) updateData.fulfillmentTeam       = data.fulfillmentTeamId ? { connect: { id: data.fulfillmentTeamId } } : { disconnect: true };
     if (data.requiresApproval      !== undefined) updateData.requiresApproval      = data.requiresApproval;

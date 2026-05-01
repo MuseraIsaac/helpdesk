@@ -139,18 +139,43 @@ router.post("/", requireAuth, async (req, res) => {
     });
   }
 
-  // Stamp firstRespondedAt on the first agent reply + always update lastAgentReplyAt
+  // Stamp firstRespondedAt on the first agent reply + always update lastAgentReplyAt.
+  //
+  // Auto-assign to first responder (when enabled): the first agent reply on a
+  // ticket assigns it to that agent — overriding any prior assignment, and
+  // unaffected by later replies. Gated on `tickets.autoAssignFirstResponder`,
+  // which defaults to true. Customers replying via this route never trigger
+  // the assignment.
+  const isFirstAgentReply = !ticket.firstRespondedAt;
+  let assignedToFirstResponder = false;
+  if (isFirstAgentReply && req.user.role !== "customer") {
+    const ticketsCfg = await getSection("tickets");
+    if (ticketsCfg.autoAssignFirstResponder !== false) {
+      assignedToFirstResponder = ticket.assignedToId !== req.user.id;
+    }
+  }
+
   await prisma.ticket.update({
     where: { id: ticketId },
     data: {
       lastAgentReplyAt: reply.createdAt,
-      ...(!ticket.firstRespondedAt && {
+      ...(isFirstAgentReply && {
         firstRespondedAt: reply.createdAt,
         ...(ticket.firstResponseDueAt != null &&
           reply.createdAt > ticket.firstResponseDueAt && { slaBreached: true }),
       }),
+      ...(assignedToFirstResponder && { assignedToId: req.user.id }),
     },
   });
+
+  if (assignedToFirstResponder) {
+    await logAudit(ticketId, req.user.id, "ticket.assigned", {
+      from:    ticket.assignedToId ? { id: ticket.assignedToId } : null,
+      to:      { id: req.user.id, name: req.user.name },
+      reason:  "first_responder",
+      replyId: reply.id,
+    });
+  }
 
   // Recipient resolution:
   //   forward       → forwardTo (validated above)

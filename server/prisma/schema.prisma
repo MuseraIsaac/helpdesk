@@ -3000,6 +3000,8 @@ model CatalogItem {
   categoryId           Int?             @map("category_id")
   category             CatalogCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   isActive             Boolean          @default(true)  @map("is_active")
+  /// Who can see and request this item: "internal" (agents only), "portal" (customers only), or "both"
+  visibility           String           @default("both") @map("visibility")
   requestorInstructions String?         @map("requestor_instructions")
 
   /// Support team auto-assigned to fulfillment tasks for this item
@@ -3031,6 +3033,7 @@ model CatalogItem {
 
   @@index([categoryId])
   @@index([isActive])
+  @@index([visibility])
   @@map("catalog_item")
 }
 
@@ -3962,6 +3965,14 @@ model SoftwareLicense {
   version        String?               @db.VarChar(50)
   platform       SoftwarePlatform      @default(cross_platform)
   licenseType    SoftwareLicenseType   @default(perpetual) @map("license_type")
+  /**
+   * Optional custom license type — admin-defined extension of the built-in
+   * `licenseType` enum. When set, UI prefers the custom name for display.
+   * Built-in `licenseType` remains as a fallback so existing reports / SDK
+   * consumers expecting the enum still work.
+   */
+  customLicenseTypeId Int?                 @map("custom_license_type_id")
+  customLicenseType   LicenseCustomType?   @relation(fields: [customLicenseTypeId], references: [id], onDelete: SetNull)
   status         SoftwareLicenseStatus @default(active)
 
   // ── License key / reference ──────────────────────────────────────────────────
@@ -4012,6 +4023,11 @@ model SoftwareLicense {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt      @map("updated_at")
 
+  // ── Soft delete ──────────────────────────────────────────────────────────────
+  deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
+  deletedByName String?   @map("deleted_by_name") @db.VarChar(200)
+
   assignments LicenseAssignment[]
 
   @@index([licenseType])
@@ -4021,7 +4037,34 @@ model SoftwareLicense {
   @@index([renewalDate])
   @@index([externalId])
   @@index([discoverySource])
+  @@index([customLicenseTypeId])
+  @@index([deletedAt])
   @@map("software_license")
+}
+
+/**
+ * LicenseCustomType — admin-defined license-type entries that extend the
+ * built-in SoftwareLicenseType enum. Reference via SoftwareLicense.customLicenseTypeId.
+ *
+ * Soft-managed: `isActive = false` hides the entry from new pickers but keeps
+ * existing references intact. Hard delete cascades to SET NULL on referencing
+ * licenses, leaving the row's built-in `licenseType` enum as the surviving
+ * label.
+ */
+model LicenseCustomType {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(120)
+  /// Optional hex colour for the badge in the UI (e.g. "#7c3aed").
+  color       String?  @db.VarChar(20)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  licenses    SoftwareLicense[]
+
+  @@index([isActive])
+  @@map("license_custom_type")
 }
 
 /**
@@ -4111,6 +4154,13 @@ model SaaSSubscription {
   appName            String                 @db.VarChar(200) @map("app_name")
   vendor             String?                @db.VarChar(200)
   category           SaaSCategory           @default(other)
+  /**
+   * Optional custom category — admin-defined extension of the built-in
+   * `category` enum. When set, UI prefers the custom name for display while
+   * the enum stays as a fallback ("other" is fine).
+   */
+  customCategoryId   Int?                   @map("custom_category_id")
+  customCategory     SaaSCustomCategory?    @relation(fields: [customCategoryId], references: [id], onDelete: SetNull)
   status             SaaSSubscriptionStatus @default(active)
 
   // ── Plan / billing ───────────────────────────────────────────────────────────
@@ -4159,6 +4209,11 @@ model SaaSSubscription {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt      @map("updated_at")
 
+  // ── Soft delete ──────────────────────────────────────────────────────────────
+  deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
+  deletedByName String?   @map("deleted_by_name") @db.VarChar(200)
+
   userAssignments SaaSUserAssignment[]
 
   @@index([category])
@@ -4167,7 +4222,31 @@ model SaaSSubscription {
   @@index([renewalDate])
   @@index([externalId])
   @@index([discoverySource])
+  @@index([customCategoryId])
+  @@index([deletedAt])
   @@map("saas_subscription")
+}
+
+/**
+ * SaaSCustomCategory — admin-defined category entries that extend the
+ * built-in SaaSCategory enum. Reference via SaaSSubscription.customCategoryId.
+ *
+ * Same shape and lifecycle conventions as LicenseCustomType.
+ */
+model SaaSCustomCategory {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(120)
+  /// Optional hex colour for the badge in the UI.
+  color       String?  @db.VarChar(20)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  subscriptions SaaSSubscription[]
+
+  @@index([isActive])
+  @@map("saas_custom_category")
 }
 
 /**

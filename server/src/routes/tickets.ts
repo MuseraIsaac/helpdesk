@@ -512,6 +512,117 @@ router.get("/search", requireAuth, async (req, res) => {
 
 // ─── Detail ────────────────────────────────────────────────────────────────
 
+/**
+ * Shared `include` block for ticket-detail responses.
+ *
+ * Used by both `GET /:id` and the post-PATCH re-fetch so the client receives
+ * the same rich shape regardless of how the ticket arrived. When the PATCH
+ * response was thinner than the GET, `setQueryData(updated)` on the client
+ * silently dropped relations like `customStatus`, `customTicketType`,
+ * `linkedIncident`, `csatRating`, etc. — the UI then re-rendered against the
+ * pruned cache and fields that read those relations appeared to "revert".
+ */
+function ticketDetailInclude(id: number) {
+  return {
+    assignedTo: { select: { id: true, name: true } },
+    team: { select: { id: true, name: true, color: true } },
+    escalationEvents: { orderBy: { createdAt: "asc" as const } },
+    escalatedToTeam: { select: { id: true, name: true, color: true } },
+    escalatedToUser: { select: { id: true, name: true } },
+    // Cap audit history to the most recent 200 events (chronological in
+    // response). Tickets with thousands of automation/system events were
+    // dominating detail-page latency. Older events can be loaded on demand
+    // via a future paginated endpoint.
+    auditEvents: {
+      orderBy: { createdAt: "desc" as const },
+      take: 200,
+      include: { actor: { select: { id: true, name: true } } },
+    },
+    customer: {
+      include: {
+        organization: { select: { id: true, name: true, domain: true } },
+        tickets: {
+          where: { id: { not: id } },
+          orderBy: { createdAt: "desc" as const },
+          take: 5,
+          select: {
+            id: true,
+            subject: true,
+            status: true,
+            priority: true,
+            createdAt: true,
+          },
+        },
+      },
+    },
+    csatRating: {
+      select: { rating: true, comment: true, submittedAt: true },
+    },
+    customStatus: { select: { id: true, label: true, color: true } },
+    customTicketType: { select: { id: true, name: true, slug: true, color: true } },
+    linkedIncident: {
+      select: {
+        id: true,
+        incidentNumber: true,
+        title: true,
+        status: true,
+        priority: true,
+        isMajor: true,
+        affectedSystem: true,
+        assignedTo: { select: { id: true, name: true } },
+        team: { select: { id: true, name: true, color: true } },
+        createdAt: true,
+        updatedAt: true,
+      },
+    },
+    linkedServiceRequest: {
+      select: {
+        id: true,
+        requestNumber: true,
+        title: true,
+        status: true,
+        priority: true,
+        approvalStatus: true,
+        assignedTo: { select: { id: true, name: true } },
+        team: { select: { id: true, name: true, color: true } },
+        createdAt: true,
+        updatedAt: true,
+      },
+    },
+    mergedInto: {
+      select: { id: true, ticketNumber: true, subject: true },
+    },
+    mergedTickets: {
+      select: { id: true, ticketNumber: true, subject: true, mergedAt: true },
+      orderBy: { mergedAt: "asc" as const },
+    },
+    ciLinks: {
+      orderBy: { linkedAt: "desc" as const },
+      select: {
+        linkedAt: true,
+        ci: {
+          select: {
+            id: true, ciNumber: true, name: true,
+            type: true, status: true, environment: true,
+          },
+        },
+      },
+    },
+    assetLinks: {
+      orderBy: { linkedAt: "desc" as const },
+      select: {
+        linkedAt: true,
+        asset: {
+          select: {
+            id: true, assetNumber: true, name: true,
+            type: true, status: true,
+          },
+        },
+      },
+    },
+  } satisfies Prisma.TicketInclude;
+}
+
 router.get("/:id", requireAuth, async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
@@ -521,104 +632,7 @@ router.get("/:id", requireAuth, async (req, res) => {
 
   const ticket = await prisma.ticket.findFirst({
     where: { id, deletedAt: null },
-    include: {
-      assignedTo: { select: { id: true, name: true } },
-      team: { select: { id: true, name: true, color: true } },
-      escalationEvents: { orderBy: { createdAt: "asc" } },
-      escalatedToTeam: { select: { id: true, name: true, color: true } },
-      escalatedToUser: { select: { id: true, name: true } },
-      // Cap audit history to the most recent 200 events (chronological in
-      // response). Tickets with thousands of automation/system events were
-      // dominating detail-page latency. Older events can be loaded on demand
-      // via a future paginated endpoint.
-      auditEvents: {
-        orderBy: { createdAt: "desc" },
-        take: 200,
-        include: { actor: { select: { id: true, name: true } } },
-      },
-      customer: {
-        include: {
-          organization: { select: { id: true, name: true, domain: true } },
-          tickets: {
-            where: { id: { not: id } },
-            orderBy: { createdAt: "desc" },
-            take: 5,
-            select: {
-              id: true,
-              subject: true,
-              status: true,
-              priority: true,
-              createdAt: true,
-            },
-          },
-        },
-      },
-      csatRating: {
-        select: { rating: true, comment: true, submittedAt: true },
-      },
-      customStatus: { select: { id: true, label: true, color: true } },
-      customTicketType: { select: { id: true, name: true, slug: true, color: true } },
-      linkedIncident: {
-        select: {
-          id: true,
-          incidentNumber: true,
-          title: true,
-          status: true,
-          priority: true,
-          isMajor: true,
-          affectedSystem: true,
-          assignedTo: { select: { id: true, name: true } },
-          team: { select: { id: true, name: true, color: true } },
-          createdAt: true,
-          updatedAt: true,
-        },
-      },
-      linkedServiceRequest: {
-        select: {
-          id: true,
-          requestNumber: true,
-          title: true,
-          status: true,
-          priority: true,
-          approvalStatus: true,
-          assignedTo: { select: { id: true, name: true } },
-          team: { select: { id: true, name: true, color: true } },
-          createdAt: true,
-          updatedAt: true,
-        },
-      },
-      mergedInto: {
-        select: { id: true, ticketNumber: true, subject: true },
-      },
-      mergedTickets: {
-        select: { id: true, ticketNumber: true, subject: true, mergedAt: true },
-        orderBy: { mergedAt: "asc" as const },
-      },
-      ciLinks: {
-        orderBy: { linkedAt: "desc" as const },
-        select: {
-          linkedAt: true,
-          ci: {
-            select: {
-              id: true, ciNumber: true, name: true,
-              type: true, status: true, environment: true,
-            },
-          },
-        },
-      },
-      assetLinks: {
-        orderBy: { linkedAt: "desc" as const },
-        select: {
-          linkedAt: true,
-          asset: {
-            select: {
-              id: true, assetNumber: true, name: true,
-              type: true, status: true,
-            },
-          },
-        },
-      },
-    },
+    include: ticketDetailInclude(id),
   });
 
   if (!ticket) {
@@ -1101,17 +1115,33 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
     }
   }
 
-  // Re-fetch to get fresh escalation + rule-applied state
+  // Re-fetch with the same rich shape as GET /:id so the client's cache
+  // doesn't lose relations (customStatus, customTicketType, linkedIncident,
+  // csatRating, etc.) when setQueryData replaces it with the PATCH response.
+  // Without this, fields backed by relations would appear to revert to
+  // defaults after a save.
   const fresh = await prisma.ticket.findUnique({
     where: { id },
-    include: {
-      assignedTo: { select: { id: true, name: true } },
-      team: { select: { id: true, name: true, color: true } },
-      escalationEvents: { orderBy: { createdAt: "asc" } },
-    },
+    include: ticketDetailInclude(id),
   });
 
-  res.json(withSlaInfo(fresh!));
+  if (!fresh) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+
+  // Match the GET handler's shape: rename customer.tickets → customer.recentTickets
+  // and reverse audit events to oldest-first.
+  const { customer, auditEvents, ...rest } = fresh;
+  const shaped = {
+    ...rest,
+    auditEvents: auditEvents.slice().reverse(),
+    customer: customer
+      ? { ...customer, recentTickets: customer.tickets, tickets: undefined }
+      : null,
+  };
+
+  res.json(withSlaInfo(shaped));
 });
 
 // ─── Bulk Actions ──────────────────────────────────────────────────────────────

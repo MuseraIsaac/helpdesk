@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router";
 import { useSession } from "../lib/auth-client";
 import { useTheme } from "../lib/theme";
@@ -9,7 +10,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LogOut, Moon, Sun, Monitor, UserCircle, Settings } from "lucide-react";
+import { LogOut, Moon, Sun, Monitor, UserCircle, Settings, Info } from "lucide-react";
+import AboutDialog from "@/components/AboutDialog";
 
 interface ProfileMenuProps {
   onSignOut: () => void;
@@ -27,6 +29,7 @@ function getInitials(name: string) {
 export default function ProfileMenu({ onSignOut }: ProfileMenuProps) {
   const { data: session } = useSession();
   const { theme, setTheme } = useTheme();
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   const name = session?.user?.name ?? "";
   const email = session?.user?.email ?? "";
@@ -106,6 +109,21 @@ export default function ProfileMenu({ onSignOut }: ProfileMenuProps) {
 
         <DropdownMenuSeparator />
 
+        {/* About */}
+        <DropdownMenuItem
+          onSelect={(e) => {
+            // Radix closes the menu on select by default, which races the
+            // dialog open. preventDefault here keeps the menu's close
+            // animation from focus-stealing the dialog's first paint.
+            e.preventDefault();
+            setAboutOpen(true);
+          }}
+          className="gap-2 cursor-pointer"
+        >
+          <Info className="h-4 w-4" />
+          About
+        </DropdownMenuItem>
+
         {/* Sign out */}
         <DropdownMenuItem
           onClick={onSignOut}
@@ -115,6 +133,8 @@ export default function ProfileMenu({ onSignOut }: ProfileMenuProps) {
           Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>
+
+      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
     </DropdownMenu>
   );
 }

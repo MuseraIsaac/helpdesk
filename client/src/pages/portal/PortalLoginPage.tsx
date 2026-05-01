@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, Navigate, useNavigate } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -59,6 +59,18 @@ export default function PortalLoginPage() {
   const navigate = useNavigate();
   const [serverError, setServerError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
+  // Per-portal "Remember me" — separate localStorage key from the agent
+  // login so the two surfaces can have independent preferences (a kiosk PC
+  // serving customers shouldn't pick up the agent's "remember me" choice).
+  const [rememberMe, setRememberMe] = useState<boolean>(() => {
+    try { return localStorage.getItem("helpdesk:remember-portal-login") === "1"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("helpdesk:remember-portal-login", rememberMe ? "1" : "0"); }
+    catch { /* private mode / quota — no-op */ }
+  }, [rememberMe]);
   const { data: branding } = useBranding();
   const { data: authProviders } = useAuthProviders();
   const googleEnabled = authProviders?.google ?? false;
@@ -276,7 +288,12 @@ export default function PortalLoginPage() {
             </>
           )}
 
-          <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+          <form
+            onSubmit={handleSubmit(onSubmit)}
+            noValidate
+            autoComplete={rememberMe ? "on" : "off"}
+            className="space-y-4"
+          >
 
             <div className="space-y-1.5">
               <Label htmlFor="email" className="text-sm font-medium">Email address</Label>
@@ -286,6 +303,7 @@ export default function PortalLoginPage() {
                   id="email"
                   type="email"
                   placeholder="you@example.com"
+                  autoComplete={rememberMe ? "email" : "off"}
                   className="pl-10 h-11 bg-muted/30 border-border/60 focus:bg-background transition-colors"
                   {...register("email")}
                 />
@@ -305,6 +323,7 @@ export default function PortalLoginPage() {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
+                  autoComplete={rememberMe ? "current-password" : "new-password"}
                   className="pl-10 pr-12 h-11 bg-muted/30 border-border/60 focus:bg-background transition-colors"
                   {...register("password")}
                 />
@@ -322,6 +341,28 @@ export default function PortalLoginPage() {
                   <span>•</span> {errors.password.message}
                 </p>
               )}
+            </div>
+
+            {/* Remember me + Forgot password */}
+            <div className="flex items-center justify-between">
+              <label className="inline-flex items-center gap-2 cursor-pointer select-none group">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-border cursor-pointer"
+                  style={{ accentColor: "var(--pa)" }}
+                />
+                <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">
+                  Remember me on this device
+                </span>
+              </label>
+              <Link
+                to="/portal/forgot-password"
+                className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Forgot password?
+              </Link>
             </div>
 
             <Button

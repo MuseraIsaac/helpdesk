@@ -13,11 +13,15 @@ import {
   type CreateCatalogItemInput,
   type UpdateCatalogItemInput,
 } from "core/schemas/catalog.ts";
-import type {
-  CatalogCategorySummary,
-  CatalogItemSummary,
-  CatalogItemDetail,
-  FormField,
+import {
+  CATALOG_VISIBILITIES,
+  CATALOG_VISIBILITY_LABEL,
+  CATALOG_VISIBILITY_DESCRIPTION,
+  type CatalogVisibility,
+  type CatalogCategorySummary,
+  type CatalogItemSummary,
+  type CatalogItemDetail,
+  type FormField,
 } from "core/constants/catalog.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,12 +64,42 @@ import {
   Eye,
   Tag,
   Settings,
+  Users,
+  Globe,
+  EyeOff,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface AgentOption { id: string; name: string }
 interface TeamOption { id: number; name: string; color: string }
+
+// ── Visibility badge ──────────────────────────────────────────────────────────
+
+const VISIBILITY_STYLE: Record<CatalogVisibility, { className: string; icon: React.ReactNode }> = {
+  internal: {
+    className: "bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900/30 dark:text-slate-300",
+    icon: <Users className="h-3 w-3" />,
+  },
+  portal: {
+    className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300",
+    icon: <Globe className="h-3 w-3" />,
+  },
+  both: {
+    className: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300",
+    icon: <Eye className="h-3 w-3" />,
+  },
+};
+
+function VisibilityBadge({ visibility }: { visibility: CatalogVisibility }) {
+  const style = VISIBILITY_STYLE[visibility] ?? VISIBILITY_STYLE.both;
+  return (
+    <Badge variant="outline" className={`text-[10px] gap-1 ${style.className}`}>
+      {style.icon}
+      {CATALOG_VISIBILITY_LABEL[visibility]}
+    </Badge>
+  );
+}
 
 // ── Category dialog ───────────────────────────────────────────────────────────
 
@@ -175,6 +209,7 @@ function ItemDialog({
           description: item.description ?? "",
           categoryId: item.category?.id,
           isActive: item.isActive,
+          visibility: item.visibility ?? "both",
           requestorInstructions: item.requestorInstructions ?? "",
           fulfillmentTeamId: item.fulfillmentTeam?.id,
           requiresApproval: item.requiresApproval,
@@ -188,6 +223,7 @@ function ItemDialog({
           shortDescription: "",
           description: "",
           isActive: true,
+          visibility: "both",
           requiresApproval: false,
           approvalMode: "all",
           approverIds: [],
@@ -312,6 +348,51 @@ function ItemDialog({
                   />
                   <Label>Active (visible in catalog)</Label>
                 </div>
+              </div>
+
+              {/* Visibility */}
+              <div className="space-y-1.5 rounded-md border bg-muted/30 p-3">
+                <Label className="flex items-center gap-1.5">
+                  <Eye className="h-3.5 w-3.5" />
+                  Visibility
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Choose where this item appears. The customer portal also requires the global
+                  <span className="font-medium"> Public service catalog </span>
+                  setting in Settings → Requests.
+                </p>
+                <Controller
+                  name="visibility"
+                  control={control}
+                  render={({ field: f }) => (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                      {(CATALOG_VISIBILITIES as CatalogVisibility[]).map((v) => {
+                        const style = VISIBILITY_STYLE[v];
+                        const selected = f.value === v;
+                        return (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => f.onChange(v)}
+                            className={`text-left rounded-md border p-2.5 transition-all ${
+                              selected
+                                ? "border-primary ring-2 ring-primary/20 bg-background"
+                                : "border-border bg-background hover:bg-muted/50"
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 text-sm font-medium">
+                              {style.icon}
+                              {CATALOG_VISIBILITY_LABEL[v]}
+                            </div>
+                            <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                              {CATALOG_VISIBILITY_DESCRIPTION[v]}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                />
               </div>
             </TabsContent>
 
@@ -523,6 +604,7 @@ export default function CatalogAdminPage() {
                     <TableHead>Item</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Team</TableHead>
+                    <TableHead>Visibility</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-24">Active</TableHead>
                     <TableHead className="w-24 text-right">Actions</TableHead>
@@ -531,7 +613,7 @@ export default function CatalogAdminPage() {
                 <TableBody>
                   {items.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                         No items yet. Create one to get started.
                       </TableCell>
                     </TableRow>
@@ -556,6 +638,9 @@ export default function CatalogAdminPage() {
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {item.fulfillmentTeam?.name ?? "—"}
+                      </TableCell>
+                      <TableCell>
+                        <VisibilityBadge visibility={(item.visibility ?? "both") as CatalogVisibility} />
                       </TableCell>
                       <TableCell>
                         {item.requiresApproval && (

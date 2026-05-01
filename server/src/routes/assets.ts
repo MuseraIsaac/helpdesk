@@ -43,16 +43,12 @@ import type { Prisma, AssetType, AssetStatus, AssetCondition, DepreciationMethod
 const router = Router();
 
 // ── Asset number generation ───────────────────────────────────────────────────
+// Reads prefix/padding/reset rules from Settings → Ticket Numbering → Asset.
+
+import { generateNumberForSeries } from "../lib/ticket-number";
 
 async function generateAssetNumber(): Promise<string> {
-  const [row] = await prisma.$queryRaw<[{ last_value: number }]>`
-    INSERT INTO ticket_counter (series, period_key, last_value)
-    VALUES ('asset', '', 1)
-    ON CONFLICT (series, period_key)
-    DO UPDATE SET last_value = ticket_counter.last_value + 1
-    RETURNING last_value
-  `;
-  return `ASSET-${String(row.last_value).padStart(5, "0")}`;
+  return generateNumberForSeries("asset");
 }
 
 // ── Projections ───────────────────────────────────────────────────────────────
@@ -658,8 +654,8 @@ router.get(
     const id = parseId(req.params.id);
     if (id === null) { res.status(400).json({ error: "Invalid ID" }); return; }
 
-    const asset = await prisma.asset.findUnique({
-      where: { id },
+    const asset = await prisma.asset.findFirst({
+      where: { id, deletedAt: null },
       select: ASSET_DETAIL_SELECT,
     });
     if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
@@ -838,12 +834,15 @@ router.patch(
 router.delete(
   "/:id",
   requireAuth,
-  requirePermission("assets.manage_inventory"),
+  requirePermission("assets.update"),
   async (req, res) => {
     const id = parseId(req.params.id);
     if (id === null) { res.status(400).json({ error: "Invalid ID" }); return; }
 
-    const asset = await prisma.asset.findUnique({ where: { id }, select: { id: true, status: true } });
+    const asset = await prisma.asset.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, status: true },
+    });
     if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
 
     if (asset.status === "deployed" || asset.status === "in_use") {

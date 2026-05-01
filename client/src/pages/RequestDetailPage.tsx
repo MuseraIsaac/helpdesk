@@ -60,15 +60,53 @@ import AssetLinksPanel from "@/components/AssetLinksPanel";
 // ── Event label map ───────────────────────────────────────────────────────────
 
 const EVENT_LABELS: Record<string, string> = {
-  "request.created":              "Request submitted",
-  "request.status_changed":       "Status changed",
-  "request.priority_changed":     "Priority changed",
-  "request.assigned":             "Assignment changed",
-  "request.approval_requested":   "Approval requested",
-  "request.task_created":         "Task added",
-  "request.task_status_changed":  "Task status updated",
-  "request.task_deleted":         "Task deleted",
+  "request.created":                  "Request submitted",
+  "request.status_changed":           "Status changed",
+  "request.priority_changed":         "Priority changed",
+  "request.assigned":                 "Assignment changed",
+  "request.team_changed":             "Team changed",
+  "request.approval_requested":       "Approval requested",
+  "request.approved":                 "Approval granted",
+  "request.rejected":                 "Approval rejected",
+  "request.cancelled":                "Request cancelled",
+  "request.completed":                "Request completed",
+  "request.fulfilled":                "Request fulfilled",
+  "request.escalation_rule_applied":  "Escalation rule applied",
+  "request.followed_status_changed":  "Watched status changed",
+  "request.task_created":             "Task added",
+  "request.task_status_changed":      "Task status updated",
+  "request.task_deleted":             "Task deleted",
 };
+
+const EVENT_TONE: Record<string, string> = {
+  "request.created":                "bg-blue-500",
+  "request.status_changed":         "bg-indigo-500",
+  "request.priority_changed":       "bg-purple-500",
+  "request.assigned":               "bg-sky-500",
+  "request.team_changed":           "bg-sky-500",
+  "request.approval_requested":     "bg-amber-500",
+  "request.approved":               "bg-green-500",
+  "request.rejected":               "bg-red-500",
+  "request.cancelled":              "bg-red-500",
+  "request.completed":              "bg-green-500",
+  "request.fulfilled":              "bg-green-500",
+  "request.task_created":           "bg-teal-500",
+  "request.task_status_changed":    "bg-teal-500",
+  "request.task_deleted":           "bg-muted-foreground",
+};
+
+const PRIORITY_LABELS: Record<string, string> = {
+  low:    "Low",
+  medium: "Medium",
+  high:   "High",
+  urgent: "Urgent",
+};
+
+function humanize(s: string): string {
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function formatRelative(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -616,7 +654,42 @@ function TaskList({
 
 // ── Event Trail ───────────────────────────────────────────────────────────────
 
-function EventTrail({ events }: { events: RequestEvent[] }) {
+function formatEventValue(
+  action: string,
+  value: unknown,
+  agentMap: Map<string, string>,
+  teamMap: Map<number, string>,
+): string {
+  if (value === null || value === undefined || value === "") return "Unassigned";
+  const str = String(value);
+
+  if (action === "request.status_changed") {
+    return requestStatusLabel[str as keyof typeof requestStatusLabel] ?? humanize(str);
+  }
+  if (action === "request.priority_changed") {
+    return PRIORITY_LABELS[str] ?? humanize(str);
+  }
+  if (action === "request.assigned") {
+    if (UUID_RE.test(str)) return agentMap.get(str) ?? "Unknown user";
+    return str;
+  }
+  if (action === "request.team_changed") {
+    const num = Number(str);
+    if (!Number.isNaN(num) && teamMap.has(num)) return teamMap.get(num)!;
+    return str;
+  }
+  return humanize(str);
+}
+
+function EventTrail({
+  events,
+  agentMap,
+  teamMap,
+}: {
+  events: RequestEvent[];
+  agentMap: Map<string, string>;
+  teamMap: Map<number, string>;
+}) {
   if (events.length === 0) return null;
 
   return (
@@ -625,21 +698,51 @@ function EventTrail({ events }: { events: RequestEvent[] }) {
         <Activity className="h-4 w-4" />
         Audit Trail
       </h3>
-      <ol className="relative border-l border-border ml-2 space-y-3">
+      <ol className="relative border-l border-border ml-3 space-y-3 pl-4">
         {[...events].reverse().map((ev) => {
           const meta = ev.meta as Record<string, unknown>;
-          let detail = "";
-          if (meta.from && meta.to)
-            detail = `${String(meta.from)} → ${String(meta.to)}`;
+          const hasFromTo = "from" in meta || "to" in meta;
+          const fromLabel = hasFromTo
+            ? formatEventValue(ev.action, meta.from, agentMap, teamMap)
+            : null;
+          const toLabel = hasFromTo
+            ? formatEventValue(ev.action, meta.to, agentMap, teamMap)
+            : null;
+
+          // Task events sometimes carry a title
+          const taskTitle =
+            typeof meta.title === "string"
+              ? meta.title
+              : typeof meta.taskTitle === "string"
+              ? meta.taskTitle
+              : null;
+
+          const dot = EVENT_TONE[ev.action] ?? "bg-border";
+
           return (
-            <li key={ev.id} className="ml-4">
-              <div className="absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full border border-background bg-border" />
-              <div className="flex items-baseline gap-2">
-                <span className="text-sm">
-                  {EVENT_LABELS[ev.action] ?? ev.action}
+            <li key={ev.id} className="relative">
+              <div
+                className={`absolute -left-[22px] top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-background ${dot}`}
+              />
+              <div className="text-sm leading-snug">
+                <span className="font-medium">
+                  {EVENT_LABELS[ev.action] ?? humanize(ev.action.replace(/^request\./, ""))}
                 </span>
-                {detail && (
-                  <span className="text-xs text-muted-foreground">{detail}</span>
+                {hasFromTo && (
+                  <span className="ml-2 inline-flex items-center gap-1.5 text-xs">
+                    <span className="rounded border bg-muted/60 px-1.5 py-0.5 text-muted-foreground">
+                      {fromLabel}
+                    </span>
+                    <span className="text-muted-foreground">→</span>
+                    <span className="rounded border bg-primary/5 px-1.5 py-0.5 text-foreground">
+                      {toLabel}
+                    </span>
+                  </span>
+                )}
+                {!hasFromTo && taskTitle && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    “{taskTitle}”
+                  </span>
                 )}
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">
@@ -698,6 +801,234 @@ function ItemsList({ items }: { items: ServiceRequest["items"] }) {
   );
 }
 
+// ── Approval card ─────────────────────────────────────────────────────────────
+
+type ApprovalStep = {
+  id: number;
+  stepOrder: number;
+  status: string;
+  isActive: boolean;
+  dueAt: string | null;
+  approver: { id: string; name: string; email: string };
+  decisions: {
+    id: number;
+    decision: string;
+    comment: string | null;
+    decidedAt: string;
+    decidedBy: { id: string; name: string } | null;
+  }[];
+};
+
+type ApprovalRequest = {
+  id: number;
+  status: string;
+  approvalMode: string;
+  requiredCount: number;
+  createdAt: string;
+  resolvedAt: string | null;
+  requestedBy: { id: string; name: string; email: string } | null;
+  steps: ApprovalStep[];
+};
+
+const STEP_STYLE: Record<string, { ring: string; dot: string; pill: string; icon: React.ReactNode }> = {
+  approved: {
+    ring: "ring-green-500/20",
+    dot:  "bg-green-500",
+    pill: "text-green-700 bg-green-50 border-green-200",
+    icon: <Check className="h-3 w-3" />,
+  },
+  rejected: {
+    ring: "ring-red-500/20",
+    dot:  "bg-red-500",
+    pill: "text-red-700 bg-red-50 border-red-200",
+    icon: <X className="h-3 w-3" />,
+  },
+  pending: {
+    ring: "ring-amber-500/20",
+    dot:  "bg-amber-500 animate-pulse",
+    pill: "text-amber-700 bg-amber-50 border-amber-200",
+    icon: <Clock className="h-3 w-3" />,
+  },
+  skipped: {
+    ring: "ring-muted",
+    dot:  "bg-muted-foreground/40",
+    pill: "text-muted-foreground bg-muted border-border",
+    icon: <X className="h-3 w-3" />,
+  },
+};
+
+function ApproverAvatar({ name }: { name: string }) {
+  const initials = name
+    .split(" ")
+    .map((p) => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  return (
+    <div className="h-7 w-7 shrink-0 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[11px] font-semibold">
+      {initials || "?"}
+    </div>
+  );
+}
+
+function ApprovalCard({
+  approvalStatus,
+  approvalRequestId,
+  approval,
+}: {
+  approvalStatus: string;
+  approvalRequestId: number | null;
+  approval: ApprovalRequest | undefined;
+}) {
+  const steps = approval?.steps ?? [];
+  const approvedCount = steps.filter((s) => s.status === "approved").length;
+  const rejectedCount = steps.filter((s) => s.status === "rejected").length;
+  const pendingCount  = steps.filter((s) => s.status === "pending").length;
+  const required      = approval?.requiredCount ?? steps.length;
+  const progress      = steps.length > 0 ? (approvedCount / Math.max(required, 1)) * 100 : 0;
+
+  return (
+    <div className="rounded-md border p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium text-sm flex items-center gap-1.5">
+          <Check className="h-3.5 w-3.5 text-muted-foreground" />
+          Approval
+        </h3>
+        <ApprovalStatusPill status={approvalStatus} />
+      </div>
+
+      {approval && steps.length > 0 && (
+        <>
+          {/* Summary chips */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-md border bg-green-50/50 px-2 py-1.5 text-center">
+              <div className="text-base font-semibold text-green-700 leading-none">
+                {approvedCount}
+              </div>
+              <div className="text-[10px] uppercase tracking-wide text-green-700/70 mt-0.5">
+                Approved
+              </div>
+            </div>
+            <div className="rounded-md border bg-amber-50/50 px-2 py-1.5 text-center">
+              <div className="text-base font-semibold text-amber-700 leading-none">
+                {pendingCount}
+              </div>
+              <div className="text-[10px] uppercase tracking-wide text-amber-700/70 mt-0.5">
+                Pending
+              </div>
+            </div>
+            <div className="rounded-md border bg-red-50/50 px-2 py-1.5 text-center">
+              <div className="text-base font-semibold text-red-700 leading-none">
+                {rejectedCount}
+              </div>
+              <div className="text-[10px] uppercase tracking-wide text-red-700/70 mt-0.5">
+                Rejected
+              </div>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span>
+                {approvedCount}/{required} approval{required === 1 ? "" : "s"}
+              </span>
+              <span className="capitalize">{approval.approvalMode.replace("_", " ")}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${
+                  rejectedCount > 0 ? "bg-red-500" : "bg-green-500"
+                }`}
+                style={{ width: `${Math.min(progress, 100)}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Approver list */}
+          <ol className="space-y-2">
+            {steps.map((step) => {
+              const style = STEP_STYLE[step.status] ?? STEP_STYLE.pending;
+              const decision = step.decisions[step.decisions.length - 1];
+              return (
+                <li
+                  key={step.id}
+                  className={`relative rounded-md border bg-card p-2.5 ring-1 ${style.ring} ${
+                    step.isActive && step.status === "pending" ? "border-amber-300" : ""
+                  }`}
+                >
+                  <div className="flex items-start gap-2.5">
+                    <ApproverAvatar name={step.approver.name} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium truncate">
+                          {step.approver.name}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] px-1.5 py-0 gap-1 ${style.pill}`}
+                        >
+                          {style.icon}
+                          <span className="capitalize">{step.status}</span>
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {step.approver.email}
+                      </p>
+                      {decision && (
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          {decision.decision === "approved" ? "Approved" : "Rejected"} ·{" "}
+                          {formatRelative(decision.decidedAt)}
+                        </p>
+                      )}
+                      {decision?.comment && (
+                        <p className="text-xs text-foreground/80 mt-1 italic border-l-2 pl-2 border-border">
+                          “{decision.comment}”
+                        </p>
+                      )}
+                      {!decision && step.status === "pending" && step.dueAt && (
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Due {formatDatetime(step.dueAt)}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                      #{step.stepOrder + 1}
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t">
+            <span>
+              Requested {formatRelative(approval.createdAt)}
+              {approval.requestedBy && ` by ${approval.requestedBy.name}`}
+            </span>
+            <Link to="/approvals" className="underline hover:text-foreground">
+              View all
+            </Link>
+          </div>
+        </>
+      )}
+
+      {!approval && approvalRequestId && (
+        <p className="text-xs text-muted-foreground">
+          Loading approval #{approvalRequestId}…
+        </p>
+      )}
+
+      {!approvalRequestId && (
+        <p className="text-xs text-muted-foreground italic">
+          No approval request has been sent yet.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── RequestDetailPage ─────────────────────────────────────────────────────────
 
 export default function RequestDetailPage() {
@@ -725,8 +1056,45 @@ export default function RequestDetailPage() {
   const { data: teamsData } = useQuery({
     queryKey: ["teams"],
     queryFn: async () => {
-      const { data } = await axios.get<{ teams: { id: number; name: string }[] }>("/api/teams");
+      const { data } = await axios.get<{
+        teams: { id: number; name: string; members: { id: string; name: string }[] }[];
+      }>("/api/teams");
       return data;
+    },
+  });
+
+  const { data: approvalData } = useQuery({
+    queryKey: ["approval", request?.approvalRequestId],
+    enabled: !!request?.approvalRequestId,
+    queryFn: async () => {
+      const { data } = await axios.get<{
+        approvalRequest: {
+          id: number;
+          status: string;
+          approvalMode: string;
+          requiredCount: number;
+          createdAt: string;
+          resolvedAt: string | null;
+          requestedBy: { id: string; name: string; email: string } | null;
+          steps: {
+            id: number;
+            stepOrder: number;
+            status: string;
+            isActive: boolean;
+            dueAt: string | null;
+            createdAt: string;
+            approver: { id: string; name: string; email: string };
+            decisions: {
+              id: number;
+              decision: string;
+              comment: string | null;
+              decidedAt: string;
+              decidedBy: { id: string; name: string } | null;
+            }[];
+          }[];
+        };
+      }>(`/api/approvals/${request!.approvalRequestId}`);
+      return data.approvalRequest;
     },
   });
 
@@ -868,7 +1236,15 @@ export default function RequestDetailPage() {
           {/* Event trail */}
           {request.events && request.events.length > 0 && (
             <div className="rounded-md border p-4">
-              <EventTrail events={request.events} />
+              <EventTrail
+                events={request.events}
+                agentMap={
+                  new Map(agentsData?.agents.map((a) => [a.id, a.name]) ?? [])
+                }
+                teamMap={
+                  new Map(teamsData?.teams.map((t) => [t.id, t.name]) ?? [])
+                }
+              />
             </div>
           )}
         </div>
@@ -893,25 +1269,6 @@ export default function RequestDetailPage() {
               </div>
             </div>
 
-            {/* Assignee */}
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Assigned To
-              </span>
-              <SearchableSelect
-                value={request.assignedTo?.id ?? "none"}
-                options={[
-                  { value: "none", label: "Unassigned" },
-                  ...(agentsData?.agents.map((a) => ({ value: a.id, label: a.name })) ?? []),
-                ]}
-                placeholder="Unassigned"
-                searchPlaceholder="Search agents…"
-                onChange={(v) => patchMutation.mutate({ assignedToId: v === "none" ? null : v })}
-                disabled={isTerminal}
-                className="h-8 text-sm"
-              />
-            </div>
-
             {/* Team */}
             <div className="space-y-1">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -925,10 +1282,81 @@ export default function RequestDetailPage() {
                 ]}
                 placeholder="No team"
                 searchPlaceholder="Search teams…"
-                onChange={(v) => patchMutation.mutate({ teamId: v === "none" ? null : Number(v) })}
+                onChange={(v) => {
+                  const newTeamId = v === "none" ? null : Number(v);
+                  // If the current assignee is no longer a member of the new team, clear them.
+                  const newTeam = newTeamId
+                    ? teamsData?.teams.find((t) => t.id === newTeamId)
+                    : null;
+                  const assigneeStillValid =
+                    !request.assignedTo ||
+                    !newTeam ||
+                    newTeam.members.some((m) => m.id === request.assignedTo!.id);
+                  patchMutation.mutate({
+                    teamId: newTeamId,
+                    ...(assigneeStillValid ? {} : { assignedToId: null }),
+                  });
+                }}
                 disabled={isTerminal}
                 className="h-8 text-sm"
               />
+            </div>
+
+            {/* Assignee — scoped to the selected team's members */}
+            <div className="space-y-1">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Assigned To
+              </span>
+              {(() => {
+                const selectedTeam = request.team?.id != null
+                  ? teamsData?.teams.find((t) => t.id === request.team!.id)
+                  : null;
+                const memberOptions = selectedTeam
+                  ? selectedTeam.members.map((m) => ({ value: m.id, label: m.name }))
+                  : (agentsData?.agents.map((a) => ({ value: a.id, label: a.name })) ?? []);
+                return (
+                  <SearchableSelect
+                    value={request.assignedTo?.id ?? "none"}
+                    options={[
+                      { value: "none", label: "Unassigned" },
+                      ...memberOptions,
+                    ]}
+                    placeholder={
+                      selectedTeam && memberOptions.length === 0
+                        ? "No members in team"
+                        : "Unassigned"
+                    }
+                    searchPlaceholder={
+                      selectedTeam ? `Search ${selectedTeam.name}…` : "Search agents…"
+                    }
+                    onChange={(v) => {
+                      const newAssigneeId = v === "none" ? null : v;
+                      // If no team is currently set and a real agent was picked,
+                      // auto-populate the team using the first team that includes them.
+                      if (newAssigneeId && !request.team && teamsData?.teams) {
+                        const inferredTeam = teamsData.teams.find((t) =>
+                          t.members.some((m) => m.id === newAssigneeId),
+                        );
+                        if (inferredTeam) {
+                          patchMutation.mutate({
+                            assignedToId: newAssigneeId,
+                            teamId: inferredTeam.id,
+                          });
+                          return;
+                        }
+                      }
+                      patchMutation.mutate({ assignedToId: newAssigneeId });
+                    }}
+                    disabled={isTerminal || (!!selectedTeam && memberOptions.length === 0)}
+                    className="h-8 text-sm"
+                  />
+                );
+              })()}
+              {request.team && (
+                <p className="text-[11px] text-muted-foreground">
+                  Showing members of {request.team.name}
+                </p>
+              )}
             </div>
           </div>
 
@@ -1046,23 +1474,11 @@ export default function RequestDetailPage() {
 
           {/* Approval info card */}
           {request.approvalStatus !== "not_required" && (
-            <div className="rounded-md border p-4 space-y-2">
-              <h3 className="font-medium text-sm">Approval</h3>
-              <div className="flex items-center gap-2">
-                <ApprovalStatusPill status={request.approvalStatus} />
-              </div>
-              {request.approvalRequestId && (
-                <p className="text-xs text-muted-foreground">
-                  Approval #{request.approvalRequestId} ·{" "}
-                  <Link
-                    to="/approvals"
-                    className="underline hover:text-foreground"
-                  >
-                    View in Approvals
-                  </Link>
-                </p>
-              )}
-            </div>
+            <ApprovalCard
+              approvalStatus={request.approvalStatus}
+              approvalRequestId={request.approvalRequestId}
+              approval={approvalData}
+            />
           )}
         </div>
       </div>

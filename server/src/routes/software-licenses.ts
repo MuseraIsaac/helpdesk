@@ -48,7 +48,10 @@ function daysUntil(date: Date | null): number | null {
 
 const LICENSE_SUMMARY_SELECT = {
   id: true, licenseNumber: true, productName: true, vendor: true,
-  edition: true, version: true, platform: true, licenseType: true, status: true,
+  edition: true, version: true, platform: true, licenseType: true,
+  customLicenseTypeId: true,
+  customLicenseType: { select: { id: true, name: true, color: true } },
+  status: true,
   totalSeats: true, expiryDate: true, renewalDate: true,
   annualCost: true, purchasePrice: true, currency: true, autoRenews: true,
   externalId: true, discoverySource: true,
@@ -96,11 +99,11 @@ router.get("/stats", requirePermission("software.view"), async (req, res) => {
   const in90  = new Date(now.getTime() + 90  * 86_400_000);
 
   const [total, active, expiring30, expiring90, expired] = await Promise.all([
-    prisma.softwareLicense.count(),
-    prisma.softwareLicense.count({ where: { status: "active" } }),
-    prisma.softwareLicense.count({ where: { status: "active", expiryDate: { lte: in30, gte: now } } }),
-    prisma.softwareLicense.count({ where: { status: "active", expiryDate: { lte: in90, gte: now } } }),
-    prisma.softwareLicense.count({ where: { status: "expired" } }),
+    prisma.softwareLicense.count({ where: { deletedAt: null } }),
+    prisma.softwareLicense.count({ where: { status: "active", deletedAt: null } }),
+    prisma.softwareLicense.count({ where: { status: "active", expiryDate: { lte: in30, gte: now }, deletedAt: null } }),
+    prisma.softwareLicense.count({ where: { status: "active", expiryDate: { lte: in90, gte: now }, deletedAt: null } }),
+    prisma.softwareLicense.count({ where: { status: "expired", deletedAt: null } }),
   ]);
 
   res.json({ total, active, expiring30, expiring90, expired });
@@ -115,7 +118,7 @@ router.get("/", requirePermission("software.view"), async (req, res) => {
   const { status, licenseType, platform, search, expiringDays, overAllocated, ownerId, page, pageSize } = query;
   const now = new Date();
 
-  const where: Prisma.SoftwareLicenseWhereInput = {};
+  const where: Prisma.SoftwareLicenseWhereInput = { deletedAt: null };
 
   if (status)      where.status      = status as SoftwareLicenseStatus;
   if (licenseType) where.licenseType = licenseType as SoftwareLicenseType;
@@ -174,6 +177,7 @@ router.post("/", requirePermission("software.create"), async (req, res) => {
       version:          data.version          ?? null,
       platform:         data.platform,
       licenseType:      data.licenseType,
+      ...(data.customLicenseTypeId != null && { customLicenseTypeId: data.customLicenseTypeId }),
       status:           data.status,
       licenseKey:       data.licenseKey       ?? null,
       licenseReference: data.licenseReference ?? null,
@@ -210,8 +214,8 @@ router.get("/:id", requirePermission("software.view"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
 
-  const license = await prisma.softwareLicense.findUnique({
-    where: { id },
+  const license = await prisma.softwareLicense.findFirst({
+    where: { id, deletedAt: null },
     select: LICENSE_DETAIL_SELECT,
   });
 
@@ -245,6 +249,7 @@ router.patch("/:id", requirePermission("software.manage"), async (req, res) => {
       ...(data.version          !== undefined && { version:          data.version }),
       ...(data.platform         !== undefined && { platform:         data.platform }),
       ...(data.licenseType      !== undefined && { licenseType:      data.licenseType }),
+      ...("customLicenseTypeId" in data && { customLicenseTypeId: data.customLicenseTypeId ?? null }),
       ...(data.status           !== undefined && { status:           data.status }),
       ...(data.licenseKey       !== undefined && { licenseKey:       data.licenseKey }),
       ...(data.licenseReference !== undefined && { licenseReference: data.licenseReference }),
@@ -280,8 +285,27 @@ router.delete("/:id", requirePermission("software.manage"), async (req, res) => 
   const id = parseId(req.params.id);
   if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
 
-  await prisma.softwareLicense.delete({ where: { id } });
+  const { count } = await prisma.softwareLicense.updateMany({
+    where: { id, deletedAt: null },
+    data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
+  });
+  if (count === 0) { res.status(404).json({ error: "Software license not found" }); return; }
   res.status(204).end();
+});
+
+// ── POST /api/software-licenses/bulk-delete ──────────────────────────────────
+
+router.post("/bulk-delete", requirePermission("software.manage"), async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+  if (!ids || ids.length === 0 || !ids.every((n: unknown) => Number.isInteger(n) && (n as number) > 0)) {
+    res.status(400).json({ error: "ids must be a non-empty array of positive integers" });
+    return;
+  }
+  const result = await prisma.softwareLicense.updateMany({
+    where: { id: { in: ids }, deletedAt: null },
+    data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
+  });
+  res.json({ deleted: result.count });
 });
 
 // ── GET /api/software-licenses/:id/assignments ────────────────────────────────

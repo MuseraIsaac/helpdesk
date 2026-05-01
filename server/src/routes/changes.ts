@@ -883,6 +883,7 @@ router.post(
     const {
       defaultCabGroupId, requireCabForNormal, requireCabForEmergency,
       cabApprovalSequential, minCabApprovers, maxApprovalResends,
+      cabRequireUnanimous,
     } = changeSettings;
 
     // Only enforce minimum approvers on a fresh (first-ever) request.
@@ -949,21 +950,27 @@ router.post(
       return;
     }
 
-    // Rule: a change is approved as soon as minCabApprovers members have approved,
-    // regardless of how many approvers were invited and regardless of order setting.
-    //  - Parallel (default): all approvers notified at once; first minCabApprovers
-    //    to approve resolve the request ("any" mode, requiredCount = minCabApprovers).
-    //  - Sequential: approvers are activated one at a time in order; once
-    //    minCabApprovers have approved the request resolves ("all" mode with
-    //    threshold — remaining steps are skipped once the threshold is reached).
+    // Threshold rule:
+    //  - Default ("quorum") behaviour: a change is approved as soon as
+    //    `minCabApprovers` members have approved. Remaining steps are skipped.
+    //  - Unanimous (`cabRequireUnanimous = true`): every invited approver must
+    //    approve. Threshold = approverIds.length. A single rejection rejects
+    //    the whole request immediately (existing engine behaviour).
+    //
+    // Mode selection:
+    //  - Parallel (default): all approvers notified at once → "any" mode with
+    //    the threshold above.
+    //  - Sequential: approvers activated one at a time in order → "all" mode
+    //    with the same threshold; remaining steps are skipped once met.
     //
     // For resends (isResend=true) we cap the threshold at the number of approvers
     // actually submitted, so a targeted resend to e.g. 1 rejected member can still
     // succeed without requiring the full minimum count from a fresh round.
     const effectiveMode: "all" | "any" = cabApprovalSequential ? "all" : "any";
+    const baseRequired = cabRequireUnanimous ? approverIds.length : minCabApprovers;
     const effectiveRequired = isResend
-      ? Math.min(minCabApprovers, approverIds.length)
-      : minCabApprovers;
+      ? Math.min(baseRequired, approverIds.length)
+      : baseRequired;
 
     const { approvalRequestId } = await requestChangeApproval(
       { changeId: id, approverIds, approvalMode: effectiveMode, requiredCount: effectiveRequired, expiresAt },

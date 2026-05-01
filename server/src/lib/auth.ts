@@ -31,6 +31,49 @@ function buildAuth(opts: {
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,
+      /**
+       * Better Auth invokes this when a user posts to /api/auth/forget-password.
+       * The reset URL it provides already includes the secure token; we just
+       * deliver it via the existing outbound-email worker. The link points to
+       * the customer portal by default; the agent reset page accepts the same
+       * `?token=` query string.
+       */
+      sendResetPassword: async ({ user, url }) => {
+        const { sendEmailJob } = await import("./send-email");
+        const appOrigin =
+          process.env.APP_URL ||
+          process.env.BETTER_AUTH_URL ||
+          process.env.BETTER_AUTH_BASE_URL ||
+          "";
+        // Better Auth's default URL points to its own callback. We rewrite to
+        // the in-app reset page so the user lands on a styled form, then the
+        // form posts back to /api/auth/reset-password.
+        const tokenMatch = url.match(/[?&]token=([^&]+)/);
+        const token = tokenMatch?.[1] ?? "";
+        const resetUrl = appOrigin
+          ? `${appOrigin.replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(token)}`
+          : url;
+
+        const subject = "Reset your password";
+        const text =
+          `Hi ${user.name || "there"},\n\n` +
+          `We received a request to reset the password for your account.\n\n` +
+          `Click the link below to set a new password (valid for 1 hour):\n` +
+          `${resetUrl}\n\n` +
+          `If you didn't request this, you can safely ignore this email — your password won't change.\n`;
+        const html =
+          `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.55;color:#111;max-width:560px">` +
+          `<p>Hi ${user.name || "there"},</p>` +
+          `<p>We received a request to reset the password for your account. Click the button below to set a new password — the link is valid for 1 hour.</p>` +
+          `<p style="margin:24px 0"><a href="${resetUrl}" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#4f46e5;color:#fff;text-decoration:none;font-weight:600">Reset password</a></p>` +
+          `<p style="font-size:12px;color:#666">Or copy this link into your browser:<br><span style="word-break:break-all">${resetUrl}</span></p>` +
+          `<hr style="border:0;border-top:1px solid #e5e7eb;margin:24px 0">` +
+          `<p style="font-size:12px;color:#666">If you didn't request this, you can safely ignore this email — your password won't change.</p>` +
+          `</div>`;
+
+        await sendEmailJob({ to: user.email, subject, body: text, bodyHtml: html });
+      },
+      resetPasswordTokenExpiresIn: 60 * 60, // 1 hour
     },
     ...(googleEnabled && {
       socialProviders: {

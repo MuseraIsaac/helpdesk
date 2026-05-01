@@ -27,7 +27,10 @@ import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
 import SettingsFormShell from "./SettingsFormShell";
 import { SettingsField, SettingsSwitchRow, SettingsGroup } from "./SettingsField";
 import EscalationRulesManager from "@/components/EscalationRulesManager";
-import { Upload, X, Sparkles, Monitor, ShieldCheck, ShieldX, Check, Plus } from "lucide-react";
+import {
+  Upload, X, Sparkles, Monitor, ShieldCheck, ShieldX, Check, Plus,
+  Ticket as TicketIcon, AlertTriangle, ShoppingBag, GitMerge, Bug, Server, Database, Hash,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -824,6 +827,14 @@ export function TicketsSection() {
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
+        <SettingsSwitchRow
+          label="Assign on first response"
+          description="When an agent posts the first reply on a ticket, they're automatically assigned to it. Subsequent replies from other agents don't change the assignee. This rule overrides every other assignment automation."
+        >
+          <Controller name="autoAssignFirstResponder" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
         <SettingsSwitchRow label="Require category on create" description="Agents must pick a category before creating a ticket manually.">
           <Controller name="requireCategoryOnCreate" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
@@ -1000,13 +1011,47 @@ export function TicketsSection() {
 
 // ── 4. Ticket Numbering ───────────────────────────────────────────────────────
 
-type TicketSeriesKey = "ticket" | "change_request" | "problem";
+type TicketSeriesKey =
+  | "ticket"
+  | "incident"
+  | "service_request"
+  | "problem"
+  | "change_request"
+  | "asset"
+  | "ci";
 
-const SERIES_META: { key: TicketSeriesKey; label: string; description: string }[] = [
-  { key: "ticket",         label: "Ticket",         description: "Shared counter for Incidents, Service Requests, and untyped tickets — all numbered together" },
-  { key: "change_request", label: "Change Request",  description: "Separate counter for changes to systems or infrastructure" },
-  { key: "problem",        label: "Problem",         description: "Separate counter for root cause investigations" },
+interface SeriesMeta {
+  key: TicketSeriesKey;
+  label: string;
+  description: string;
+  icon: React.ElementType;
+  /**
+   * Tailwind colour family used for the icon chip + accent rail. Each ITSM
+   * module gets its own hue so the page reads as a colour-coded matrix
+   * rather than a uniform list.
+   */
+  tone: "violet" | "rose" | "teal" | "amber" | "blue" | "indigo" | "purple";
+}
+
+const SERIES_META: SeriesMeta[] = [
+  { key: "ticket",          label: "Tickets",          description: "Generic untyped tickets",                      icon: TicketIcon,    tone: "violet" },
+  { key: "incident",        label: "Incidents",        description: "Major incident management records",            icon: AlertTriangle, tone: "rose" },
+  { key: "service_request", label: "Service Requests", description: "Catalog requests and customer asks",           icon: ShoppingBag,   tone: "teal" },
+  { key: "problem",         label: "Problems",         description: "Root-cause investigations and known errors",   icon: Bug,           tone: "amber" },
+  { key: "change_request",  label: "Changes",          description: "Change requests for systems or infrastructure", icon: GitMerge,      tone: "blue" },
+  { key: "asset",           label: "Assets",           description: "Hardware, devices, software licences",          icon: Server,        tone: "indigo" },
+  { key: "ci",              label: "CMDB Items",       description: "Configuration items and services",             icon: Database,      tone: "purple" },
 ];
+
+const TONE_STYLES: Record<SeriesMeta["tone"], { rail: string; iconBg: string; iconColor: string; previewBg: string; previewText: string }> = {
+  violet: { rail: "bg-violet-500", iconBg: "bg-violet-500/10 border-violet-500/30", iconColor: "text-violet-600 dark:text-violet-400", previewBg: "bg-violet-500/[0.08] border-violet-500/30", previewText: "text-violet-700 dark:text-violet-300" },
+  rose:   { rail: "bg-rose-500",   iconBg: "bg-rose-500/10 border-rose-500/30",     iconColor: "text-rose-600 dark:text-rose-400",     previewBg: "bg-rose-500/[0.08] border-rose-500/30",     previewText: "text-rose-700 dark:text-rose-300" },
+  teal:   { rail: "bg-teal-500",   iconBg: "bg-teal-500/10 border-teal-500/30",     iconColor: "text-teal-600 dark:text-teal-400",     previewBg: "bg-teal-500/[0.08] border-teal-500/30",     previewText: "text-teal-700 dark:text-teal-300" },
+  amber:  { rail: "bg-amber-500",  iconBg: "bg-amber-500/10 border-amber-500/30",   iconColor: "text-amber-600 dark:text-amber-400",   previewBg: "bg-amber-500/[0.08] border-amber-500/30",   previewText: "text-amber-700 dark:text-amber-300" },
+  blue:   { rail: "bg-blue-500",   iconBg: "bg-blue-500/10 border-blue-500/30",     iconColor: "text-blue-600 dark:text-blue-400",     previewBg: "bg-blue-500/[0.08] border-blue-500/30",     previewText: "text-blue-700 dark:text-blue-300" },
+  indigo: { rail: "bg-indigo-500", iconBg: "bg-indigo-500/10 border-indigo-500/30", iconColor: "text-indigo-600 dark:text-indigo-400", previewBg: "bg-indigo-500/[0.08] border-indigo-500/30", previewText: "text-indigo-700 dark:text-indigo-300" },
+  purple: { rail: "bg-purple-500", iconBg: "bg-purple-500/10 border-purple-500/30", iconColor: "text-purple-600 dark:text-purple-400", previewBg: "bg-purple-500/[0.08] border-purple-500/30", previewText: "text-purple-700 dark:text-purple-300" },
+};
 
 function buildPreview(config: Partial<SeriesConfig>, now = new Date()): string {
   const prefix    = config?.prefix        ?? "???";
@@ -1028,97 +1073,96 @@ function buildPreview(config: Partial<SeriesConfig>, now = new Date()): string {
 
 // One row in the series table (uses its own watch for a live preview)
 function SeriesRow({
-  seriesKey,
-  label,
-  description,
+  meta,
   control,
   register,
 }: {
-  seriesKey: TicketSeriesKey;
-  label: string;
-  description: string;
+  meta: SeriesMeta;
   control: ReturnType<typeof useForm<TicketNumberingSettings>>["control"];
   register: ReturnType<typeof useForm<TicketNumberingSettings>>["register"];
 }) {
+  const { key: seriesKey, label, description, icon: Icon, tone } = meta;
   const config = useWatch({ control, name: seriesKey });
   const preview = useMemo(() => buildPreview(config), [config]);
+  const t = TONE_STYLES[tone];
 
   return (
-    <div className="rounded-lg border bg-card p-4 space-y-3">
+    <div className="relative rounded-xl border bg-card overflow-hidden shadow-sm hover:shadow-md hover:border-foreground/20 transition-all">
+      {/* Top accent rail */}
+      <div className={`absolute top-0 inset-x-0 h-[3px] ${t.rail}`} />
+
       {/* Header */}
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-semibold">{label}</p>
-          <p className="text-xs text-muted-foreground">{description}</p>
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border/60 bg-muted/20">
+        <span className={`flex h-9 w-9 items-center justify-center rounded-lg border shrink-0 ${t.iconBg}`}>
+          <Icon className={`h-4 w-4 ${t.iconColor}`} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold leading-tight">{label}</p>
+          <p className="text-[11px] text-muted-foreground leading-snug">{description}</p>
         </div>
-        <div className="shrink-0 rounded-md bg-muted px-3 py-1.5 font-mono text-sm font-bold tracking-wide">
-          {preview}
+
+        {/* Live preview chip */}
+        <div className={`shrink-0 flex items-center gap-1.5 rounded-md border px-3 py-1.5 ${t.previewBg}`}>
+          <Hash className={`h-3 w-3 ${t.previewText}`} />
+          <span className={`font-mono text-sm font-bold tracking-wider ${t.previewText}`}>
+            {preview}
+          </span>
         </div>
       </div>
 
-      {/* Config fields — horizontal row */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        {/* Prefix */}
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Prefix</p>
+      {/* Config fields */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 p-4">
+        <FieldShell label="Prefix">
           <Input
             maxLength={10}
-            className="font-mono uppercase text-sm h-8"
+            className="font-mono uppercase text-sm h-9 font-semibold tracking-wide"
             {...register(`${seriesKey}.prefix`)}
           />
-        </div>
+        </FieldShell>
 
-        {/* Digits */}
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Digits</p>
+        <FieldShell label="Digits">
           <Input
             type="number"
             min={1}
             max={10}
-            className="text-sm h-8"
+            className="text-sm h-9 tabular-nums"
             {...register(`${seriesKey}.paddingLength`, { valueAsNumber: true })}
           />
-        </div>
+        </FieldShell>
 
-        {/* Start At */}
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Start At</p>
+        <FieldShell label="Start at">
           <Input
             type="number"
             min={1}
-            className="text-sm h-8"
+            className="text-sm h-9 tabular-nums"
             {...register(`${seriesKey}.startAt`, { valueAsNumber: true })}
           />
-        </div>
+        </FieldShell>
 
-        {/* Date segment */}
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Date</p>
+        <FieldShell label="Date segment">
           <Controller
             name={`${seriesKey}.includeDateSegment`}
             control={control}
             render={({ field }) => (
               <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
-                  <SelectItem value="year">Year (2024)</SelectItem>
-                  <SelectItem value="year_month">Year+Month (202403)</SelectItem>
+                  <SelectItem value="year">Year (2026)</SelectItem>
+                  <SelectItem value="year_month">Year + Month (202604)</SelectItem>
                 </SelectContent>
               </Select>
             )}
           />
-        </div>
+        </FieldShell>
 
-        {/* Reset period */}
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Reset</p>
+        <FieldShell label="Reset period">
           <Controller
             name={`${seriesKey}.resetPeriod`}
             control={control}
             render={({ field }) => (
               <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="never">Never</SelectItem>
                   <SelectItem value="yearly">Yearly</SelectItem>
@@ -1127,8 +1171,19 @@ function SeriesRow({
               </Select>
             )}
           />
-        </div>
+        </FieldShell>
       </div>
+    </div>
+  );
+}
+
+function FieldShell({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/80 mb-1.5">
+        {label}
+      </p>
+      {children}
     </div>
   );
 }
@@ -1149,7 +1204,7 @@ export function TicketNumberingSection() {
   return (
     <SettingsFormShell
       title="Ticket Numbering"
-      description="One numbering series per ticket type. Numbers are generated at creation and are permanent — changing settings here only affects new tickets."
+      description="Each ITSM module has its own counter and prefix. Numbers are generated at creation and are permanent — changing settings here only affects new records."
       onSubmit={handleSubmit((d) => update.mutate(d))}
       isPending={update.isPending}
       isDirty={isDirty}
@@ -1157,22 +1212,37 @@ export function TicketNumberingSection() {
       isSuccess={update.isSuccess}
     >
       <div className="space-y-3">
-        {SERIES_META.map(({ key, label, description }) => (
+        {SERIES_META.map((meta) => (
           <SeriesRow
-            key={key}
-            seriesKey={key}
-            label={label}
-            description={description}
+            key={meta.key}
+            meta={meta}
             control={control}
             register={register}
           />
         ))}
       </div>
 
-      <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground space-y-1">
-        <p><span className="font-semibold text-foreground">Ticket counter</span> — Incidents, Service Requests, and untyped tickets all share one counter and prefix. A TKT0001 incident and a TKT0002 service request are counted together.</p>
-        <p><span className="font-semibold text-foreground">Start At</span> — seeds the counter only when no ticket in that series exists yet. It has no effect once the first number has been issued.</p>
-        <p><span className="font-semibold text-foreground">Reset</span> — resets the sequence each year or month. Combine with a date segment to produce formats like <span className="font-mono">TKT202400001</span>.</p>
+      {/* Help / glossary card */}
+      <div className="rounded-xl border border-dashed bg-muted/20 px-5 py-4 mt-4 text-[12px] leading-relaxed text-muted-foreground space-y-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground/80 mb-2">
+          About these settings
+        </p>
+        <p>
+          <span className="font-semibold text-foreground">Independent counters.</span>{" "}
+          Each module increments its own sequence — an Incident numbered <span className="font-mono">INC-0001</span> and a Service Request numbered <span className="font-mono">REQ-0001</span> coexist without conflict.
+        </p>
+        <p>
+          <span className="font-semibold text-foreground">Start At.</span>{" "}
+          Seeds the counter only when no record in that series exists yet. It has no effect once the first number has been issued.
+        </p>
+        <p>
+          <span className="font-semibold text-foreground">Date segment + Reset.</span>{" "}
+          Combine to produce formats like <span className="font-mono text-foreground">INC-2026-0001</span> or <span className="font-mono text-foreground">CHG-202604-001</span> with the sequence resetting every year or month.
+        </p>
+        <p>
+          <span className="font-semibold text-foreground">Backwards compatible.</span>{" "}
+          Existing records keep their original numbers when you change a prefix; only newly created records use the new format.
+        </p>
       </div>
     </SettingsFormShell>
   );
@@ -2896,7 +2966,10 @@ export function RequestsSection() {
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
-        <SettingsSwitchRow label="Public service catalog" description="Show the service catalog to unauthenticated portal visitors.">
+        <SettingsSwitchRow
+          label="Public service catalog"
+          description="Master switch — when off, the service catalog is hidden from the customer portal entirely. When on, only items whose visibility is set to ‘Customer portal only’ or ‘Agents & customer portal’ are shown. Manage per-item visibility in the Service Catalog admin."
+        >
           <Controller name="catalogPubliclyVisible" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
@@ -3029,8 +3102,27 @@ export function ProblemsSection() {
 export function ChangesSection() {
   const { data, isLoading } = useSettings("changes");
   const update = useUpdateSettings("changes");
-  const { register, handleSubmit, reset, control, formState: { isDirty } } =
-    useForm<ChangesSettings>({ resolver: zodResolver(changesSettingsSchema), defaultValues: changesSettingsSchema.parse({}) });
+  // Pull `errors` and `isValid` so the form can show *why* a save is
+  // blocked instead of silently dropping the click. Without this, clicking
+  // Save on an invalid field (e.g. a cleared number input that became NaN)
+  // does nothing and looks broken.
+  // Number inputs registered with `valueAsNumber: true` produce NaN when
+  // the user clears them. Zod's `z.number()` rejects NaN, so the default
+  // resolver would silently fail validation and the Save button would
+  // appear to do nothing. Wrap the resolver to coerce NaN to undefined
+  // first — that lets each field's schema-level `.default(...)` fire,
+  // and a cleared number input falls back to its default instead of
+  // blocking the entire save.
+  const baseResolver = zodResolver(changesSettingsSchema);
+  const resolver: typeof baseResolver = (values, ctx, options) => {
+    const sanitized = JSON.parse(
+      JSON.stringify(values, (_k, v) => typeof v === "number" && isNaN(v) ? undefined : v),
+    );
+    return baseResolver(sanitized, ctx, options);
+  };
+
+  const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
+    useForm<ChangesSettings>({ resolver, defaultValues: changesSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
   const freezeEnabled = useWatch({ control, name: "freezeWindowEnabled" });
   const pirEnabled    = useWatch({ control, name: "postImplementationReviewEnabled" });
@@ -3043,6 +3135,25 @@ export function ChangesSection() {
     },
   });
 
+  // Build a flat list of validation errors so the user can scan all of
+  // them at once. Walks the (possibly nested) react-hook-form errors
+  // object and pulls out any leaf with a `message`.
+  const errorList = useMemo(() => {
+    const out: { field: string; message: string }[] = [];
+    const walk = (obj: unknown, path: string[]) => {
+      if (!obj || typeof obj !== "object") return;
+      if ("message" in obj && typeof (obj as { message?: unknown }).message === "string") {
+        out.push({ field: path.join("."), message: (obj as { message: string }).message });
+        return;
+      }
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+        walk(v, [...path, k]);
+      }
+    };
+    walk(errors, []);
+    return out;
+  }, [errors]);
+
   return (
     <SettingsFormShell
       title="Changes"
@@ -3051,6 +3162,22 @@ export function ChangesSection() {
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
       {isLoading && <SectionLoading />}
+
+      {errorList.length > 0 && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/[0.04] p-3 space-y-1.5">
+          <p className="text-xs font-semibold text-destructive">
+            {errorList.length} field{errorList.length === 1 ? "" : "s"} need{errorList.length === 1 ? "s" : ""} attention before saving:
+          </p>
+          <ul className="space-y-0.5 text-[12px]">
+            {errorList.map((e, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <span className="font-mono text-[10px] text-destructive/80 shrink-0 mt-0.5">{e.field}</span>
+                <span className="text-destructive/90">{e.message}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <SettingsGroup title="Module">
         <SettingsSwitchRow label="Enable Change Management" description="Track change requests through a review and approval workflow.">
@@ -3172,9 +3299,17 @@ export function ChangesSection() {
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
+        <SettingsSwitchRow
+          label="Require unanimous CAB approval"
+          description="When on, every invited CAB member must approve before a change is finalised. A single rejection rejects the whole request immediately. When off (default), the change is approved as soon as the minimum-approvers threshold below is met."
+        >
+          <Controller name="cabRequireUnanimous" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
         <SettingsField
           label="Minimum CAB approvers"
-          description="The minimum number of CAB members that must be selected before a change can be submitted for approval."
+          description="The minimum number of CAB members that must be selected before a change can be submitted for approval. When unanimous approval is on, this is also the minimum invitation size."
           htmlFor="minCabApprovers"
         >
           <div className="flex items-center gap-2">

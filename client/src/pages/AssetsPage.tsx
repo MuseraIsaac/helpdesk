@@ -29,6 +29,10 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import ErrorAlert from "@/components/ErrorAlert";
 import NewAssetDialog from "@/components/NewAssetDialog";
 import AssetBulkActionsBar from "@/components/AssetBulkActionsBar";
@@ -143,7 +147,13 @@ function SortIcon({ col, sortBy, sortOrder }: { col: string; sortBy: string; sor
 
 // ── Row actions ───────────────────────────────────────────────────────────────
 
-function RowActions({ asset, onClone }: { asset: AssetSummary; onClone: (id: number) => void }) {
+function RowActions({
+  asset, onClone, onDelete,
+}: {
+  asset:    AssetSummary;
+  onClone:  (id: number) => void;
+  onDelete: (asset: AssetSummary) => void;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -178,9 +188,12 @@ function RowActions({ asset, onClone }: { asset: AssetSummary; onClone: (id: num
         {asset.status !== "deployed" && asset.status !== "in_use" && (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive flex items-center gap-2">
+            <DropdownMenuItem
+              onClick={() => onDelete(asset)}
+              className="text-destructive flex items-center gap-2 focus:text-destructive"
+            >
               <Trash2 className="h-3.5 w-3.5" />
-              Delete
+              Move to trash
             </DropdownMenuItem>
           </>
         )}
@@ -322,6 +335,17 @@ export default function AssetsPage() {
       qc.invalidateQueries({ queryKey: ["assets"] });
       qc.invalidateQueries({ queryKey: ["assets-stats"] });
       navigate(`/assets/${res.data.id}`);
+    },
+  });
+
+  const [deleteTarget, setDeleteTarget] = useState<AssetSummary | null>(null);
+  const deleteMut = useMutation({
+    mutationFn: (id: number) => axios.delete(`/api/assets/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["assets"] });
+      qc.invalidateQueries({ queryKey: ["assets-stats"] });
+      qc.invalidateQueries({ queryKey: ["trash-summary"] });
+      setDeleteTarget(null);
     },
   });
 
@@ -548,7 +572,11 @@ export default function AssetsPage() {
     header: () => null,
     cell: ({ row }) => (
       <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-        <RowActions asset={row.original} onClone={id => cloneMut.mutate(id)} />
+        <RowActions
+          asset={row.original}
+          onClone={id => cloneMut.mutate(id)}
+          onDelete={a => setDeleteTarget(a)}
+        />
       </div>
     ),
   };
@@ -772,6 +800,32 @@ export default function AssetsPage() {
 
       {error && <ErrorAlert error={error} fallback="Failed to load assets" />}
       {cloneMut.error && <ErrorAlert error={cloneMut.error} fallback="Clone failed" />}
+
+      {/* ── Move-to-trash confirmation (single asset row action) ── */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) { setDeleteTarget(null); deleteMut.reset(); } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Move {deleteTarget?.name} to trash?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This asset will be moved to the trash. You can restore it from Settings → Trash within the configured retention window before it's permanently purged.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteMut.error && <ErrorAlert error={deleteMut.error} fallback="Failed to delete asset" />}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMut.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteMut.isPending}
+              onClick={e => {
+                e.preventDefault();
+                if (deleteTarget) deleteMut.mutate(deleteTarget.id);
+              }}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleteMut.isPending ? "Moving…" : "Move to trash"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Table ── */}
       <div className="rounded-lg border border-border/60 overflow-x-auto">

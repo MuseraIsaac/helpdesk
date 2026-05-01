@@ -21,7 +21,7 @@ export async function registerPurgeTrashWorker(boss: PgBoss) {
     const cutoff = new Date(Date.now() - settings.retentionDays * 86_400_000);
     const where  = { deletedAt: { not: null, lt: cutoff } };
 
-    const [t, i, rq, p, c, a, kb] = await Promise.all([
+    const [t, i, rq, p, c, a, kb, sa, sl] = await Promise.all([
       prisma.ticket.deleteMany({ where }),
       prisma.incident.deleteMany({ where }),
       prisma.serviceRequest.deleteMany({ where }),
@@ -29,14 +29,20 @@ export async function registerPurgeTrashWorker(boss: PgBoss) {
       prisma.change.deleteMany({ where }),
       prisma.asset.deleteMany({ where }),
       prisma.kbArticle.deleteMany({ where }),
+      prisma.saaSSubscription.deleteMany({ where }),
+      prisma.softwareLicense.deleteMany({ where }),
     ]);
 
-    const total = t.count + i.count + rq.count + p.count + c.count + a.count + kb.count;
+    const total = t.count + i.count + rq.count + p.count + c.count + a.count + kb.count + sa.count + sl.count;
     if (total > 0) {
       console.info(JSON.stringify({
         event:    "trash.purge_completed",
         cutoff:   cutoff.toISOString(),
-        deleted:  { tickets: t.count, incidents: i.count, requests: rq.count, problems: p.count, changes: c.count, assets: a.count, kbArticles: kb.count },
+        deleted:  {
+          tickets: t.count, incidents: i.count, requests: rq.count, problems: p.count,
+          changes: c.count, assets: a.count, kbArticles: kb.count,
+          saasSubscriptions: sa.count, softwareLicenses: sl.count,
+        },
         total,
       }));
     }

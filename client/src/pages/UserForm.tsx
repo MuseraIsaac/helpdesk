@@ -200,8 +200,15 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
           placeholder="user@example.com"
           autoComplete="off"
           aria-invalid={!!form.formState.errors.email}
+          readOnly={isEdit}
+          className={isEdit ? "bg-muted/40 text-muted-foreground cursor-not-allowed" : undefined}
           {...form.register("email")}
         />
+        {isEdit && (
+          <p className="text-[11px] text-muted-foreground">
+            Email is the user's sign-in identifier and cannot be changed here.
+          </p>
+        )}
         {form.formState.errors.email && (
           <ErrorMessage message={form.formState.errors.email.message} />
         )}

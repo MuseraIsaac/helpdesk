@@ -22,9 +22,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import ErrorAlert from "@/components/ErrorAlert";
+import SearchableSelect, { type SelectOption } from "@/components/SearchableSelect";
 import {
   Key, ChevronLeft, Eye, EyeOff, User, Monitor, UserMinus, UserPlus,
-  Calendar, DollarSign, Tag, Package, AlertTriangle, Copy,
+  Calendar, DollarSign, Tag, Package, AlertTriangle, Copy, Mail, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -53,6 +54,33 @@ function LicenseKeyField({ licenseKey }: { licenseKey: string | null }) {
 
 // ── Assign seat dialog ────────────────────────────────────────────────────────
 
+interface AgentLite { id: string; name: string; email: string }
+interface AssetLite {
+  id: number;
+  assetNumber: string | null;
+  name: string;
+  type: string;
+  status: string;
+  manufacturer: string | null;
+  model: string | null;
+  assignedTo?: { id: string; name: string } | null;
+}
+
+const AVATAR_TONES = [
+  "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+  "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  "bg-teal-500/15 text-teal-700 dark:text-teal-300",
+  "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  "bg-blue-500/15 text-blue-700 dark:text-blue-300",
+  "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
+  "bg-purple-500/15 text-purple-700 dark:text-purple-300",
+  "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+];
+
+function avatarTone(name: string): string {
+  return AVATAR_TONES[(name.charCodeAt(0) || 0) % AVATAR_TONES.length]!;
+}
+
 function AssignSeatDialog({ licenseId, onAssigned }: { licenseId: number; onAssigned: () => void }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"user" | "device">("user");
@@ -61,6 +89,56 @@ function AssignSeatDialog({ licenseId, onAssigned }: { licenseId: number; onAssi
     defaultValues: {},
   });
 
+  const { data: agents = [], isLoading: loadingAgents } = useQuery<AgentLite[]>({
+    queryKey: ["agents"],
+    queryFn: () => axios.get<{ agents: AgentLite[] }>("/api/agents").then(r => r.data.agents),
+    staleTime: 60_000,
+    enabled: open && mode === "user",
+  });
+
+  const userOptions: SelectOption[] = agents.map((a) => ({
+    value: a.id,
+    label: a.name,
+    hint: a.email,
+    prefix: (
+      <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold shrink-0 ${avatarTone(a.name)}`}>
+        {a.name.charAt(0).toUpperCase()}
+      </span>
+    ),
+  }));
+
+  // Asset roster — only fetched when the user switches to "device" mode.
+  // pageSize is capped server-side at 100 (see listAssetsQuerySchema). We
+  // intentionally do NOT pass a `statuses` filter so every non-deleted asset
+  // appears in the picker; license-eligibility is a workflow decision the
+  // admin can make per-asset rather than a hard server filter.
+  const { data: assets = [], isLoading: loadingAssets } = useQuery<AssetLite[]>({
+    queryKey: ["assets-for-license-pick"],
+    queryFn: () =>
+      axios
+        .get<{ items: AssetLite[] }>(
+          "/api/assets?pageSize=100&sortBy=name&sortOrder=asc",
+        )
+        .then((r) => r.data.items),
+    staleTime: 60_000,
+    enabled: open && mode === "device",
+  });
+
+  // Format the asset type for the hint (e.g. "end_user_device" → "End-user device")
+  const formatAssetType = (t: string) =>
+    t.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const assetOptions: SelectOption[] = assets.map((a) => ({
+    value: String(a.id),
+    label: a.name,
+    hint: [a.assetNumber, formatAssetType(a.type)].filter(Boolean).join(" · "),
+    prefix: (
+      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 shrink-0">
+        <Monitor className="h-3 w-3" />
+      </span>
+    ),
+  }));
+
   const mutation = useMutation({
     mutationFn: (data: AssignLicenseSeatInput) =>
       axios.post(`/api/software-licenses/${licenseId}/assignments`, data).then(r => r.data),
@@ -68,70 +146,177 @@ function AssignSeatDialog({ licenseId, onAssigned }: { licenseId: number; onAssi
       onAssigned();
       setOpen(false);
       form.reset();
+      mutation.reset();
     },
   });
 
+  const selectedUserId = form.watch("assignedToUserId");
+  const selectedAssetId = form.watch("assignedToAssetId");
+  const selectedAgent = agents.find((a) => a.id === selectedUserId);
+  const canSubmit =
+    mode === "user"
+      ? !!selectedUserId && !mutation.isPending
+      : !!selectedAssetId && !mutation.isPending;
+
+  function handleClose() {
+    setOpen(false);
+    form.reset();
+    mutation.reset();
+  }
+
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
-        <UserPlus className="w-4 h-4 mr-1.5" />Assign Seat
+      <Button size="sm" onClick={() => setOpen(true)} className="gap-1.5 shadow-sm">
+        <UserPlus className="h-4 w-4" />Assign Seat
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Assign License Seat</DialogTitle>
+      <Dialog
+        open={open}
+        onOpenChange={(v) => { if (!v) handleClose(); else setOpen(true); }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="space-y-2">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-violet-500/30 bg-violet-500/10 shrink-0">
+                <UserPlus className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+              </span>
+              <DialogTitle className="text-base">Assign License Seat</DialogTitle>
+            </div>
           </DialogHeader>
-          <div className="flex gap-2 mb-2">
+
+          {/* Mode toggle */}
+          <div className="flex gap-1 p-1 rounded-lg border bg-muted/40">
             <button
+              type="button"
               onClick={() => { setMode("user"); form.setValue("assignedToAssetId", undefined); }}
-              className={`px-3 py-1 rounded-full text-sm border ${mode === "user" ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}
+              className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                mode === "user"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
             >
-              <User className="w-3 h-3 inline mr-1" />User
+              <User className="h-3.5 w-3.5" />
+              Assign to user
             </button>
             <button
+              type="button"
               onClick={() => { setMode("device"); form.setValue("assignedToUserId", undefined); }}
-              className={`px-3 py-1 rounded-full text-sm border ${mode === "device" ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}
+              className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                mode === "device"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
             >
-              <Monitor className="w-3 h-3 inline mr-1" />Device
+              <Monitor className="h-3.5 w-3.5" />
+              Assign to device
             </button>
           </div>
+
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(d => mutation.mutate(d))} className="space-y-3">
+            <form onSubmit={form.handleSubmit(d => mutation.mutate(d))} className="space-y-4">
               {mode === "user" ? (
                 <FormField control={form.control} name="assignedToUserId" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>User ID</FormLabel>
-                    <FormControl><Input placeholder="Enter user ID" {...field} value={field.value ?? ""} /></FormControl>
+                    <FormLabel className="flex items-center gap-1.5">
+                      <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                      User
+                      <span className="text-destructive">*</span>
+                    </FormLabel>
+                    <FormControl>
+                      <SearchableSelect
+                        options={userOptions}
+                        value={field.value ?? ""}
+                        onChange={field.onChange}
+                        placeholder={loadingAgents ? "Loading users…" : "Select a user…"}
+                        searchPlaceholder="Search by name or email…"
+                        disabled={loadingAgents}
+                        className="w-full"
+                      />
+                    </FormControl>
+                    {selectedAgent && (
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1">
+                        <Mail className="h-3 w-3" />
+                        {selectedAgent.email}
+                      </p>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )} />
               ) : (
-                <FormField control={form.control} name="assignedToAssetId" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Asset ID</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="number" placeholder="Enter asset ID"
-                        {...field}
-                        value={field.value ?? ""}
-                        onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
+                <FormField control={form.control} name="assignedToAssetId" render={({ field }) => {
+                  const selectedAsset = assets.find((a) => a.id === field.value);
+                  return (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-1.5">
+                        <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
+                        Asset
+                        <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <FormControl>
+                        <SearchableSelect
+                          options={assetOptions}
+                          value={field.value != null ? String(field.value) : ""}
+                          onChange={(v) => field.onChange(v ? Number(v) : undefined)}
+                          placeholder={loadingAssets ? "Loading assets…" : "Select an asset…"}
+                          searchPlaceholder="Search by name, number, model…"
+                          disabled={loadingAssets}
+                          className="w-full"
+                        />
+                      </FormControl>
+                      {selectedAsset && (
+                        <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-1 flex-wrap">
+                          <span className="font-mono tabular-nums">{selectedAsset.assetNumber}</span>
+                          {selectedAsset.manufacturer && selectedAsset.model && (
+                            <>
+                              <span className="text-muted-foreground/40">·</span>
+                              <span>{selectedAsset.manufacturer} {selectedAsset.model}</span>
+                            </>
+                          )}
+                          {selectedAsset.assignedTo && (
+                            <>
+                              <span className="text-muted-foreground/40">·</span>
+                              <span className="inline-flex items-center gap-1">
+                                <User className="h-3 w-3" />
+                                {selectedAsset.assignedTo.name}
+                              </span>
+                            </>
+                          )}
+                        </p>
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }} />
               )}
+
               <FormField control={form.control} name="note" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Note</FormLabel>
-                  <FormControl><Input placeholder="Optional note" {...field} value={field.value ?? ""} /></FormControl>
+                  <FormLabel className="flex items-center gap-1.5">
+                    Note
+                    <span className="text-[10px] font-normal text-muted-foreground/70 ml-auto">optional</span>
+                  </FormLabel>
+                  <FormControl>
+                    <Input placeholder="Optional note" {...field} value={field.value ?? ""} />
+                  </FormControl>
                 </FormItem>
               )} />
-              <ErrorAlert error={mutation.error} fallback="Failed to assign seat" />
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-                <Button type="submit" disabled={mutation.isPending}>
-                  {mutation.isPending ? "Assigning…" : "Assign Seat"}
+
+              {mutation.error && (
+                <ErrorAlert error={mutation.error} fallback="Failed to assign seat" />
+              )}
+
+              <DialogFooter className="gap-2">
+                <Button type="button" variant="outline" onClick={handleClose}>Cancel</Button>
+                <Button type="submit" disabled={!canSubmit} className="gap-1.5">
+                  {mutation.isPending
+                    ? <>
+                        <span className="h-3.5 w-3.5 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground animate-spin" />
+                        Assigning…
+                      </>
+                    : <>
+                        <UserPlus className="h-3.5 w-3.5" />
+                        Assign Seat
+                      </>
+                  }
                 </Button>
               </DialogFooter>
             </form>
@@ -248,7 +433,7 @@ export default function SoftwareLicenseDetailPage() {
             <h1 className="text-xl font-semibold">{license.productName}</h1>
             <p className="text-sm text-muted-foreground">
               {license.vendor && `${license.vendor} · `}
-              {license.licenseNumber} · {SOFTWARE_LICENSE_TYPE_LABEL[license.licenseType]}
+              {license.licenseNumber} · {license.customLicenseType?.name ?? SOFTWARE_LICENSE_TYPE_LABEL[license.licenseType]}
             </p>
           </div>
         </div>

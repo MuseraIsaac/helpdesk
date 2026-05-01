@@ -192,7 +192,9 @@
       "Bash(tail -15 \"C:\\\\\\\\Users\\\\\\\\IMusera\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Users-IMusera-OneDrive---CopyCat-Group-Desktop-ITSM-helpdesk\\\\\\\\4b7caafa-59c1-4464-9849-c3d45ae6d9b7\\\\\\\\tasks\\\\\\\\bnwe50mfk.output\")",
       "PowerShell(Get-Process *)",
       "Bash(grep -rn \"tickets/\\\\${\" \"C:\\\\Users\\\\IMusera\\\\OneDrive - CopyCat Group\\\\Desktop\\\\ITSM\\\\helpdesk\\\\client\\\\src\")",
-      "Bash(kill bk608pecl *)"
+      "Bash(kill bk608pecl *)",
+      "Bash(grep -n \"Show\\\\\\\\|Hide\\\\\\\\|errors.password\\\\\\\\|Submit\" \"C:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/client/src/pages/portal/PortalLoginPage.tsx\")",
+      "Bash(grep -vE \"^$\")"
     ]
   }
 }

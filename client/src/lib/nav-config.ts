@@ -170,7 +170,6 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Assets",
         icon: Server,
         permission: "assets.view",
-        badge: "beta",
       },
       {
         id: "software-licenses",

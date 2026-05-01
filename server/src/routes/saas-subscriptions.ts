@@ -47,7 +47,9 @@ function daysUntil(date: Date | null): number | null {
 
 const SAAS_SUMMARY_SELECT = {
   id: true, subscriptionNumber: true, appName: true, vendor: true,
-  category: true, status: true, plan: true, billingCycle: true, url: true,
+  category: true, customCategoryId: true,
+  customCategory: { select: { id: true, name: true, color: true } },
+  status: true, plan: true, billingCycle: true, url: true,
   totalSeats: true, monthlyAmount: true, annualAmount: true, currency: true,
   renewalDate: true, autoRenews: true,
   externalId: true, discoverySource: true,
@@ -93,15 +95,15 @@ router.get("/stats", requirePermission("software.view"), async (req, res) => {
   const in30  = new Date(now.getTime() + 30 * 86_400_000);
 
   const [total, active, expiring30, cancelled] = await Promise.all([
-    prisma.saaSSubscription.count(),
-    prisma.saaSSubscription.count({ where: { status: "active" } }),
-    prisma.saaSSubscription.count({ where: { status: "active", renewalDate: { lte: in30, gte: now } } }),
-    prisma.saaSSubscription.count({ where: { status: "cancelled" } }),
+    prisma.saaSSubscription.count({ where: { deletedAt: null } }),
+    prisma.saaSSubscription.count({ where: { status: "active", deletedAt: null } }),
+    prisma.saaSSubscription.count({ where: { status: "active", renewalDate: { lte: in30, gte: now }, deletedAt: null } }),
+    prisma.saaSSubscription.count({ where: { status: "cancelled", deletedAt: null } }),
   ]);
 
   // Aggregate monthly spend across active subscriptions
   const spendResult = await prisma.saaSSubscription.aggregate({
-    where: { status: "active" },
+    where: { status: "active", deletedAt: null },
     _sum: { monthlyAmount: true, annualAmount: true },
   });
 
@@ -124,7 +126,7 @@ router.get("/", requirePermission("software.view"), async (req, res) => {
   const { status, category, billingCycle, search, renewingDays, overAllocated, ownerId, page, pageSize } = query;
   const now = new Date();
 
-  const where: Prisma.SaaSSubscriptionWhereInput = {};
+  const where: Prisma.SaaSSubscriptionWhereInput = { deletedAt: null };
 
   if (status)       where.status       = status       as SaaSSubscriptionStatus;
   if (category)     where.category     = category     as SaaSCategory;
@@ -180,6 +182,7 @@ router.post("/", requirePermission("software.create"), async (req, res) => {
       appName:         data.appName,
       vendor:          data.vendor         ?? null,
       category:        data.category,
+      ...(data.customCategoryId != null && { customCategoryId: data.customCategoryId }),
       status:          data.status,
       plan:            data.plan           ?? null,
       billingCycle:    data.billingCycle,
@@ -215,8 +218,8 @@ router.get("/:id", requirePermission("software.view"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
 
-  const sub = await prisma.saaSSubscription.findUnique({
-    where: { id },
+  const sub = await prisma.saaSSubscription.findFirst({
+    where: { id, deletedAt: null },
     select: SAAS_DETAIL_SELECT,
   });
 
@@ -247,6 +250,7 @@ router.patch("/:id", requirePermission("software.manage"), async (req, res) => {
       ...(data.appName         !== undefined && { appName:         data.appName }),
       ...(data.vendor          !== undefined && { vendor:          data.vendor }),
       ...(data.category        !== undefined && { category:        data.category }),
+      ...("customCategoryId" in data && { customCategoryId: data.customCategoryId ?? null }),
       ...(data.status          !== undefined && { status:          data.status }),
       ...(data.plan            !== undefined && { plan:            data.plan }),
       ...(data.billingCycle    !== undefined && { billingCycle:    data.billingCycle }),
@@ -281,8 +285,27 @@ router.delete("/:id", requirePermission("software.manage"), async (req, res) => 
   const id = parseId(req.params.id);
   if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
 
-  await prisma.saaSSubscription.delete({ where: { id } });
+  const { count } = await prisma.saaSSubscription.updateMany({
+    where: { id, deletedAt: null },
+    data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
+  });
+  if (count === 0) { res.status(404).json({ error: "SaaS subscription not found" }); return; }
   res.status(204).end();
+});
+
+// ── POST /api/saas-subscriptions/bulk-delete ─────────────────────────────────
+
+router.post("/bulk-delete", requirePermission("software.manage"), async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+  if (!ids || ids.length === 0 || !ids.every((n: unknown) => Number.isInteger(n) && (n as number) > 0)) {
+    res.status(400).json({ error: "ids must be a non-empty array of positive integers" });
+    return;
+  }
+  const result = await prisma.saaSSubscription.updateMany({
+    where: { id: { in: ids }, deletedAt: null },
+    data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
+  });
+  res.json({ deleted: result.count });
 });
 
 // ── GET /api/saas-subscriptions/:id/users ────────────────────────────────────

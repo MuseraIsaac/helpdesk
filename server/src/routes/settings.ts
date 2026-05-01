@@ -148,14 +148,32 @@ router.put("/:section", requireAuth, requireAdmin, async (req, res) => {
   }
   incoming = sanitized;
 
-  // Validate incoming data against the section schema
+  // Validate incoming data against the section schema.
+  //
+  // ⚠ Zod's `.partial()` makes fields optional but does NOT strip their
+  // defaults. So `schema.partial().safeParse({ minCabApprovers: 2 })`
+  // returns an object with ALL fields populated — the missing ones
+  // filled in from the schema defaults (e.g. `defaultCabGroupId: null`).
+  // Passing that into setSection's spread-merge would overwrite every
+  // unrelated stored field with a default, silently wiping the user's
+  // previous configuration on every save.
+  //
+  // Fix: only forward keys that were actually present in the incoming
+  // body. The values come from the validated parse so they're typed
+  // correctly, but we drop any key the user didn't send.
   const result = schema.partial().safeParse(incoming);
   if (!result.success) {
     res.status(400).json({ error: result.error.issues[0]?.message ?? "Validation failed" });
     return;
   }
 
-  const saved = await setSection(section, result.data as never, req.user.id);
+  const incomingKeys = new Set(Object.keys(incoming));
+  const diff: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(result.data as Record<string, unknown>)) {
+    if (incomingKeys.has(key)) diff[key] = value;
+  }
+
+  const saved = await setSection(section, diff as never, req.user.id);
 
   // Bust the in-memory audit settings cache so logAudit picks up the change
   // within the same request cycle, not after the 60-second TTL expires.

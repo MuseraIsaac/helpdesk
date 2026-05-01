@@ -259,6 +259,13 @@ export const ticketsSettingsSchema = z.object({
   defaultPriority:              z.enum(["low", "medium", "high", "urgent"]).nullable().default(null),
   defaultCategory:              z.string().nullable().default(null),
   autoAssignment:               z.boolean().default(false),
+  /**
+   * When enabled, the first agent to post a reply on an unassigned ticket is
+   * auto-assigned to it. Subsequent replies from other agents do NOT change
+   * the assignee. This rule overrides any other assignment automation —
+   * it always wins when triggered.
+   */
+  autoAssignFirstResponder:     z.boolean().default(true),
   allowCustomerReopenResolved:  z.boolean().default(true),
   csatEnabled:                  z.boolean().default(true),
   autoCloseResolvedAfterDays:   z.number().int().min(0).max(365).default(7),
@@ -327,11 +334,20 @@ export const seriesConfigSchema = z.object({
 export type SeriesConfig = z.infer<typeof seriesConfigSchema>;
 
 export const ticketNumberingSettingsSchema = z.object({
-  // Shared counter for incidents, service requests, and untyped (generic) tickets.
-  // All three use this one prefix and sequence — they are numbered together.
-  ticket:         seriesConfigSchema.default({ prefix: "TKT", paddingLength: 4, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
-  change_request: seriesConfigSchema.default({ prefix: "CRQ", paddingLength: 7, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
-  problem:        seriesConfigSchema.default({ prefix: "PRB", paddingLength: 4, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
+  /**
+   * Each ITSM module has its OWN counter and prefix. Numbers within a module
+   * are sequential (e.g. INC-0001, INC-0002, …) and never collide across
+   * modules because each series increments independently. Existing entities
+   * created before a series existed keep their original numbers — no
+   * migration is forced when prefixes change.
+   */
+  ticket:           seriesConfigSchema.default({ prefix: "TKT", paddingLength: 4, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
+  incident:         seriesConfigSchema.default({ prefix: "INC", paddingLength: 4, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
+  service_request:  seriesConfigSchema.default({ prefix: "REQ", paddingLength: 4, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
+  problem:          seriesConfigSchema.default({ prefix: "PRB", paddingLength: 4, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
+  change_request:   seriesConfigSchema.default({ prefix: "CHG", paddingLength: 4, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
+  asset:            seriesConfigSchema.default({ prefix: "AST", paddingLength: 5, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
+  ci:               seriesConfigSchema.default({ prefix: "CI",  paddingLength: 4, startAt: 1, includeDateSegment: "none", resetPeriod: "never" }),
 });
 
 export const slaSettingsSchema = z.object({
@@ -581,6 +597,14 @@ export const changesSettingsSchema = z.object({
   cabApprovalSequential:       z.boolean().default(false),
   /** Minimum number of CAB approvers that must be selected before a change can be submitted for approval. */
   minCabApprovers:             z.number().int().min(1).default(1),
+  /**
+   * When true, every invited CAB member must approve before the request is
+   * finalised — the threshold becomes the number of approvers actually
+   * invited, not `minCabApprovers`. A single rejection still rejects the
+   * whole request immediately. Off by default so existing installations keep
+   * the "first to approve wins" quorum semantics.
+   */
+  cabRequireUnanimous:         z.boolean().default(false),
   /** Maximum number of times an approval request can be resent to an approver who has rejected. 0 = no resends allowed. */
   maxApprovalResends:          z.number().int().min(0).default(3),
 

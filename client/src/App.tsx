@@ -63,6 +63,8 @@ const NewProblemPage            = lazy(() => import("./pages/NewProblemPage"));
 const NewRequestPage            = lazy(() => import("./pages/NewRequestPage"));
 const PortalLoginPage           = lazy(() => import("./pages/portal/PortalLoginPage"));
 const PortalRegisterPage        = lazy(() => import("./pages/portal/PortalRegisterPage"));
+const ForgotPasswordPage        = lazy(() => import("./pages/ForgotPasswordPage"));
+const ResetPasswordPage         = lazy(() => import("./pages/ResetPasswordPage"));
 const PortalTicketsPage         = lazy(() => import("./pages/portal/PortalTicketsPage"));
 const PortalTicketDetailPage    = lazy(() => import("./pages/portal/PortalTicketDetailPage"));
 const PortalNewTicketPage       = lazy(() => import("./pages/portal/PortalNewTicketPage"));
@@ -178,6 +180,8 @@ function App() {
       <Routes>
       {/* ── Agent / admin ───────────────────────────────────────────────── */}
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password"  element={<ResetPasswordPage />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
           <Route path="/" element={<DefaultLandingRoute />} />
@@ -291,6 +295,8 @@ function App() {
       {/* ── Customer portal ─────────────────────────────────────────────── */}
       <Route path="/portal/login" element={<PortalLoginPage />} />
       <Route path="/portal/register" element={<PortalRegisterPage />} />
+      <Route path="/portal/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/portal/reset-password"  element={<ResetPasswordPage />} />
       <Route element={<CustomerRoute />}>
         <Route element={<PortalLayout />}>
           <Route path="/portal/tickets" element={<PortalTicketsPage />} />

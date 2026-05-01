@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { FORM_FIELD_TYPES } from "../constants/catalog.ts";
+import { FORM_FIELD_TYPES, CATALOG_VISIBILITIES } from "../constants/catalog.ts";
 
 // ── Form schema definition ─────────────────────────────────────────────────────
 
@@ -53,6 +53,7 @@ export const createCatalogItemSchema = z.object({
   description:           z.string().max(10000).optional(),
   categoryId:            z.number().int().positive().optional(),
   isActive:              z.boolean().default(true),
+  visibility:            z.enum(CATALOG_VISIBILITIES as [string, ...string[]]).default("both"),
   requestorInstructions: z.string().max(5000).optional(),
   fulfillmentTeamId:     z.number().int().positive().optional(),
   requiresApproval:      z.boolean().default(false),
@@ -71,6 +72,7 @@ export const updateCatalogItemSchema = z.object({
   description:           z.string().max(10000).nullable().optional(),
   categoryId:            z.number().int().positive().nullable().optional(),
   isActive:              z.boolean().optional(),
+  visibility:            z.enum(CATALOG_VISIBILITIES as [string, ...string[]]).optional(),
   requestorInstructions: z.string().max(5000).nullable().optional(),
   fulfillmentTeamId:     z.number().int().positive().nullable().optional(),
   requiresApproval:      z.boolean().optional(),

@@ -57,6 +57,25 @@ export interface FormField {
 
 export type FormSchema = FormField[];
 
+// ── Visibility ────────────────────────────────────────────────────────────────
+
+/** Who can see and request a catalog item. */
+export type CatalogVisibility = "internal" | "portal" | "both";
+
+export const CATALOG_VISIBILITIES: CatalogVisibility[] = ["internal", "portal", "both"];
+
+export const CATALOG_VISIBILITY_LABEL: Record<CatalogVisibility, string> = {
+  internal: "Agents only",
+  portal:   "Customer portal only",
+  both:     "Agents & customer portal",
+};
+
+export const CATALOG_VISIBILITY_DESCRIPTION: Record<CatalogVisibility, string> = {
+  internal: "Visible to internal agents in the agent service catalog. Hidden from the customer portal.",
+  portal:   "Visible to customers in the portal. Hidden from the agent catalog.",
+  both:     "Visible everywhere — to agents and to customers in the portal.",
+};
+
 // ── Domain interfaces (API response shapes) ───────────────────────────────────
 
 export interface CatalogCategorySummary {
@@ -74,6 +93,7 @@ export interface CatalogItemSummary {
   shortDescription: string | null;
   icon: string | null;
   isActive: boolean;
+  visibility: CatalogVisibility;
   requiresApproval: boolean;
   category: CatalogCategorySummary | null;
   fulfillmentTeam: { id: number; name: string; color: string } | null;

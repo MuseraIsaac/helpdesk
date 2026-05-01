@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router";
+import { useParams, Link, useNavigate } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -46,6 +46,10 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import BackLink from "@/components/BackLink";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
@@ -56,7 +60,7 @@ import {
   Layers, Clock, ExternalLink, Circle, ChevronDown, Server,
   FileText, Zap, Wrench, AlertCircle, CheckCircle2, CalendarClock,
   Database, Truck, Warehouse, UserCheck, CornerDownLeft, TrendingDown,
-  Ticket,
+  Ticket, MoreHorizontal,
 } from "lucide-react";
 import {
   CONTRACT_TYPE_LABEL, CONTRACT_STATUS_LABEL, CONTRACT_STATUS_COLOR, CONTRACT_TYPE_COLOR,
@@ -1339,6 +1343,7 @@ function fmtPrice(price: string | null | undefined, currency: string) {
 
 export default function AssetDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const qc = useQueryClient();
 
   const [assignOpen,      setAssignOpen]      = useState(false);
@@ -1348,6 +1353,7 @@ export default function AssetDetailPage() {
   const [movementOpen,    setMovementOpen]    = useState(false);
   const [movementWorkflow, setMovementWorkflow] = useState<WorkflowType | undefined>();
   const [linkContractOpen, setLinkContractOpen] = useState(false);
+  const [deleteOpen,       setDeleteOpen]       = useState(false);
 
   const { data: asset, isLoading, error } = useQuery({
     queryKey: ["asset", id],
@@ -1379,6 +1385,16 @@ export default function AssetDetailPage() {
     mutationFn: ({ entity, entityId }: { entity: string; entityId: number }) =>
       axios.delete(`/api/assets/${id}/links/${entity}/${entityId}`),
     onSuccess: refresh,
+  });
+  const deleteMut = useMutation({
+    mutationFn: () => axios.delete(`/api/assets/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["assets"] });
+      qc.invalidateQueries({ queryKey: ["assets-stats"] });
+      qc.invalidateQueries({ queryKey: ["trash-summary"] });
+      setDeleteOpen(false);
+      navigate("/assets");
+    },
   });
 
   const [linkTarget, setLinkTarget] = useState<LinkTarget | null>(null);
@@ -1450,8 +1466,49 @@ export default function AssetDetailPage() {
                 <User className="h-3 w-3" />
                 {asset.assignedTo ? "Reassign" : "Assign"}
               </Button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" className="h-7 w-7 p-0">
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44 text-sm">
+                  <DropdownMenuItem
+                    disabled={asset.status === "deployed" || asset.status === "in_use"}
+                    onClick={() => setDeleteOpen(true)}
+                    className="text-destructive focus:text-destructive flex items-center gap-2"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Move to trash
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
+
+          {/* ── Move-to-trash confirmation ── */}
+          <AlertDialog open={deleteOpen} onOpenChange={open => { if (!open) { setDeleteOpen(false); deleteMut.reset(); } }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Move {asset.name} to trash?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This asset will be moved to the trash. You can restore it from Settings → Trash within the configured retention window before it's permanently purged.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              {deleteMut.error && <ErrorAlert error={deleteMut.error} fallback="Failed to delete asset" />}
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={deleteMut.isPending}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={deleteMut.isPending}
+                  onClick={e => { e.preventDefault(); deleteMut.mutate(); }}
+                  className="bg-destructive text-white hover:bg-destructive/90"
+                >
+                  {deleteMut.isPending ? "Moving…" : "Move to trash"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           {/* ── Lifecycle stepper ── */}
           <div className="rounded-lg border border-border/60 bg-card overflow-hidden">

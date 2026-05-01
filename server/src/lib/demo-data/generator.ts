@@ -507,10 +507,30 @@ async function generateChanges(ctx: GeneratorContext, batchId: number, progress:
   await markModuleRunning(batchId, "changes", progress);
   let approvalCount = 0;
 
+  // Snapshot catalog item names once so each change can record both serviceId
+  // (FK) and serviceName (denormalised — survives catalog edits/deletes).
+  // Provides the "primary affected service" link the schema documents but the
+  // demo generator was leaving NULL.
+  const catalogLookup = ctx.catalogItemIds.length
+    ? await prisma.catalogItem.findMany({
+        where: { id: { in: ctx.catalogItemIds } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const catalogById = new Map(catalogLookup.map((c) => [c.id, c.name]));
+
   for (let i = 0; i < take(CHANGE_POOL, ctx.params.changes).length; i++) {
     const spec    = CHANGE_POOL[i]!;
     const assigneeId = ctx.userIds[spec.assignIdx % ctx.userIds.length];
     const teamId     = ctx.teamIds[spec.teamIdx   % ctx.teamIds.length];
+
+    // Round-robin a catalog item per change so the Change → Service relation
+    // is exercised across the demo dataset (powers reports, service-impact
+    // dashboards, and the linked-records sidebar on the change detail page).
+    const serviceId = ctx.catalogItemIds.length
+      ? ctx.catalogItemIds[i % ctx.catalogItemIds.length] ?? null
+      : null;
+    const serviceName = serviceId ? catalogById.get(serviceId) ?? null : null;
 
     const change = await prisma.change.create({
       data: {
@@ -522,6 +542,8 @@ async function generateChanges(ctx: GeneratorContext, batchId: number, progress:
         createdById: assigneeId ?? null, justification: spec.justification, rollbackPlan: spec.rollbackPlan,
         plannedStart: daysAgo(jitter(-7, 15)), plannedEnd: daysAgo(jitter(-5, 12)),
         createdAt: daysAgo(jitter(1, 15)),
+        ...(serviceId   && { serviceId }),
+        ...(serviceName && { serviceName }),
         ...(["closed"].includes(spec.state) ? { closedAt: daysAgo(jitter(0, 2)), submittedAt: daysAgo(jitter(5, 10)) } : {}),
         ...(spec.problemIdx >= 0 && ctx.problemIds[spec.problemIdx] ? { linkedProblemId: ctx.problemIds[spec.problemIdx] } : {}),
       },
