@@ -45,6 +45,7 @@ import {
   X, Columns3, Plus, Users, Star,
   MoreHorizontal, Pencil, Trash2, Check,
   Zap, ChevronRight, LayoutList,
+  Ticket as TicketIcon,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -259,17 +260,23 @@ function ViewChip({
 }) {
   const hasActions = !!(onEdit || onSetDefault || onClearDefault || onDelete);
 
+  // Active-state recipe: when an `activeColor` (Tailwind text-* class) is
+  // provided we use it as the chip's tint family — coloured background, ring,
+  // and shadow that all glow in the same hue. The default (no activeColor)
+  // falls back to the primary brand colour.
+  const activeStyles = activeColor
+    ? `${activeColor} bg-current/15 ring-1 ring-current/40 shadow-sm shadow-current/10 font-semibold`
+    : "bg-primary text-primary-foreground shadow-sm shadow-primary/30 hover:bg-primary/90 font-semibold";
+
   const chip = (
     <button
       type="button"
       onClick={onClick}
       className={[
-        "group relative inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium transition-all whitespace-nowrap shrink-0 select-none",
+        "group relative inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs transition-all whitespace-nowrap shrink-0 select-none",
         active
-          ? activeColor
-            ? `${activeColor} bg-current/10 ring-1 ring-current/30`
-            : "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
-          : "text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-transparent hover:border-border/50",
+          ? activeStyles
+          : "text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-transparent hover:border-border/50 font-medium",
       ].join(" ")}
     >
       {emoji && <span className="text-sm leading-none">{emoji}</span>}
@@ -472,11 +479,22 @@ export default function TicketsPage() {
   const shared   = viewList?.shared   ?? [];
 
   return (
-    <div className="lg:pr-[20rem]">
+    <div className="lg:pr-[20.5rem]">
       {/* ── Page header ── */}
-      <div className="flex items-center justify-between mb-5">
-        <h1 className="text-2xl font-semibold tracking-tight">Tickets</h1>
-        <div className="flex items-center gap-2">
+      <div className="flex items-start justify-between gap-4 mb-5">
+        <div className="flex items-start gap-3.5 min-w-0">
+          {/* Brand-tinted icon chip — uses primary so it picks up the active palette. */}
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-primary/30 bg-gradient-to-br from-primary/15 via-primary/8 to-transparent shrink-0 shadow-sm">
+            <TicketIcon className="h-5 w-5 text-primary" />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight leading-tight">Tickets</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Inbound requests, incidents, and service work — across every channel.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
           <Button
             variant="outline" size="sm" className="h-8 gap-1.5"
             onClick={() => setCustomizerOpen(true)}
@@ -484,7 +502,7 @@ export default function TicketsPage() {
             <Columns3 className="h-4 w-4" />
             Columns
           </Button>
-          <Button onClick={() => navigate("/tickets/new")} size="sm" className="h-8">
+          <Button onClick={() => navigate("/tickets/new")} size="sm" className="h-8 shadow-sm">
             <Plus className="h-4 w-4 mr-1" />New Ticket
           </Button>
         </div>

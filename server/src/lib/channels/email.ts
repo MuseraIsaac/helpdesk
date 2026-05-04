@@ -45,6 +45,9 @@ export async function deliverEmail(
     });
     if (!user) return { status: "skipped" };
 
+    // General settings give us the helpdesk name for template branding
+    const general = await getSection("general").catch(() => null);
+
     // Render notification email template for this event
     const rendered = await renderNotificationEmail(payload.event, {
       entityNumber:   payload.entityId,
@@ -52,6 +55,8 @@ export async function deliverEmail(
       entityUrl:      payload.entityUrl,
       recipientName:  user.name,
       recipientEmail: user.email,
+      note:           payload.body,
+      helpdeskName:   general?.helpdeskName,
     });
 
     // Fall back to a minimal plain-text email when no template is configured

@@ -15,6 +15,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
+import SidebarRail from "./SidebarRail";
 import {
   Filter, X, ChevronRight, Sparkles, Zap, AlertTriangle, Clock,
   UserX, UserCheck, ShieldAlert, RotateCcw, Check, Tag, Flag,
@@ -215,6 +216,34 @@ function ChipGroup<T extends string>({
 }
 
 // ── Section header ───────────────────────────────────────────────────────────
+//
+// Each section gets its own colour identity so the right rail reads as a
+// scannable palette of categories rather than a uniform grey block. The tone
+// is chosen by section title — soft tinted icon chip + matching label hue,
+// dark/light variants kept low-saturation so they don't fight the data.
+
+const SECTION_TONES: Record<
+  string,
+  { chip: string; icon: string; label: string; count: string }
+> = {
+  "Active":        { chip: "bg-violet-500/12  border-violet-500/25",  icon: "text-violet-600 dark:text-violet-400",   label: "text-violet-700/85 dark:text-violet-300/85",   count: "bg-violet-500/15 text-violet-700 dark:text-violet-300"   },
+  "Quick filters": { chip: "bg-amber-500/12   border-amber-500/25",   icon: "text-amber-600 dark:text-amber-400",     label: "text-amber-700/85 dark:text-amber-300/85",     count: "bg-amber-500/15 text-amber-700 dark:text-amber-300"      },
+  "Priority":      { chip: "bg-red-500/12     border-red-500/25",     icon: "text-red-600 dark:text-red-400",         label: "text-red-700/85 dark:text-red-300/85",         count: "bg-red-500/15 text-red-700 dark:text-red-300"            },
+  "Severity":      { chip: "bg-orange-500/12  border-orange-500/25",  icon: "text-orange-600 dark:text-orange-400",   label: "text-orange-700/85 dark:text-orange-300/85",   count: "bg-orange-500/15 text-orange-700 dark:text-orange-300"   },
+  "Category":      { chip: "bg-indigo-500/12  border-indigo-500/25",  icon: "text-indigo-600 dark:text-indigo-400",   label: "text-indigo-700/85 dark:text-indigo-300/85",   count: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300"   },
+  "Source":        { chip: "bg-sky-500/12     border-sky-500/25",     icon: "text-sky-600 dark:text-sky-400",         label: "text-sky-700/85 dark:text-sky-300/85",         count: "bg-sky-500/15 text-sky-700 dark:text-sky-300"            },
+  "Status":        { chip: "bg-emerald-500/12 border-emerald-500/25", icon: "text-emerald-600 dark:text-emerald-400", label: "text-emerald-700/85 dark:text-emerald-300/85", count: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
+  "Type":          { chip: "bg-cyan-500/12    border-cyan-500/25",    icon: "text-cyan-600 dark:text-cyan-400",       label: "text-cyan-700/85 dark:text-cyan-300/85",       count: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300"         },
+  "Team":          { chip: "bg-blue-500/12    border-blue-500/25",    icon: "text-blue-600 dark:text-blue-400",       label: "text-blue-700/85 dark:text-blue-300/85",       count: "bg-blue-500/15 text-blue-700 dark:text-blue-300"         },
+  "Assignee":      { chip: "bg-pink-500/12    border-pink-500/25",    icon: "text-pink-600 dark:text-pink-400",       label: "text-pink-700/85 dark:text-pink-300/85",       count: "bg-pink-500/15 text-pink-700 dark:text-pink-300"         },
+};
+
+const DEFAULT_TONE = {
+  chip:  "bg-muted border-border/50",
+  icon:  "text-muted-foreground/70",
+  label: "text-muted-foreground/80",
+  count: "bg-muted text-foreground/70",
+};
 
 function SectionHeader({
   icon: Icon, title, count, action,
@@ -224,13 +253,18 @@ function SectionHeader({
   count?: number;
   action?: React.ReactNode;
 }) {
+  const tone = SECTION_TONES[title] ?? DEFAULT_TONE;
   return (
     <div className="flex items-center gap-2 mb-2.5">
-      <Icon className="h-3 w-3 text-muted-foreground/70" />
-      <h4 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/80 flex-1">
+      <span className={`flex h-5 w-5 items-center justify-center rounded-md border shrink-0 ${tone.chip}`}>
+        <Icon className={`h-3 w-3 ${tone.icon}`} />
+      </span>
+      <h4 className={`text-[10px] font-bold uppercase tracking-[0.10em] flex-1 ${tone.label}`}>
         {title}
         {count != null && count > 0 && (
-          <span className="ml-1.5 text-foreground/70 normal-case tracking-normal">{count}</span>
+          <span className={`ml-1.5 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full text-[10px] font-bold tabular-nums normal-case tracking-normal ${tone.count}`}>
+            {count}
+          </span>
         )}
       </h4>
       {action}
@@ -374,19 +408,30 @@ export default function TicketsFilterSidebar({ filters, onChange, onClear, onSav
     <aside
       aria-label="Ticket filters"
       className={[
-        // Pinned flush to the viewport's right edge, full available height below the app header
-        "fixed right-0 top-14 bottom-0 w-80 z-20",
+        // Pinned flush to the viewport's right edge, full available height below the app header.
+        // Width = 6px rail + 320px content (was just 320).
+        "fixed right-0 top-14 bottom-0 w-[326px] z-20",
         // Hide on smaller screens where there isn't room next to the main content
-        "hidden lg:flex flex-col",
+        "hidden lg:flex flex-row",
       ].join(" ")}
     >
+      {/* Decorative rail flush against the sidebar's left edge — picks up
+       *  --primary so it shifts with the active palette. */}
+      <SidebarRail side="left" tone="primary" />
       <div className="flex flex-col flex-1 min-h-0 border-l bg-card/95 backdrop-blur-md shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.08)] overflow-hidden">
 
-        {/* ── Header (gradient + decorative accent bar) ────────────────────── */}
-        <div className="relative border-b bg-gradient-to-br from-primary/8 via-primary/4 to-transparent">
+        {/* ── Header (multi-stop colour gradient + accent rail) ──────────── */}
+        <div className="relative border-b overflow-hidden">
+          {/* Layered colour wash — picks up the active palette via primary, plus
+              soft violet/teal tints for visual depth without committing to a
+              single hue. Sits behind the content, very low opacity so labels
+              remain readable in light & dark modes. */}
+          <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-violet-500/[0.04] to-teal-500/[0.05] pointer-events-none" />
+          {/* Glow orb top-right for that "premium tool" feel */}
+          <div className="absolute -top-12 -right-12 h-32 w-32 rounded-full bg-primary/15 blur-2xl pointer-events-none" />
           {/* Left accent bar */}
-          <div className="absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-primary/60 via-primary/30 to-transparent" />
-          <div className="px-5 py-3.5 flex items-center gap-3">
+          <div className="absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-primary via-primary/40 to-transparent" />
+          <div className="relative px-5 py-3.5 flex items-center gap-3">
             <div className={[
               "h-9 w-9 rounded-xl flex items-center justify-center shrink-0 transition-all",
               hasFilters

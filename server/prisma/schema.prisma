@@ -925,12 +925,29 @@ model Template {
   notificationEvent String? @db.VarChar(80) @map("notification_event")
   /// Human-readable subject line for notification email templates (supports {{variables}})
   emailSubject String?     @db.VarChar(255) @map("email_subject")
+
+  /// Sharing scope: "private" (creator only) | "team" (a specific team's members) | "everyone".
+  /// Notification email templates ignore this and remain global/system.
+  visibility   String       @default("private") @db.VarChar(20)
+  /// Required when visibility = "team"; null otherwise.
+  teamId       Int?         @map("team_id")
+  team         Team?        @relation("TemplateTeam", fields: [teamId], references: [id], onDelete: SetNull)
+
+  /// Snapshot of the source ticket's structured fields (category, priority,
+  /// severity, impact, urgency, ticket type, custom fields, etc.) at the
+  /// moment of saving. Replayed onto the new ticket form when the template
+  /// is applied. Validated against templateFieldsSchema in core/schemas.
+  fields       Json         @default("{}")
+
   createdById String
   createdBy   User         @relation(fields: [createdById], references: [id])
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
   @@index([notificationEvent])
+  @@index([visibility])
+  @@index([teamId])
+  @@index([createdById])
   @@map("template")
 }
 
@@ -1130,6 +1147,7 @@ model Team {
   teamDashboards     DashboardConfig[]    @relation("DashboardVisibilityTeam")
   scenarioVisibility ScenarioDefinition[] @relation("ScenarioVisibilityTeam")
   savedReports       SavedReport[]        @relation("SavedReportTeam")
+  templates          Template[]           @relation("TemplateTeam")
   assets             Asset[]
   escalatedTickets   Ticket[]            @relation("EscalatedToTeam")
 

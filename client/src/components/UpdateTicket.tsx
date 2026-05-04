@@ -7,6 +7,15 @@ import { ticketTypes, ticketTypeLabel } from "core/constants/ticket-type.ts";
 import { AlertTriangle, CheckCircle, Tag, BarChart2, Users, Clock, Server, Save, Undo2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useSession } from "@/lib/auth-client";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { agentTicketStatuses, statusLabel } from "core/constants/ticket-status.ts";
 import { ticketCategories, categoryLabel } from "core/constants/ticket-category.ts";
 import { ticketPriorities, priorityLabel } from "core/constants/ticket-priority.ts";
@@ -205,6 +214,9 @@ function AffectedSystemInput({
 export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
   const queryClient = useQueryClient();
   const [escalateDialogOpen, setEscalateDialogOpen] = useState(false);
+  const { data: session } = useSession();
+  const currentUserId   = session?.user?.id   ?? null;
+  const currentUserName = session?.user?.name ?? "";
 
   // The TicketDetailPage caches the ticket under `["ticket", urlId]` where
   // urlId is whatever the URL contained — could be the numeric DB id ("36")
@@ -407,6 +419,70 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
     queueUpdate(patch);
   }
 
+  // ── Agent → team auto-population ──────────────────────────────────────────
+  //
+  // When an agent is assigned, surface the team(s) they belong to:
+  //   • 0 teams: leave team as-is, just stamp the assignee.
+  //   • 1 team:  auto-set that team alongside the assignee.
+  //   • 2+ teams AND the current team is one of them: keep the current
+  //                team (no surprise switch) and just stamp the assignee.
+  //   • 2+ teams AND the current team is NOT one of them: open the
+  //                team-picker dialog so the user explicitly chooses
+  //                which team this assignment belongs to.
+
+  /** Picker state — null while no choice is being prompted for. */
+  const [teamPicker, setTeamPicker] = useState<{
+    agentId:   string;
+    agentName: string;
+    teams:     Team[];
+  } | null>(null);
+
+  function handleAgentChange(value: string) {
+    const newAgentId = value === "unassigned" ? null : value;
+
+    // Unassigning — never touch the team. Just clear the agent.
+    if (newAgentId === null) {
+      queueUpdate({ assignedToId: null });
+      return;
+    }
+
+    const agentTeams = (teamsData ?? []).filter((t) =>
+      t.members.some((m) => m.id === newAgentId),
+    );
+
+    if (agentTeams.length === 0) {
+      // Agent isn't on any team — clear the team along with the
+      // assignment. Leaving the previous agent's team in place was
+      // misleading: the new agent has nothing to do with that team and
+      // the SLA / watcher routing would silently still belong to it.
+      queueUpdate({ assignedToId: newAgentId, teamId: null });
+      return;
+    }
+
+    if (agentTeams.length === 1) {
+      // Exactly one team — auto-set both fields.
+      queueUpdate({ assignedToId: newAgentId, teamId: agentTeams[0]!.id });
+      return;
+    }
+
+    // Multiple teams — keep current team if the agent is already in it,
+    // otherwise prompt the user to pick.
+    const currentTeamId = val<number | null>("teamId", ticket.teamId ?? null);
+    if (currentTeamId != null && agentTeams.some((t) => t.id === currentTeamId)) {
+      queueUpdate({ assignedToId: newAgentId });
+      return;
+    }
+
+    const agentName = (agentsData ?? []).find((a) => a.id === newAgentId)?.name ?? "this agent";
+    setTeamPicker({ agentId: newAgentId, agentName, teams: agentTeams });
+  }
+
+  function confirmTeamPicker(teamId: number) {
+    if (!teamPicker) return;
+    queueUpdate({ assignedToId: teamPicker.agentId, teamId });
+    setTeamPicker(null);
+  }
+
   // ── Build options ────────────────────────────────────────────────────────
 
   const statusOptions = [
@@ -485,18 +561,60 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
     })),
   ];
 
-  const agentOptions = [
-    { value: "unassigned", label: "Unassigned" },
-    ...availableAgents.map((a) => ({
-      value: a.id,
-      label: a.name,
-      prefix: (
-        <span className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-semibold text-primary shrink-0">
-          {initials(a.name)}
-        </span>
-      ),
-    })),
-  ];
+  // Agent options: when a team is selected we group "In <team>" first,
+  // followed by "Other agents" so the user can still pick someone from
+  // another team — picking a cross-team agent triggers the team-picker
+  // prompt above, which is the whole point of the auto-population flow.
+  const agentRow = (a: Agent) => ({
+    value: a.id,
+    label: a.name,
+    prefix: (
+      <span className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-semibold text-primary shrink-0">
+        {initials(a.name)}
+      </span>
+    ),
+  });
+
+  // "Me" shortcut — pinned at the top so an agent can self-assign in one
+  // click without scrolling the agent list. Hidden when the current user
+  // already owns the ticket (no point offering self-assign to yourself)
+  // or when the session hasn't loaded yet.
+  const meOption = currentUserId && mergedAssignedToId !== currentUserId
+    ? {
+        value: currentUserId,
+        label: "Me",
+        prefix: (
+          <span
+            className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-semibold text-white shrink-0 ring-1 ring-primary/30"
+            style={{ background: "linear-gradient(135deg, var(--primary), var(--ring))" }}
+            title={currentUserName}
+          >
+            {initials(currentUserName) || "?"}
+          </span>
+        ),
+        hint: <span className="text-[9px] text-primary/70 font-semibold">assign to self</span>,
+      }
+    : null;
+
+  // When a team is set, the agent dropdown is scoped to that team's
+  // members only — picking the team first is a deliberate signal that
+  // the user wants to stay inside it. No team set → all agents are
+  // selectable so the team-auto-population flow can suggest one. The
+  // "Me" pinned row stays available regardless; if "Me" isn't in the
+  // selected team, picking it triggers the team-picker dialog.
+  const agentOptions = (() => {
+    const allAgents = agentsData ?? [];
+    const head = [
+      { value: "unassigned", label: "Unassigned" },
+      ...(meOption ? [meOption] : []),
+    ];
+    if (!selectedTeam) {
+      return [...head, ...allAgents.map(agentRow)];
+    }
+    const inTeamIds = new Set(selectedTeam.members.map((m) => m.id));
+    const inTeam    = allAgents.filter((a) => inTeamIds.has(a.id));
+    return [...head, ...inTeam.map(agentRow)];
+  })();
 
   const statusValue =
     mergedCustomStatusId != null ? `custom_${mergedCustomStatusId}` : mergedStatus;
@@ -704,7 +822,7 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
         <FieldRow label={selectedTeam ? `Agent · ${selectedTeam.name}` : "Agent"}>
           <SearchableSelect
             value={mergedAssignedToId ?? "unassigned"}
-            onChange={(v) => queueUpdate({ assignedToId: v === "unassigned" ? null : v })}
+            onChange={handleAgentChange}
             options={agentOptions}
             disabled={updateMutation.isPending}
           />
@@ -794,6 +912,66 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
           </div>
         ))}
       </SidebarSection>
+
+      {/* ── Pick a team for the assignee ──────────────────────────────────
+       *
+       * Opens when the user assigns an agent who belongs to two or more
+       * teams and the ticket isn't already on one of them. Lets the user
+       * scope the assignment to a specific team in a single click.
+       */}
+      <Dialog
+        open={teamPicker !== null}
+        onOpenChange={(open) => { if (!open) setTeamPicker(null); }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Users className="h-4 w-4 text-emerald-500" />
+              Pick a team for {teamPicker?.agentName}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {teamPicker?.agentName} is on multiple teams. Choose which one
+              this ticket should be routed under — the team drives SLA
+              ownership and watcher notifications.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-2 py-1">
+            {(teamPicker?.teams ?? []).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => confirmTeamPicker(t.id)}
+                className="group flex items-center gap-3 rounded-lg border border-border/60 bg-card hover:border-primary/40 hover:bg-primary/[0.04] px-3 py-2.5 text-left transition-all hover:-translate-y-0.5 hover:shadow-sm"
+              >
+                <span
+                  className="h-9 w-9 rounded-lg flex items-center justify-center text-white text-[10px] font-bold shrink-0 shadow-sm"
+                  style={{ backgroundColor: t.color }}
+                >
+                  {t.name.slice(0, 2).toUpperCase()}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate group-hover:text-primary transition-colors">
+                    {t.name}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {t.members.length} member{t.members.length !== 1 ? "s" : ""}
+                  </p>
+                </div>
+                <span className="text-[10px] font-semibold text-muted-foreground/50 group-hover:text-primary transition-colors">
+                  Select →
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setTeamPicker(null)}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

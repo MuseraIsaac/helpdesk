@@ -7,7 +7,6 @@ export interface TemplateVariable {
 }
 
 const TICKET_VARIABLES: TemplateVariable[] = [
-  { key: "{{ticket.number}}", description: "Ticket number", group: "Ticket" },
   { key: "{{ticket.subject}}", description: "Subject line", group: "Ticket" },
   { key: "{{ticket.status}}", description: "Current status", group: "Ticket" },
   { key: "{{ticket.priority}}", description: "Priority level", group: "Ticket" },

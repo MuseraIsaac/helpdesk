@@ -187,11 +187,14 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
 
   await logAudit(ticket.id, req.user.id, "ticket.created", { via: "agent" });
 
-  // Auto-create linked ITIL record based on ticket type
+  // Auto-create linked ITIL record based on ticket type.
+  // Note: service_request tickets are NOT mirrored into a separate
+  // ServiceRequest row — the ticket itself IS the service request.
+  // /requests is reserved for standalone service requests submitted by
+  // internal agents or by customers via the portal. Analytics aggregates
+  // both surfaces; see lib/request-aggregate.ts.
   if (ticket.ticketType === "incident") {
     void createLinkedIncident(ticket.id, req.user.id);
-  } else if (ticket.ticketType === "service_request") {
-    void createLinkedServiceRequest(ticket.id, req.user.id);
   }
 
   // Run automation rules — may modify category, priority, or assignee
@@ -1094,16 +1097,19 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
     ...("teamId" in data && { teamId: data.teamId }),
   };
 
-  // If ticket type was just set (no existing link), create the linked record
+  // If ticket type was just set (no existing link), create the linked
+  // record — but only for incidents. Service-request tickets are no
+  // longer mirrored into the standalone ServiceRequest table; the ticket
+  // is the service request. Existing links from before this change are
+  // still kept in sync so historical data stays consistent.
   if ("ticketType" in data) {
     const newType = data.ticketType;
     if (newType === "incident" && !ticket.linkedIncidentId) {
       void createLinkedIncident(id, req.user.id);
-    } else if (newType === "service_request" && !ticket.linkedServiceRequestId) {
-      void createLinkedServiceRequest(id, req.user.id);
     } else if (newType === "incident" && ticket.linkedIncidentId) {
       void syncTicketToIncident(ticket.linkedIncidentId, syncChanges);
     } else if (newType === "service_request" && ticket.linkedServiceRequestId) {
+      // Pre-existing link — keep it in sync but do not create new ones.
       void syncTicketToServiceRequest(ticket.linkedServiceRequestId, syncChanges);
     }
   } else {

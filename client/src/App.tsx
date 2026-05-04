@@ -231,17 +231,24 @@ function App() {
           {/* /settings redirects non-admins to home; admin sub-routes below */}
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
 
+          {/* Trash is available to all authenticated users — server scopes the
+              data to the requester's own deletions unless they are an
+              admin/supervisor. */}
+          <Route path="/admin/trash" element={<TrashPage />} />
+
+          {/* Templates: all authenticated agents can manage personal templates;
+              the server scopes visibility (private / team / everyone). */}
+          <Route path="/templates" element={<TemplatesPage />} />
+
           <Route element={<AdminRoute />}>
             <Route path="/settings/:section" element={<SettingsPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/teams" element={<TeamsPage />} />
             <Route path="/macros" element={<MacrosPage />} />
-            <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/admin/forms" element={<FormBuilderPage />} />
             <Route path="/admin/cab-groups" element={<CabGroupsPage />} />
             <Route path="/admin/ticket-types" element={<TicketTypesPage />} />
             <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
-            <Route path="/admin/trash" element={<TrashPage />} />
             <Route path="/admin/audit-log" element={<AuditLogPage />} />
             <Route path="/admin/roles" element={<RolesPage />} />
             {/* Automation Platform */}

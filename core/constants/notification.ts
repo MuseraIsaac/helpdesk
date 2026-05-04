@@ -28,6 +28,10 @@ export type NotificationEvent =
   | "change.awaiting_approval"
   | "approval.overdue"
   | "approval.reminder"
+  | "saas.renewal_soon"
+  | "license.expiry_soon"
+  | "license.expired"
+  | "license.over_limit"
   | "automation.notification"; // generic automation-triggered notification
 
 export const NOTIFICATION_EVENTS: NotificationEvent[] = [
@@ -53,6 +57,10 @@ export const NOTIFICATION_EVENTS: NotificationEvent[] = [
   "change.awaiting_approval",
   "approval.overdue",
   "approval.reminder",
+  "saas.renewal_soon",
+  "license.expiry_soon",
+  "license.expired",
+  "license.over_limit",
   "automation.notification",
 ];
 
@@ -79,6 +87,10 @@ export const NOTIFICATION_EVENT_LABEL: Record<NotificationEvent, string> = {
   "change.awaiting_approval":         "Change awaiting approval",
   "approval.overdue":                 "Approval overdue",
   "approval.reminder":                "Approval reminder",
+  "saas.renewal_soon":                "SaaS subscription renewal upcoming",
+  "license.expiry_soon":              "Software license expiring soon",
+  "license.expired":                  "Software license expired",
+  "license.over_limit":               "Software license over seat limit",
   "automation.notification":          "Automation-triggered notification",
 };
 
@@ -94,6 +106,10 @@ export const SYSTEM_EMAIL_TEMPLATE_EVENTS: NotificationEvent[] = [
   "ticket.escalated",
   "sla.breached",
   "incident.escalated",
+  "saas.renewal_soon",
+  "license.expiry_soon",
+  "license.expired",
+  "license.over_limit",
 ];
 
 // ── Channels ──────────────────────────────────────────────────────────────────

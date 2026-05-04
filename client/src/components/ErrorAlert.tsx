@@ -30,6 +30,13 @@ export default function ErrorAlert({
   fallback = "Something went wrong",
   className,
 }: ErrorAlertProps) {
+  // Render nothing when there's nothing to show. Without this guard the
+  // fallback text leaks into the UI on every consumer that does
+  // `<ErrorAlert error={mutation.error} />` (e.g. dialogs that mount
+  // before any submission has happened) — turning every freshly-opened
+  // form into "Failed to …" before the user has typed anything.
+  if (!message && (error == null)) return null;
+
   const text = message ?? getErrorMessage(error, fallback);
 
   return (

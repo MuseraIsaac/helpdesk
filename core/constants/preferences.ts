@@ -9,6 +9,22 @@ export const languages = [
 
 export type Language = (typeof languages)[number]["value"];
 
+/**
+ * Languages with a full UI translation implemented.
+ *
+ * The app currently has no i18n infrastructure — every UI string is a
+ * hard-coded English literal in JSX. The `languages` list above advertises
+ * locale options for forward compatibility, but only entries in this
+ * `supportedLanguages` set actually render translated content. Pickers should
+ * disable any value not in this set so the UI doesn't promise behaviour it
+ * can't deliver.
+ */
+export const supportedLanguages: ReadonlySet<Language> = new Set(["en"]);
+
+export function isLanguageSupported(value: string): value is Language {
+  return supportedLanguages.has(value as Language);
+}
+
 export const timezones = [
   { value: "UTC", label: "UTC" },
   { value: "America/New_York", label: "Eastern Time (ET)" },

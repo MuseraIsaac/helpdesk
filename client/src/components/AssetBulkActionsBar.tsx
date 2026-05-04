@@ -336,7 +336,15 @@ export default function AssetBulkActionsBar({ selectedIds, onClearSelection }: A
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      await axios.post("/api/assets/bulk", { action: "delete", ids: selectedIds });
+      // Server now does a partial delete: returns { affected, skipped }
+      // where `skipped` counts active (deployed / in_use) assets that
+      // weren't deletable. We need the response so we can show the user
+      // a clear "X moved, Y skipped" summary after success.
+      const { data } = await axios.post<{ affected: number; skipped: number }>(
+        "/api/assets/bulk",
+        { action: "delete", ids: selectedIds },
+      );
+      return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["assets"] });

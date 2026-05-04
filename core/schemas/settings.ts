@@ -660,6 +660,29 @@ export const cmdbSettingsSchema = z.object({
   impactAnalysisEnabled:       z.boolean().default(true),
   // Max depth for dependency chain rendering
   dependencyTreeDepth:         z.number().int().min(1).max(10).default(3),
+
+  // ── License & SaaS lifecycle alerts ─────────────────────────────────────────
+  // All disabled by default — admin must opt in.
+  licenseAlertsInAppEnabled:    z.boolean().default(false),
+  licenseAlertsEmailEnabled:    z.boolean().default(false),
+  /** Days before expiryDate to start warning. */
+  licenseExpiryWarningDays:     z.number().int().min(1).max(365).default(30),
+  /** Notify when a license has passed its expiryDate. */
+  licenseNotifyOnExpired:       z.boolean().default(true),
+  /** Notify when a license's consumed seats exceeds totalSeats. */
+  licenseNotifyOnOverLimit:     z.boolean().default(true),
+
+  saasAlertsInAppEnabled:       z.boolean().default(false),
+  saasAlertsEmailEnabled:       z.boolean().default(false),
+  /** Days before renewalDate to start warning. */
+  saasRenewalWarningDays:       z.number().int().min(1).max(365).default(30),
+
+  /** User IDs to receive license/SaaS alerts. */
+  alertRecipientUserIds:        z.array(z.string()).default([]),
+  /** Team IDs whose members should receive license/SaaS alerts. */
+  alertRecipientTeamIds:        z.array(z.number().int().positive()).default([]),
+  /** Also notify the owner set on the license / subscription record. */
+  notifyAssetOwners:            z.boolean().default(true),
 });
 
 export const notificationsSettingsSchema = z.object({

@@ -20,6 +20,7 @@ import {
   Pie,
   AreaChart,
   Area,
+  LabelList,
 } from "recharts";
 import {
   Card,
@@ -79,6 +80,8 @@ import {
   WIDGET_CATEGORIES,
   WIDGET_PRESENTATION,
   SYSTEM_DEFAULT_CONFIG,
+  CUSTOM_FIELD_LAYOUT_DEFAULT,
+  isCustomFieldWidget,
   type WidgetConfig,
   type WidgetAppearance,
 } from "core/schemas/dashboard.ts";
@@ -114,9 +117,13 @@ import {
   Repeat2,
   ClipboardList,
   Check,
+  CheckCircle2,
   Activity,
   Target,
   Award,
+  Trophy,
+  Medal,
+  Tag,
   Layers,
   Inbox,
   Hash,
@@ -174,7 +181,14 @@ function DashboardWidget({
   onEditStyle?:  () => void;
   children:      React.ReactNode;
 }) {
-  const label        = appearance?.titleOverride || WIDGET_META[id]?.label || id;
+  // Custom-field widgets don't have a static meta entry; show a clean
+  // "Custom Field · <fieldKey>" label in the edit-mode drag bar so admins
+  // can identify which widget they're moving without a giant raw id.
+  const builtinLabel = WIDGET_META[id as keyof typeof WIDGET_META]?.label;
+  const customLabel  = isCustomFieldWidget(id)
+    ? `Custom Field · ${id.split(":").slice(2).join(":").replace(/^custom_/, "")}`
+    : null;
+  const label        = appearance?.titleOverride || builtinLabel || customLabel || id;
   const accentColor  = appearance?.accentColor;
   const scale        = appearance?.scale ?? 1;
 
@@ -220,29 +234,34 @@ function DashboardWidget({
             )}
             {/* Separator */}
             <div className="h-3 w-px bg-border/60 mx-0.5" />
-            {/* Width presets */}
-            {[{ label: "½", w: 6 }, { label: "⅔", w: 8 }, { label: "Full", w: 12 }].map(preset => (
-              <button
-                key={preset.w}
-                type="button"
-                title={`${preset.label} width`}
-                onMouseDown={e => e.stopPropagation()}
-                onClick={() => onWidthChange(preset.w)}
-                className={[
-                  "px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors",
-                  currentW === preset.w || (preset.w === 6 && currentW < 7)
-                    ? "text-white"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                ].join(" ")}
-                style={
-                  currentW === preset.w || (preset.w === 6 && currentW < 7)
-                    ? { background: accentColor ?? "hsl(var(--primary))" }
-                    : undefined
-                }
-              >
-                {preset.label}
-              </button>
-            ))}
+            {/* Width presets — each highlights for the range up to its w
+                (e.g. ¼ → 1-3, ½ → 4-6, ⅔ → 7-8, Full → 9-12) */}
+            {([
+              { label: "¼",    w: 3,  prev: 0 },
+              { label: "½",    w: 6,  prev: 3 },
+              { label: "⅔",    w: 8,  prev: 6 },
+              { label: "Full", w: 12, prev: 8 },
+            ] as const).map(preset => {
+              const active = currentW > preset.prev && currentW <= preset.w;
+              return (
+                <button
+                  key={preset.w}
+                  type="button"
+                  title={`${preset.label} width`}
+                  onMouseDown={e => e.stopPropagation()}
+                  onClick={() => onWidthChange(preset.w)}
+                  className={[
+                    "px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors",
+                    active
+                      ? "text-white"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  ].join(" ")}
+                  style={active ? { background: accentColor ?? "hsl(var(--primary))" } : undefined}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -496,18 +515,23 @@ const agingChartConfig = {
   count: { label: "Open tickets", color: "var(--primary)" },
 } satisfies ChartConfig;
 
+// Direct hex codes — Recharts renders `fill` straight onto SVG which
+// doesn't reliably resolve `hsl(var(--destructive))` when --destructive
+// is itself an oklch() value (browser falls back to black). Use the
+// underlying tailwind colour palette directly.
 const PRIORITY_COLORS: Record<string, string> = {
-  urgent: "hsl(var(--destructive))",
-  high:   "#f97316",
-  medium: "#eab308",
-  low:    "#22c55e",
+  urgent: "#ef4444",  // red-500
+  high:   "#f97316",  // orange-500
+  medium: "#eab308",  // yellow-500
+  low:    "#22c55e",  // green-500
+  unset:  "#94a3b8",  // slate-400 — mute the "no priority" bar so it doesn't fight the real categories
 };
 
 const AGING_COLORS: Record<number, string> = {
-  1: "#22c55e",
-  2: "#eab308",
-  3: "#f97316",
-  4: "hsl(var(--destructive))",
+  1: "#22c55e",  // < 24h — fresh, healthy
+  2: "#eab308",  // 1–3 days
+  3: "#f97316",  // 3–7 days
+  4: "#ef4444",  // > 7 days — overdue, needs attention
 };
 
 const incidentChartConfig = {
@@ -519,7 +543,7 @@ const csatTrendChartConfig = {
 } satisfies ChartConfig;
 
 const backlogChartConfig = {
-  opened: { label: "Opened",  color: "hsl(var(--primary))" },
+  opened: { label: "Opened",   color: "hsl(var(--foreground))" },
   closed: { label: "Resolved", color: "#22c55e" },
 } satisfies ChartConfig;
 
@@ -592,55 +616,64 @@ function MetricCard({
 
   const valueStyle = resolvedColor ? { color: resolvedColor } : undefined;
 
+  const isEmpty = !loading && (value === null || value === undefined || value === "");
+
   const card = (
     <Card
       className={[
-        "relative overflow-hidden transition-all duration-200 group/metric",
+        "relative overflow-hidden rounded-2xl border transition-all duration-200 group/metric",
         href ? "hover:shadow-lg hover:-translate-y-0.5 cursor-pointer" : "",
-        "shadow-sm",
-        // Inside AutoFitBox the card lays out at its intrinsic content
-        // size (max-content) and the scaler fits it to the cell — no
-        // h-full needed, which would otherwise produce a 0/auto height
-        // inside a max-content parent.
+        "shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_3px_rgba(15,23,42,0.06)]",
         fillCard ? "flex flex-col w-[240px]" : "",
       ].join(" ")}
       style={resolvedColor ? {
-        borderTopColor: resolvedColor,
-        borderTopWidth: 3,
-        boxShadow: href ? undefined : `0 1px 3px 0 ${resolvedColor}15, 0 1px 2px -1px ${resolvedColor}10`,
+        // Tinted top edge — same stroke colour as the accent, but as a soft
+        // 2px bar baked into the border for a tighter, more refined look.
+        borderTopColor: `${resolvedColor}cc`,
+        borderTopWidth: 2,
       } : undefined}
     >
-      {/* Gradient tint fill */}
+      {/* Soft diagonal tint wash — keeps the card feeling alive without competing with the number. */}
       {resolvedColor && (
         <div
-          className="absolute inset-0 pointer-events-none transition-opacity duration-200 group-hover/metric:opacity-150"
-          style={{ background: `linear-gradient(135deg, ${resolvedColor}0d 0%, ${resolvedColor}04 40%, transparent 70%)` }}
+          className="absolute inset-0 pointer-events-none transition-opacity duration-300 opacity-90 group-hover/metric:opacity-100"
+          style={{ background: `linear-gradient(135deg, ${resolvedColor}10 0%, ${resolvedColor}04 38%, transparent 75%)` }}
         />
       )}
-      {/* Bottom glow line */}
+
+      {/* Decorative blurred halo behind the number — purely visual polish. */}
       {resolvedColor && (
         <div
-          className="absolute bottom-0 left-4 right-4 h-px pointer-events-none opacity-40"
-          style={{ background: `linear-gradient(90deg, transparent, ${resolvedColor}, transparent)` }}
+          className="absolute -bottom-12 -right-10 h-32 w-32 rounded-full pointer-events-none opacity-60 blur-3xl transition-opacity duration-300 group-hover/metric:opacity-90"
+          style={{ background: `radial-gradient(circle at center, ${resolvedColor}30 0%, transparent 70%)` }}
+        />
+      )}
+
+      {/* Crisp accent rail at the very bottom — anchors the card. */}
+      {resolvedColor && (
+        <div
+          className="absolute bottom-0 left-0 right-0 h-[2px] pointer-events-none opacity-70"
+          style={{ background: `linear-gradient(90deg, transparent 0%, ${resolvedColor}80 30%, ${resolvedColor}80 70%, transparent 100%)` }}
         />
       )}
 
       <CardHeader className={density === "compact" ? "pb-1 relative" : "pb-2 relative"}>
         <div className="flex items-start justify-between gap-2">
-          {/* Icon badge with glow ring */}
+          {/* Icon badge — bigger, layered, with halo ring */}
           <div
-            className="metric-card-icon-badge h-10 w-10 rounded-xl flex items-center justify-center shrink-0 transition-transform duration-200 group-hover/metric:scale-105"
+            className="metric-card-icon-badge h-11 w-11 rounded-xl flex items-center justify-center shrink-0 transition-all duration-200 group-hover/metric:scale-105 group-hover/metric:rotate-[-2deg]"
             style={resolvedColor
               ? {
-                  background: `linear-gradient(135deg, ${resolvedColor}22, ${resolvedColor}0f)`,
-                  border: `1px solid ${resolvedColor}35`,
-                  boxShadow: `0 0 0 3px ${resolvedColor}0f`,
+                  background: `linear-gradient(140deg, ${resolvedColor}26 0%, ${resolvedColor}10 100%)`,
+                  border: `1px solid ${resolvedColor}40`,
+                  boxShadow: `inset 0 1px 0 0 ${resolvedColor}25, 0 0 0 4px ${resolvedColor}0a`,
                 }
-              : { background: "hsl(var(--muted))" }
+              : { background: "hsl(var(--muted))", border: "1px solid hsl(var(--border))" }
             }
           >
             <Icon
-              className="metric-card-icon h-4.5 w-4.5"
+              className="metric-card-icon h-[18px] w-[18px]"
+              strokeWidth={2.25}
               style={resolvedColor ? { color: resolvedColor } : { color: "hsl(var(--muted-foreground))" }}
             />
           </div>
@@ -649,15 +682,22 @@ function MetricCard({
             <TooltipProvider delayDuration={200}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Info className="h-3 w-3 text-muted-foreground/30 cursor-default mt-0.5 shrink-0 hover:text-muted-foreground/60 transition-colors" />
+                  <Info className="h-3.5 w-3.5 text-muted-foreground/40 cursor-default mt-0.5 shrink-0 hover:text-muted-foreground transition-colors" />
                 </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-[200px] text-xs">{hint}</TooltipContent>
+                <TooltipContent side="top" className="max-w-[220px] text-xs leading-relaxed">{hint}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           )}
         </div>
-        <CardTitle className="metric-card-title text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70 leading-tight mt-2.5">
-          {title}
+        <CardTitle className="metric-card-title text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80 leading-tight mt-3 inline-flex items-center gap-1.5">
+          {/* Tiny accent dot */}
+          {resolvedColor && (
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full shrink-0"
+              style={{ background: resolvedColor, boxShadow: `0 0 0 2px ${resolvedColor}25` }}
+            />
+          )}
+          <span className="truncate">{title}</span>
         </CardTitle>
       </CardHeader>
 
@@ -667,12 +707,16 @@ function MetricCard({
         ) : (
           <div>
             <p
-              className={`metric-card-value font-black tracking-tight leading-none tabular-nums ${density === "compact" ? "text-2xl" : "text-[2rem]"}`}
-              style={valueStyle}
+              className={[
+                "metric-card-value font-extrabold tracking-tight leading-none tabular-nums",
+                density === "compact" ? "text-[1.75rem]" : "text-[2.25rem]",
+                isEmpty ? "text-muted-foreground/50 font-bold" : "",
+              ].join(" ")}
+              style={isEmpty ? undefined : valueStyle}
             >
               {value ?? "—"}
             </p>
-            {sub && <p className="text-[11px] text-muted-foreground mt-1.5 leading-tight">{sub}</p>}
+            {sub && <p className="text-[11px] text-muted-foreground mt-2 leading-tight">{sub}</p>}
           </div>
         )}
       </CardContent>
@@ -848,6 +892,164 @@ function EmptyState({
   );
 }
 
+// ── CustomFieldWidget ────────────────────────────────────────────────────────
+//
+// Renders a generic distribution chart for an admin-defined custom field on
+// any ITSM entity. Loads its own data via /api/reports/custom-field-distribution
+// using the widget id (`cf:<entity>:<key>`) to derive the entity type and
+// field key. Visual treatment matches the polished `breakdown_category`
+// widget — header + top-bucket callout + ranked bar list — so it sits
+// naturally beside the built-in distribution widgets on a dashboard.
+
+interface CustomFieldDistribution {
+  field:   { key: string; label: string; type: string; options: string[] };
+  buckets: { value: string; label: string; count: number }[];
+  total:   number;
+  missing: number;
+}
+
+const CF_ENTITY_LABEL: Record<string, string> = {
+  ticket:   "tickets",
+  incident: "incidents",
+  request:  "service requests",
+  change:   "changes",
+  problem:  "problems",
+};
+
+const CF_BAR_TONES = [
+  { bar: "bg-gradient-to-r from-violet-400  to-violet-600",  dot: "bg-violet-500"  },
+  { bar: "bg-gradient-to-r from-rose-400    to-rose-600",    dot: "bg-rose-500"    },
+  { bar: "bg-gradient-to-r from-teal-400    to-teal-600",    dot: "bg-teal-500"    },
+  { bar: "bg-gradient-to-r from-amber-400   to-amber-600",   dot: "bg-amber-500"   },
+  { bar: "bg-gradient-to-r from-blue-400    to-blue-600",    dot: "bg-blue-500"    },
+  { bar: "bg-gradient-to-r from-indigo-400  to-indigo-600",  dot: "bg-indigo-500"  },
+  { bar: "bg-gradient-to-r from-emerald-400 to-emerald-600", dot: "bg-emerald-500" },
+  { bar: "bg-gradient-to-r from-fuchsia-400 to-fuchsia-600", dot: "bg-fuchsia-500" },
+];
+function cfToneFor(label: string) {
+  const seed = label.split("").reduce((s, c) => s + c.charCodeAt(0), 0);
+  return CF_BAR_TONES[seed % CF_BAR_TONES.length]!;
+}
+
+function CustomFieldWidget({
+  id,
+  fromTo,
+  preset,
+}: {
+  id: string;
+  fromTo: string;
+  preset: TimePreset;
+}) {
+  // Parse the dynamic id; bail out gracefully if it's malformed.
+  const m = id.match(/^cf:([a-z]+):(.+)$/);
+  const entityType = m?.[1] ?? null;
+  const fieldKey   = m?.[2] ?? null;
+
+  const { data, isLoading, error } = useQuery<CustomFieldDistribution>({
+    queryKey: ["custom-field-distribution", entityType, fieldKey, fromTo],
+    queryFn: () =>
+      axios
+        .get<CustomFieldDistribution>(
+          `/api/reports/custom-field-distribution?entityType=${entityType}&fieldKey=${fieldKey}&${fromTo}`,
+        )
+        .then((r) => r.data),
+    enabled: !!entityType && !!fieldKey,
+    staleTime: STALE_TIME,
+  });
+
+  const buckets   = data?.buckets ?? [];
+  const grandTot  = buckets.reduce((s, b) => s + b.count, 0);
+  const maxCount  = buckets.reduce((m, b) => Math.max(m, b.count), 0) || 1;
+  const top       = buckets[0] ?? null;
+  const entityWord = CF_ENTITY_LABEL[entityType ?? ""] ?? "rows";
+
+  return (
+    <Card key={id} className="h-full flex flex-col">
+      <WidgetHeader
+        title={data?.field.label ?? "Custom field"}
+        description={`Distribution by ${data?.field.label?.toLowerCase() ?? "field"} · ${PRESET_LABELS[preset]} · ${entityWord}`}
+        icon={Tag}
+        iconColor="text-fuchsia-500"
+      />
+      <CardContent className="flex-1 pb-4">
+        {isLoading ? (
+          <div className="space-y-2.5">
+            <Skeleton className="h-14 w-full rounded-lg" />
+            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-9 w-full rounded-lg" />)}
+          </div>
+        ) : error ? (
+          <EmptyState icon={Tag} title="Couldn't load" description="The custom field's data couldn't be retrieved. Reload to try again." />
+        ) : !buckets.length ? (
+          <EmptyState
+            icon={Tag}
+            title="No data yet"
+            description={`No ${entityWord} have a value for this field in the selected period.`}
+          />
+        ) : (
+          <div className="flex flex-col h-full gap-3">
+
+            {/* Top-bucket callout */}
+            {top && (
+              <div className="rounded-lg border border-fuchsia-500/25 bg-gradient-to-br from-fuchsia-500/[0.08] via-fuchsia-500/[0.04] to-transparent px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
+                    Most common
+                  </span>
+                  <span className="ml-auto text-[10px] font-semibold tabular-nums text-muted-foreground">
+                    {grandTot} total{data?.missing ? ` · ${data.missing} blank` : ""}
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between gap-2 mt-0.5">
+                  <span className="text-sm font-bold tracking-tight truncate">{top.label}</span>
+                  <span className="text-xl font-bold tabular-nums tracking-tight text-fuchsia-600 dark:text-fuchsia-400 shrink-0">
+                    {top.count}
+                    <span className="text-[11px] font-medium text-muted-foreground ml-1">
+                      ({grandTot > 0 ? Math.round((top.count / grandTot) * 100) : 0}%)
+                    </span>
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Bar list */}
+            <ul className="space-y-1.5 flex-1 min-h-0 overflow-y-auto pr-1">
+              {buckets.map((b) => {
+                const tone  = cfToneFor(b.label);
+                const pct   = (b.count / maxCount) * 100;
+                const share = grandTot > 0 ? Math.round((b.count / grandTot) * 100) : 0;
+                return (
+                  <li key={b.value}>
+                    <div className="rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`h-2 w-2 rounded-full shrink-0 ${tone.dot}`} />
+                        <span className="text-[12.5px] font-medium truncate flex-1">
+                          {b.label}
+                        </span>
+                        <span className="text-[10px] tabular-nums text-muted-foreground shrink-0">
+                          {share}%
+                        </span>
+                        <span className="text-sm font-bold tabular-nums shrink-0 w-7 text-right">
+                          {b.count}
+                        </span>
+                      </div>
+                      <div className="relative h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`absolute inset-y-0 left-0 rounded-full transition-all ${tone.bar}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 /** Coloured priority pill */
 function PriorityBadge({ priority }: { priority: string | null | undefined }) {
   const styles: Record<string, string> = {
@@ -887,36 +1089,70 @@ function HorizontalBarChart({
   if (!data.length) {
     return <p className="text-sm text-muted-foreground py-6 text-center">No data</p>;
   }
+
+  // Resolve a colour for each row up-front so we can declare a unique
+  // gradient per bar in <defs>. Recharts' Cell fill is referenced via a
+  // url(#id) so each bar gets a smooth lighten-to-darken gradient instead
+  // of a flat block of colour.
+  const PRIMARY_FALLBACK = "#6366f1"; // indigo-500 — won't go black under any theme
+  function resolveColor(entry: Record<string, unknown>): string {
+    if (colorMap && colorKey) return colorMap[entry[colorKey] as string | number] ?? PRIMARY_FALLBACK;
+    if (colorMap && sortKey)  return colorMap[entry[sortKey]  as string | number] ?? PRIMARY_FALLBACK;
+    if (colorKey)             return PRIORITY_COLORS[entry[colorKey] as string] ?? PRIMARY_FALLBACK;
+    return PRIMARY_FALLBACK;
+  }
+  const colors  = data.map(resolveColor);
+  const max     = Math.max(...data.map((d) => Number(d[dataKey] ?? 0)), 1);
+  // Stable id prefix so two charts on the same page don't fight each other
+  // for the same gradient definitions.
+  const gradId  = (i: number) => `hbar-grad-${labelKey}-${dataKey}-${i}`;
+
   return (
     <ChartContainer config={config} className="h-full w-full min-h-[160px]">
-      <BarChart layout="vertical" data={data} margin={{ left: 0, right: 28, top: 4, bottom: 4 }}>
-        <XAxis type="number" hide />
+      <BarChart
+        layout="vertical"
+        data={data}
+        margin={{ left: 0, right: 36, top: 6, bottom: 6 }}
+        barCategoryGap="22%"
+      >
+        <defs>
+          {colors.map((c, i) => (
+            <linearGradient key={i} id={gradId(i)} x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%"   stopColor={c} stopOpacity={0.65} />
+              <stop offset="100%" stopColor={c} stopOpacity={1} />
+            </linearGradient>
+          ))}
+        </defs>
+        <CartesianGrid horizontal={false} stroke="hsl(var(--border) / 0.4)" strokeDasharray="2 4" />
+        <XAxis type="number" hide domain={[0, max * 1.15]} />
         <YAxis
           type="category"
           dataKey={labelKey}
-          width={110}
+          width={104}
           tickLine={false}
           axisLine={false}
-          tick={{ fontSize: 12 }}
+          tick={{ fontSize: 11, fontWeight: 500, fill: "hsl(var(--muted-foreground))" }}
         />
-        <ChartTooltip content={<ChartTooltipContent />} />
+        <ChartTooltip cursor={{ fill: "hsl(var(--muted) / 0.4)" }} content={<ChartTooltipContent />} />
         <Bar
           dataKey={dataKey}
-          radius={[0, 4, 4, 0]}
+          // Slightly bigger pill radius — looks more "card-like" than a bar
+          radius={[3, 6, 6, 3]}
           style={{ cursor: onBarClick ? "pointer" : undefined }}
           onClick={onBarClick ? (entry) => onBarClick(entry as Record<string, unknown>) : undefined}
         >
-          {data.map((entry, i) => {
-            let fill = "var(--primary)";
-            if (colorMap && colorKey) {
-              fill = colorMap[entry[colorKey] as string | number] ?? "var(--primary)";
-            } else if (colorMap && sortKey) {
-              fill = colorMap[entry[sortKey] as string | number] ?? "var(--primary)";
-            } else if (colorKey) {
-              fill = PRIORITY_COLORS[entry[colorKey] as string] ?? "var(--primary)";
-            }
-            return <Cell key={i} fill={fill} />;
-          })}
+          {data.map((_, i) => (
+            <Cell key={i} fill={`url(#${gradId(i)})`} />
+          ))}
+          {/* Inline count at the end of each bar — saves the user from
+              hovering just to read a number. Tabular-nums keeps multi-
+              digit values aligned across bars. */}
+          <LabelList
+            dataKey={dataKey}
+            position="right"
+            offset={8}
+            style={{ fontSize: 11, fontWeight: 600, fill: "hsl(var(--foreground))", fontVariantNumeric: "tabular-nums" }}
+          />
         </Bar>
       </BarChart>
     </ChartContainer>
@@ -940,24 +1176,125 @@ function StarRow({ rating }: { rating: number }) {
   );
 }
 
+/**
+ * Compact health-status label for CSAT cards. Pairs with `accentColor` so
+ * each card stays visually distinct (gold/green/rose/indigo) while the
+ * sub-line still communicates the underlying trend health.
+ */
+function csatHealthLabel(v: Variant): string {
+  if (v === "good") return "● Healthy";
+  if (v === "warn") return "● Watch";
+  if (v === "bad")  return "● At risk";
+  return "● No data";
+}
+
 function RatingDistribution({ distribution, total }: { distribution: Record<number, number>; total: number }) {
   if (total === 0) return null;
+
+  // Per-rating accent colour — sentiment-aware (5★ green → 1★ red)
+  const TONE: Record<number, { color: string; bg: string }> = {
+    5: { color: "#10b981", bg: "#10b98119" },
+    4: { color: "#22c55e", bg: "#22c55e19" },
+    3: { color: "#f59e0b", bg: "#f59e0b19" },
+    2: { color: "#f97316", bg: "#f9731619" },
+    1: { color: "#ef4444", bg: "#ef444419" },
+  };
+
+  // Weighted average for the summary header
+  const sum = [1, 2, 3, 4, 5].reduce((s, n) => s + n * (distribution[n] ?? 0), 0);
+  const avg = total > 0 ? sum / total : 0;
+  const topBucket = [5, 4, 3, 2, 1].reduce((m, n) => ((distribution[n] ?? 0) > (distribution[m] ?? 0) ? n : m), 5);
+
   return (
-    <div className="space-y-1.5">
-      {[5, 4, 3, 2, 1].map((star) => {
-        const count = distribution[star] ?? 0;
-        const pctVal = Math.round((count / total) * 100);
-        return (
-          <div key={star} className="flex items-center gap-2">
-            <span className="flex items-center gap-0.5 w-14 shrink-0">
-              <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-              <span className="text-xs text-muted-foreground">{star}</span>
+    <div className="space-y-3">
+      {/* Summary header — average rating + visual stars */}
+      <div className="flex items-end gap-3 pb-3 border-b border-border/60">
+        <div>
+          <div className="flex items-baseline gap-1">
+            <span className="text-3xl font-extrabold tabular-nums tracking-tight">
+              {avg.toFixed(1)}
             </span>
-            <Progress value={pctVal} className="h-2 flex-1" />
-            <span className="text-xs text-muted-foreground w-8 text-right">{count}</span>
+            <span className="text-sm font-medium text-muted-foreground">/ 5</span>
           </div>
-        );
-      })}
+          <div className="flex items-center gap-0.5 mt-0.5">
+            {[1, 2, 3, 4, 5].map((s) => {
+              // Filled when avg >= s, half when between s-1 and s
+              const filled = avg >= s;
+              const half = !filled && avg > s - 1 && avg < s;
+              return (
+                <span key={s} className="relative inline-block h-3 w-3">
+                  <Star className="absolute inset-0 h-3 w-3 text-amber-200" />
+                  {(filled || half) && (
+                    <span
+                      className="absolute inset-0 overflow-hidden"
+                      style={{ width: half ? "50%" : "100%" }}
+                    >
+                      <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                    </span>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+        <div className="ml-auto text-right">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">Ratings</p>
+          <p className="text-base font-bold tabular-nums leading-tight">{total.toLocaleString()}</p>
+        </div>
+      </div>
+
+      {/* Distribution bars */}
+      <div className="space-y-1.5">
+        {[5, 4, 3, 2, 1].map((star) => {
+          const count = distribution[star] ?? 0;
+          const pct   = total > 0 ? (count / total) * 100 : 0;
+          const tone  = TONE[star]!;
+          const isTop = star === topBucket && count > 0;
+          return (
+            <div
+              key={star}
+              className={[
+                "group/row flex items-center gap-2.5 px-1.5 py-1 rounded-md transition-colors",
+                isTop ? "" : "hover:bg-muted/40",
+              ].join(" ")}
+            >
+              {/* Star label */}
+              <span className="flex items-center gap-0.5 w-9 shrink-0 text-xs tabular-nums font-medium">
+                <span style={{ color: tone.color }} className="font-semibold">{star}</span>
+                <Star className="h-3 w-3" style={{ color: tone.color, fill: tone.color }} />
+              </span>
+
+              {/* Progress bar with gradient fill */}
+              <div className="relative h-2 flex-1 rounded-full overflow-hidden" style={{ background: tone.bg }}>
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out"
+                  style={{
+                    width: `${pct}%`,
+                    background: `linear-gradient(90deg, ${tone.color}, ${tone.color}cc)`,
+                    boxShadow: count > 0 ? `0 0 8px ${tone.color}40` : undefined,
+                  }}
+                />
+              </div>
+
+              {/* Count + percentage */}
+              <div className="flex items-center gap-1 w-[68px] justify-end shrink-0">
+                <span className="text-[10px] tabular-nums text-muted-foreground/70 w-9 text-right">
+                  {count > 0 ? `${pct.toFixed(0)}%` : "—"}
+                </span>
+                <span
+                  className={[
+                    "text-xs font-bold tabular-nums w-6 text-right",
+                    count === 0 ? "text-muted-foreground/40" : "",
+                  ].join(" ")}
+                  style={count > 0 ? { color: tone.color } : undefined}
+                >
+                  {count}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -982,6 +1319,39 @@ function WidgetPickerDialog({
   isSaving: boolean;
 }) {
   const visibleIds = new Set(widgets.filter(w => w.visible).map(w => w.id));
+
+  // Fetch the global custom-field registry — admins can add a distribution
+  // widget for any visible custom field on any ITSM form. Lazy-loaded when
+  // the dialog opens so the picker stays cheap when nobody's customising.
+  const { data: customFields = [], isLoading: loadingCustomFields } =
+    useQuery<{ id: number; entityType: string; key: string; label: string; fieldType: string }[]>({
+      queryKey: ["custom-fields-all"],
+      queryFn: () =>
+        axios.get<{ fields: { id: number; entityType: string; key: string; label: string; fieldType: string }[] }>(
+          "/api/custom-fields/all",
+        ).then((r) => r.data.fields),
+      enabled: open,
+      staleTime: 60_000,
+    });
+
+  // Group fields by entity type so each entity gets its own subsection in
+  // the picker. Skip field types that can't be meaningfully bucketed
+  // (free-form text, textarea, url, email, number) — the distribution
+  // widget only makes sense for select/multiselect/switch/date.
+  const DIST_FRIENDLY = new Set(["select", "multiselect", "switch"]);
+  const ENTITY_LABELS: Record<string, string> = {
+    ticket:   "Tickets",
+    incident: "Incidents",
+    request:  "Service Requests",
+    change:   "Changes",
+    problem:  "Problems",
+  };
+  const customFieldsByEntity = customFields
+    .filter((f) => DIST_FRIENDLY.has(f.fieldType))
+    .reduce<Record<string, typeof customFields>>((acc, f) => {
+      (acc[f.entityType] ??= []).push(f);
+      return acc;
+    }, {});
 
   // Per-widget animated phase: "adding" / "removing" while the save is in
   // flight, then "added" / "removed" briefly to confirm success. Cleared
@@ -1103,6 +1473,99 @@ function WidgetPickerDialog({
               </div>
             </div>
           ))}
+
+          {/* ── Custom Fields section — one entry per admin-defined field ── */}
+          {(loadingCustomFields || Object.keys(customFieldsByEntity).length > 0) && (
+            <div>
+              <div className="flex items-baseline gap-2 mb-2.5">
+                <h3 className="text-[10px] font-semibold text-fuchsia-600 dark:text-fuchsia-400 uppercase tracking-widest">
+                  Custom Fields
+                </h3>
+                <span className="text-[10px] text-muted-foreground/70">
+                  Distribution widgets for fields you've added to ITSM forms
+                </span>
+              </div>
+
+              {loadingCustomFields ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[...Array(2)].map((_, i) => (
+                    <div key={i} className="h-[68px] rounded-lg border border-dashed border-border/50 bg-muted/20 animate-pulse" />
+                  ))}
+                </div>
+              ) : (
+                Object.entries(customFieldsByEntity).map(([entity, fields]) => (
+                  <div key={entity} className="space-y-2 mb-4 last:mb-0">
+                    <p className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="h-[2px] w-3 rounded-full bg-gradient-to-r from-fuchsia-500/60 to-fuchsia-500/0" />
+                      {ENTITY_LABELS[entity] ?? entity}
+                      <span className="text-muted-foreground/50">· {fields.length}</span>
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {fields.map((f) => {
+                        const id    = `cf:${f.entityType}:${f.key}` as WidgetId;
+                        const isOn  = visibleIds.has(id);
+                        const ph    = phase[id];
+                        const busy  = ph === "adding" || ph === "removing";
+                        const ringClass =
+                          ph === "adding"   || ph === "added"   ? "ring-2 ring-emerald-500/40 bg-emerald-500/5" :
+                          ph === "removing" || ph === "removed" ? "ring-2 ring-amber-500/40  bg-amber-500/5"   : "";
+
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => handleClick(id)}
+                            disabled={busy}
+                            className={[
+                              "relative flex items-start gap-3 p-3 rounded-lg border text-left transition-all",
+                              isOn
+                                ? "border-fuchsia-500/40 bg-fuchsia-500/[0.04] ring-1 ring-fuchsia-500/20"
+                                : "border-border hover:border-fuchsia-500/30 hover:bg-muted/40",
+                              ringClass,
+                              busy && "opacity-90",
+                            ].filter(Boolean).join(" ")}
+                          >
+                            <div className={`mt-0.5 h-6 w-6 rounded-md flex items-center justify-center shrink-0 ${isOn ? "bg-fuchsia-500 text-white" : "bg-muted"}`}>
+                              {busy
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : isOn
+                                  ? <Check className="h-3.5 w-3.5" />
+                                  : <Plus className="h-3.5 w-3.5 text-muted-foreground" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-sm font-medium leading-tight truncate ${isOn ? "text-fuchsia-700 dark:text-fuchsia-300" : "text-foreground"}`}>
+                                {f.label}
+                              </p>
+                              <p className="text-[12px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">
+                                Distribution by {f.label.toLowerCase()} · {f.fieldType}
+                              </p>
+                              <span className="inline-block mt-1 text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">
+                                custom field
+                              </span>
+                            </div>
+                            {ph && (
+                              <span
+                                className={[
+                                  "pointer-events-none absolute right-2 top-2 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider border shadow-sm animate-in fade-in slide-in-from-top-1",
+                                  (ph === "adding"   || ph === "added")   && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+                                  (ph === "removing" || ph === "removed") && "bg-amber-500/15   text-amber-700  dark:text-amber-300  border-amber-500/30",
+                                ].filter(Boolean).join(" ")}
+                              >
+                                {ph === "adding"   && <><Loader2 className="h-2.5 w-2.5 animate-spin" />Adding…</>}
+                                {ph === "added"    && <><Check    className="h-2.5 w-2.5" />Added</>}
+                                {ph === "removing" && <><Loader2 className="h-2.5 w-2.5 animate-spin" />Removing…</>}
+                                {ph === "removed"  && <><Check    className="h-2.5 w-2.5" />Removed</>}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -1347,17 +1810,28 @@ export default function HomePage() {
   //   • Widgets with no saved y → stack below all positioned widgets
   //   This eliminates the old y:999 sentinel which caused ~79,920 px of empty space
   //   when compactType was null (free-form edit mode or gap-preserving view mode).
+  // Layout-default lookup that gracefully handles dynamic `cf:*` widget IDs
+  // — they don't have an entry in WIDGET_LAYOUT_DEFAULTS, so we fall back
+  // to a sensible 4×4 default so they slot into the grid without exploding.
+  const layoutDefaultFor = useCallback(
+    (wid: string) =>
+      isCustomFieldWidget(wid)
+        ? CUSTOM_FIELD_LAYOUT_DEFAULT
+        : (WIDGET_LAYOUT_DEFAULTS as Record<string, typeof CUSTOM_FIELD_LAYOUT_DEFAULT>)[wid] ?? CUSTOM_FIELD_LAYOUT_DEFAULT,
+    [],
+  );
+
   const configLayout = useMemo((): Layout => {
     // Find the bottom edge of all widgets that have an explicit saved y
     const maxSavedBottom = orderedWidgets.reduce((m, w) => {
       if (w.y == null) return m;
-      const def = WIDGET_LAYOUT_DEFAULTS[w.id];
+      const def = layoutDefaultFor(w.id);
       return Math.max(m, w.y + (w.h ?? def.h));
     }, 0);
 
     let nextY = maxSavedBottom;
     return orderedWidgets.map(w => {
-      const def = WIDGET_LAYOUT_DEFAULTS[w.id];
+      const def = layoutDefaultFor(w.id);
       const h = w.h ?? def.h;
       const y = w.y != null ? w.y : (() => { const yy = nextY; nextY += h; return yy; })();
       return {
@@ -1365,7 +1839,7 @@ export default function HomePage() {
         minW: def.minW, minH: def.minH,
       };
     });
-  }, [orderedWidgets]);
+  }, [orderedWidgets, layoutDefaultFor]);
 
   const gridLayout = draftLayout ?? configLayout;
 
@@ -1786,7 +2260,7 @@ export default function HomePage() {
 
   /** Show a hidden widget by making it visible and appending to the layout */
   function showWidget(id: WidgetId) {
-    const def  = WIDGET_LAYOUT_DEFAULTS[id];
+    const def  = layoutDefaultFor(id);
     const base = draftLayout ?? configLayout;
     // Use reduce (not spread) to find the real bottom — avoids issues with stale large y values
     const maxY = base.reduce((m, l) => Math.max(m, l.y + l.h), 0);
@@ -1843,7 +2317,13 @@ export default function HomePage() {
   // Each widget is a named section rendered as a closure over the query data.
 
   function renderWidget(id: WidgetId): React.ReactNode {
-    switch (id) {
+    // Custom-field widgets (cf:<entityType>:<fieldKey>) are dynamic — they
+    // can't live in a switch because the IDs aren't known at compile time.
+    // Detect first and short-circuit to a generic distribution renderer.
+    if (id.startsWith("cf:")) {
+      return <CustomFieldWidget key={id} id={id} fromTo={fromToParams} preset={preset} />;
+    }
+    switch (id as Exclude<WidgetId, `cf:${string}:${string}`>) {
       // ── Volume ──────────────────────────────────────────────────────────────
       case "volume":
         return (
@@ -1894,46 +2374,124 @@ export default function HomePage() {
       }
 
       // ── Tickets Per Day ──────────────────────────────────────────────────────
-      case "tickets_per_day":
+      case "tickets_per_day": {
+        const series = volume?.data ?? [];
+        const total  = series.reduce((s, d) => s + d.tickets, 0);
+        const peak   = series.reduce((m, d) => Math.max(m, d.tickets), 0);
+        const nonzero = series.filter((d) => d.tickets > 0).length;
+        const avg    = nonzero > 0 ? total / nonzero : 0;
+        const peakDay = series.find((d) => d.tickets === peak);
         return (
-          <Card key="tickets_per_day" className="h-full flex flex-col">
+          <Card key="tickets_per_day" className="h-full flex flex-col overflow-hidden">
             <WidgetHeader title="Tickets Per Day" description={PRESET_LABELS[preset]} icon={BarChart2} iconColor="text-primary" />
-            <CardContent className="flex-1 pb-4">
+            <CardContent className="flex-1 pb-4 pt-0 flex flex-col gap-3 min-h-0">
               {volumeError ? (
                 <ErrorAlert error={volumeError} fallback="Failed to load chart data" />
               ) : volumeLoading ? (
                 <Skeleton className="h-full w-full min-h-[180px]" />
               ) : (
-                <ChartContainer config={volumeChartConfig} className="h-full w-full min-h-[180px]">
-                  <BarChart accessibilityLayer data={volume?.data}>
-                    <CartesianGrid vertical={false} />
-                    <XAxis
-                      dataKey="date"
-                      tickLine={false}
-                      axisLine={false}
-                      tickMargin={8}
-                      tickFormatter={(v: string) => formatDate(v, period)}
-                      interval="preserveStartEnd"
-                      minTickGap={40}
-                    />
-                    <ChartTooltip
-                      content={
-                        <ChartTooltipContent
-                          labelFormatter={(v: string) =>
-                            new Date(v + "T00:00:00").toLocaleDateString("en-US", {
-                              weekday: "long", month: "short", day: "numeric", year: "numeric",
-                            })
-                          }
+                <>
+                  {/* Compact KPI strip */}
+                  <div className="grid grid-cols-3 gap-2 shrink-0">
+                    <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-1">
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                        Total
+                      </p>
+                      <p className="text-lg font-bold tabular-nums leading-tight mt-0.5">{total.toLocaleString()}</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-1">
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        Avg / day
+                      </p>
+                      <p className="text-lg font-bold tabular-nums leading-tight mt-0.5">{avg ? avg.toFixed(1) : "—"}</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-1">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        Peak
+                      </p>
+                      <p className="text-lg font-bold tabular-nums leading-tight mt-0.5">
+                        {peak || "—"}
+                        {peakDay && (
+                          <span className="ml-1 text-[10px] font-medium text-muted-foreground">
+                            · {formatDate(peakDay.date, period)}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Chart */}
+                  <ChartContainer config={volumeChartConfig} className="h-full w-full min-h-[160px] flex-1">
+                    <BarChart accessibilityLayer data={series} margin={{ top: 12, right: 8, left: -8, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="bar-tickets-grad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%"  stopColor="var(--color-tickets)" stopOpacity={1}   />
+                          <stop offset="100%" stopColor="var(--color-tickets)" stopOpacity={0.55} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid vertical={false} strokeOpacity={0.35} strokeDasharray="3 4" />
+                      <XAxis
+                        dataKey="date"
+                        tickLine={false}
+                        axisLine={false}
+                        tickMargin={8}
+                        tickFormatter={(v: string) => formatDate(v, period)}
+                        interval="preserveStartEnd"
+                        minTickGap={40}
+                        tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                      />
+                      <ChartTooltip
+                        cursor={{ fill: "var(--color-tickets)", fillOpacity: 0.06, radius: 4 }}
+                        content={
+                          <ChartTooltipContent
+                            labelFormatter={(v: string) =>
+                              new Date(v + "T00:00:00").toLocaleDateString("en-US", {
+                                weekday: "long", month: "short", day: "numeric", year: "numeric",
+                              })
+                            }
+                          />
+                        }
+                      />
+                      {/* Average reference line */}
+                      {avg > 0 && (
+                        <ReferenceLine
+                          y={avg}
+                          stroke="hsl(var(--muted-foreground))"
+                          strokeDasharray="3 3"
+                          strokeOpacity={0.4}
+                          label={{
+                            value: `avg ${avg.toFixed(1)}`,
+                            position: "right",
+                            fill: "hsl(var(--muted-foreground))",
+                            fontSize: 9,
+                          }}
                         />
-                      }
-                    />
-                    <Bar dataKey="tickets" fill="var(--color-tickets)" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ChartContainer>
+                      )}
+                      <Bar
+                        dataKey="tickets"
+                        fill="url(#bar-tickets-grad)"
+                        radius={[6, 6, 2, 2]}
+                        maxBarSize={28}
+                      >
+                        {series.map((d, i) => (
+                          <Cell
+                            key={i}
+                            fill={d.tickets === peak && peak > 0 ? "var(--color-tickets)" : "url(#bar-tickets-grad)"}
+                            fillOpacity={d.tickets === 0 ? 0.18 : 1}
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ChartContainer>
+                </>
               )}
             </CardContent>
           </Card>
         );
+      }
 
       // ── Breakdowns ───────────────────────────────────────────────────────────
       case "breakdowns":
@@ -1976,54 +2534,122 @@ export default function HomePage() {
         );
 
       // ── By Assignee ──────────────────────────────────────────────────────────
-      case "by_assignee":
+      case "by_assignee": {
+        const list   = breakdowns?.byAssignee ?? [];
+        const maxTot = list.reduce((m, a) => Math.max(m, a.total), 0) || 1;
         return (
           <Card key="by_assignee" className="h-full flex flex-col">
             <WidgetHeader title="By Assignee" description={`Ticket load per agent · ${PRESET_LABELS[preset]}`} icon={Users} iconColor="text-indigo-500" />
-            <CardContent className="flex-1 overflow-auto pb-2">
+            <CardContent className="flex-1 overflow-auto pb-3 pt-0">
               {breakdownsLoading ? (
-                <div className="space-y-2">
-                  {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}
+                <div className="space-y-2.5">
+                  {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
                 </div>
-              ) : !breakdowns?.byAssignee.length ? (
+              ) : !list.length ? (
                 <EmptyState icon={Users} title="No assigned tickets" description="Assigned ticket data will appear here" />
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Agent</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                      <TableHead className="text-right">Open</TableHead>
-                      <TableHead className="text-right">Resolved</TableHead>
-                      <TableHead className="w-[140px]">Open %</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {breakdowns.byAssignee.map((a) => {
-                      const openPct = a.total > 0 ? Math.round((a.open / a.total) * 100) : 0;
-                      return (
-                        <TableRow key={a.agentId}>
-                          <TableCell className="font-medium">{a.agentName}</TableCell>
-                          <TableCell className="text-right">{a.total}</TableCell>
-                          <TableCell className="text-right">{a.open}</TableCell>
-                          <TableCell className="text-right">{a.resolved}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Progress value={openPct} className="h-1.5 flex-1" />
-                              <span className="text-xs text-muted-foreground w-8 text-right">
+                <ul className="divide-y divide-border/60">
+                  {list.map((a, idx) => {
+                    const openPct  = a.total > 0 ? Math.round((a.open / a.total) * 100) : 0;
+                    const loadPct  = (a.total / maxTot) * 100;
+                    const initials = a.agentName
+                      .split(/\s+/)
+                      .map((p) => p[0])
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .join("")
+                      .toUpperCase();
+                    // Stable colour from the agent's id so the avatar doesn't change between renders
+                    const palette  = ["#6366f1","#8b5cf6","#06b6d4","#10b981","#f59e0b","#ef4444","#ec4899","#3b82f6"];
+                    const seed     = String(a.agentId).split("").reduce((s, c) => s + c.charCodeAt(0), 0);
+                    const color    = palette[seed % palette.length] ?? palette[0]!;
+                    return (
+                      <li
+                        key={a.agentId}
+                        className="group flex items-center gap-3 py-2.5 px-1 rounded-lg transition-colors hover:bg-muted/40"
+                      >
+                        {/* Rank + avatar */}
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <span className="text-[10px] font-semibold tabular-nums text-muted-foreground/60 w-4 text-right shrink-0">
+                            {idx + 1}
+                          </span>
+                          <div
+                            className="h-9 w-9 rounded-full flex items-center justify-center text-[11px] font-semibold tracking-wide shrink-0 ring-2 ring-background"
+                            style={{
+                              background: `linear-gradient(135deg, ${color}, ${color}cc)`,
+                              color: "white",
+                              boxShadow: `0 0 0 2px ${color}1a`,
+                            }}
+                            title={a.agentName}
+                          >
+                            {initials || "?"}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium leading-tight truncate">{a.agentName}</p>
+                            {/* Mini split bar: open (color) + resolved (muted) */}
+                            <div className="mt-1.5 flex items-center gap-2">
+                              <div className="relative h-1.5 flex-1 rounded-full bg-muted/60 overflow-hidden">
+                                {/* Resolved portion (cool muted) */}
+                                <div
+                                  className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
+                                  style={{
+                                    width: `${loadPct}%`,
+                                    background: `linear-gradient(90deg, ${color}55, ${color}22)`,
+                                  }}
+                                />
+                                {/* Open portion (vivid, anchored left) */}
+                                <div
+                                  className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
+                                  style={{
+                                    width: `${(a.open / maxTot) * 100}%`,
+                                    background: `linear-gradient(90deg, ${color}, ${color}aa)`,
+                                  }}
+                                />
+                              </div>
+                              <span className="text-[10px] tabular-nums text-muted-foreground/70 w-9 text-right shrink-0">
                                 {a.total > 0 ? `${openPct}%` : "—"}
                               </span>
                             </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                          </div>
+                        </div>
+
+                        {/* Counts */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold tabular-nums px-2 py-0.5 rounded-md"
+                            title="Open"
+                            style={{
+                              color,
+                              background: `${color}14`,
+                              border: `1px solid ${color}30`,
+                            }}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+                            {a.open}
+                          </span>
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] font-medium tabular-nums px-2 py-0.5 rounded-md text-muted-foreground bg-muted/60 border border-border/60"
+                            title="Resolved"
+                          >
+                            <CheckCircle2 className="h-2.5 w-2.5" />
+                            {a.resolved}
+                          </span>
+                          <span
+                            className="text-sm font-bold tabular-nums w-7 text-right"
+                            title="Total"
+                          >
+                            {a.total}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
             </CardContent>
           </Card>
         );
+      }
 
       // ── CSAT ─────────────────────────────────────────────────────────────────
       case "csat":
@@ -2031,10 +2657,42 @@ export default function HomePage() {
           <section key="csat" className="space-y-4">
             <SectionHeading>Customer Satisfaction</SectionHeading>
             <div className={`grid grid-cols-2 lg:grid-cols-4 ${density === "compact" ? "gap-2" : "gap-4"}`}>
-              <MetricCard title="Avg Rating"    value={csat?.avgRating != null ? `${csat.avgRating} / 5` : "—"} icon={Star}      loading={csatLoading} variant={csatAvgVariant}      hint="Average CSAT score across all submitted ratings." />
-              <MetricCard title="Positive Rate" value={pct(csat?.positiveRate)}                                icon={ThumbsUp}   loading={csatLoading} variant={csatPositiveVariant} hint="Percentage of ratings that were 4★ or 5★." />
-              <MetricCard title="Negative Rate" value={pct(csat?.negativeRate)}                                icon={ThumbsDown} loading={csatLoading} variant={csatNegativeVariant} hint="Percentage of ratings that were 1★ or 2★." />
-              <MetricCard title="Response Rate" value={csat != null ? `${csat.responseRate}%` : "—"}          icon={BarChart2}  loading={csatLoading} hint="Percentage of resolved/closed tickets that received a rating." />
+              <MetricCard
+                title="Avg Rating"
+                value={csat?.avgRating != null ? `${csat.avgRating} / 5` : "—"}
+                icon={Star}
+                loading={csatLoading}
+                accentColor="#f59e0b"
+                hint="Average CSAT score across all submitted ratings."
+                sub={csat ? csatHealthLabel(csatAvgVariant) : undefined}
+              />
+              <MetricCard
+                title="Positive Rate"
+                value={pct(csat?.positiveRate)}
+                icon={ThumbsUp}
+                loading={csatLoading}
+                accentColor="#10b981"
+                hint="Percentage of ratings that were 4★ or 5★."
+                sub={csat ? csatHealthLabel(csatPositiveVariant) : undefined}
+              />
+              <MetricCard
+                title="Negative Rate"
+                value={pct(csat?.negativeRate)}
+                icon={ThumbsDown}
+                loading={csatLoading}
+                accentColor="#f43f5e"
+                hint="Percentage of ratings that were 1★ or 2★. Lower is better."
+                sub={csat ? csatHealthLabel(csatNegativeVariant) : undefined}
+              />
+              <MetricCard
+                title="Response Rate"
+                value={csat != null ? `${csat.responseRate}%` : "—"}
+                icon={BarChart2}
+                loading={csatLoading}
+                accentColor="#6366f1"
+                hint="Percentage of resolved/closed tickets that received a rating."
+                sub={csat?.totalRatings != null ? `${csat.totalRatings.toLocaleString()} rating${csat.totalRatings === 1 ? "" : "s"} collected` : undefined}
+              />
             </div>
             <div className={`grid grid-cols-1 lg:grid-cols-2 ${density === "compact" ? "gap-2" : "gap-4"}`}>
               <Card>
@@ -2575,7 +3233,20 @@ export default function HomePage() {
         );
 
       // ── Agent Leaderboard ─────────────────────────────────────────────────────
-      case "agent_leaderboard":
+      case "agent_leaderboard": {
+        // Stable colour from agent id so each row's avatar stays consistent
+        // between renders. Using a small palette keeps the visual chrome quiet
+        // — the leaderboard is about ranks, not rainbow chaos.
+        const avatarPalette = [
+          "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+          "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+          "bg-teal-500/15 text-teal-700 dark:text-teal-300",
+          "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+          "bg-blue-500/15 text-blue-700 dark:text-blue-300",
+          "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
+          "bg-purple-500/15 text-purple-700 dark:text-purple-300",
+          "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+        ];
         return (
           <Card key="agent_leaderboard" className="h-full flex flex-col">
             <WidgetHeader
@@ -2587,45 +3258,121 @@ export default function HomePage() {
             <CardContent className="flex-1 pb-4">
               {leaderboardLoading ? (
                 <div className="space-y-2.5">
-                  {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+                  {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
                 </div>
               ) : !agentLeaderboard?.agents.length ? (
                 <EmptyState icon={Award} title="No agent data" description="Leaderboard appears once tickets are assigned and resolved" />
               ) : (
-                <div className="space-y-2">
-                  {agentLeaderboard.agents.map((agent, i) => (
-                    <div key={agent.agentId} className="flex items-center gap-2.5">
-                      <span className={`text-xs font-bold w-5 text-right shrink-0 ${i === 0 ? "text-amber-500" : i === 1 ? "text-slate-400" : i === 2 ? "text-orange-400" : "text-muted-foreground"}`}>
-                        {i + 1}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-[13px] font-medium truncate">{agent.agentName}</span>
-                          <span className="text-sm font-bold tabular-nums ml-2 shrink-0">{agent.resolved}</span>
-                        </div>
-                        <Progress value={(agent.resolved / maxResolved) * 100} className="h-1.5" />
-                      </div>
-                      {agent.slaCompliancePct != null && (
-                        <span className={`text-[11px] tabular-nums w-9 text-right shrink-0 font-medium ${
-                          agent.slaCompliancePct >= 90 ? "text-green-600 dark:text-green-400" :
-                          agent.slaCompliancePct >= 70 ? "text-amber-500" : "text-destructive"
-                        }`}>
-                          {agent.slaCompliancePct}%
+                <div className="space-y-1.5">
+                  {agentLeaderboard.agents.map((agent, i) => {
+                    const initials = agent.agentName
+                      .split(/\s+/).map((p) => p[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
+                    const seed     = String(agent.agentId).split("").reduce((s, c) => s + c.charCodeAt(0), 0);
+                    const tone     = avatarPalette[seed % avatarPalette.length]!;
+                    const pct      = (agent.resolved / Math.max(maxResolved, 1)) * 100;
+
+                    // Rank treatment — top three get a podium look (gold/silver/bronze).
+                    const rankStyle =
+                      i === 0 ? { bg: "bg-gradient-to-br from-amber-400 to-amber-600 text-white shadow-md shadow-amber-500/30", icon: Trophy,  iconCls: "h-3 w-3" } :
+                      i === 1 ? { bg: "bg-gradient-to-br from-slate-300 to-slate-500 text-white shadow-md shadow-slate-400/30", icon: Medal,   iconCls: "h-3 w-3" } :
+                      i === 2 ? { bg: "bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-md shadow-orange-500/30", icon: Medal, iconCls: "h-3 w-3" } :
+                              { bg: "bg-muted/60 text-muted-foreground border border-border/60",                                   icon: null,  iconCls: "" };
+
+                    // SLA chip tone family
+                    const slaTone =
+                      agent.slaCompliancePct == null               ? null :
+                      agent.slaCompliancePct >= 90                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/25" :
+                      agent.slaCompliancePct >= 70                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/25" :
+                                                                      "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/25";
+
+                    return (
+                      <div
+                        key={agent.agentId}
+                        className={[
+                          "relative flex items-center gap-3 rounded-lg px-2.5 py-2 transition-colors",
+                          i < 3 ? "bg-muted/30 hover:bg-muted/50" : "hover:bg-muted/40",
+                        ].join(" ")}
+                      >
+                        {/* Rank badge — coin shape for podium, neutral pill otherwise */}
+                        <span
+                          className={[
+                            "flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold tabular-nums shrink-0",
+                            rankStyle.bg,
+                          ].join(" ")}
+                        >
+                          {rankStyle.icon
+                            ? <rankStyle.icon className={rankStyle.iconCls} />
+                            : i + 1
+                          }
                         </span>
-                      )}
-                    </div>
-                  ))}
-                  <p className="text-[10px] text-muted-foreground/60 pt-1 text-right">
-                    bar = resolved · right = SLA compliance
-                  </p>
+
+                        {/* Avatar */}
+                        <span className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold shrink-0 ${tone}`}>
+                          {initials || "?"}
+                        </span>
+
+                        {/* Name + progress */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="text-[13px] font-medium truncate">{agent.agentName}</span>
+                            <span className="text-sm font-bold tabular-nums shrink-0 text-foreground">
+                              {agent.resolved}
+                            </span>
+                          </div>
+                          {/* Rich progress bar with rank-tinted fill */}
+                          <div className="relative h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                            <div
+                              className={[
+                                "absolute inset-y-0 left-0 rounded-full transition-all",
+                                i === 0 ? "bg-gradient-to-r from-amber-400 to-amber-500" :
+                                i === 1 ? "bg-gradient-to-r from-slate-400 to-slate-500" :
+                                i === 2 ? "bg-gradient-to-r from-orange-400 to-orange-500" :
+                                          "bg-gradient-to-r from-primary/60 to-primary",
+                              ].join(" ")}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* SLA compliance chip */}
+                        {slaTone && (
+                          <span
+                            className={`inline-flex items-center justify-center min-w-[42px] h-5 rounded-full border px-1.5 text-[10px] font-bold tabular-nums shrink-0 ${slaTone}`}
+                            title={`SLA compliance · ${agent.slaCompliancePct}%`}
+                          >
+                            {agent.slaCompliancePct}%
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* Legend — no top border so the row continues the same
+                      visual rhythm as the agents above it, keeping the widget
+                      uniform from top to bottom. */}
+                  <div className="flex items-center justify-end gap-3 pt-2 text-[10px] text-muted-foreground/70">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="h-1.5 w-3 rounded-full bg-gradient-to-r from-primary/60 to-primary" />
+                      tickets resolved
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <span className="h-3 w-3 rounded-full border border-emerald-500/40 bg-emerald-500/15" />
+                      SLA compliance
+                    </span>
+                  </div>
                 </div>
               )}
             </CardContent>
           </Card>
         );
+      }
 
       // ── Backlog Trend ─────────────────────────────────────────────────────────
-      case "backlog_trend":
+      case "backlog_trend": {
+        const totalOpened   = backlogTrend?.data.reduce((s, d) => s + d.opened, 0) ?? 0;
+        const totalResolved = backlogTrend?.data.reduce((s, d) => s + d.closed, 0) ?? 0;
+        const netChange     = totalOpened - totalResolved;
+        const netImproving  = netChange < 0;   // resolving faster than opening = good
+        const netSteady     = netChange === 0;
         return (
           <Card key="backlog_trend" className="h-full flex flex-col">
             <WidgetHeader
@@ -2636,62 +3383,129 @@ export default function HomePage() {
             />
             <CardContent className="flex-1 pb-4">
               {backlogLoading ? (
-                <Skeleton className="h-full w-full min-h-[180px]" />
+                <div className="space-y-3">
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-full w-full min-h-[180px]" />
+                </div>
               ) : !backlogTrend?.data.length ? (
                 <EmptyState icon={Activity} title="No data" description="Backlog trend will appear once tickets are created" />
               ) : (
-                <ChartContainer config={backlogChartConfig} className="h-full w-full min-h-[180px]">
-                  <AreaChart data={backlogTrend.data} margin={{ left: 0, right: 8, top: 4, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="gradOpened" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor="hsl(var(--primary))" stopOpacity={0.25} />
-                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="gradClosed" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.25} />
-                        <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid vertical={false} />
-                    <XAxis
-                      dataKey="date"
-                      tickLine={false}
-                      axisLine={false}
-                      tickFormatter={(v: string) => formatDate(v, period)}
-                      interval="preserveStartEnd"
-                      minTickGap={40}
-                      tick={{ fontSize: 11 }}
-                    />
-                    <YAxis tickLine={false} axisLine={false} width={28} tick={{ fontSize: 11 }} />
-                    <ChartTooltip
-                      content={
-                        <ChartTooltipContent
-                          labelFormatter={(v: string) =>
-                            new Date(v + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-                          }
-                        />
-                      }
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="opened"
-                      stroke="hsl(var(--primary))"
-                      strokeWidth={2}
-                      fill="url(#gradOpened)"
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="closed"
-                      stroke="#22c55e"
-                      strokeWidth={2}
-                      fill="url(#gradClosed)"
-                    />
-                  </AreaChart>
-                </ChartContainer>
+                <div className="flex flex-col h-full gap-3">
+
+                  {/* ── Stat strip — period totals + net direction ── */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-lg border border-foreground/15 bg-foreground/[0.04] px-3 py-2">
+                      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
+                        <span className="h-1.5 w-1.5 rounded-full bg-foreground" />
+                        Opened
+                      </div>
+                      <p className="text-xl font-bold tabular-nums tracking-tight mt-0.5 text-foreground">
+                        {totalOpened}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2">
+                      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        Resolved
+                      </div>
+                      <p className="text-xl font-bold tabular-nums tracking-tight mt-0.5 text-emerald-600 dark:text-emerald-400">
+                        {totalResolved}
+                      </p>
+                    </div>
+                    <div
+                      className={[
+                        "rounded-lg border px-3 py-2",
+                        netSteady    ? "border-border bg-muted/40" :
+                        netImproving ? "border-emerald-500/25 bg-emerald-500/[0.06]" :
+                                        "border-amber-500/30 bg-amber-500/[0.06]",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
+                        {netSteady
+                          ? <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+                          : netImproving
+                            ? <TrendingDown className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                            : <TrendingUp   className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                        }
+                        Net
+                      </div>
+                      <p
+                        className={[
+                          "text-xl font-bold tabular-nums tracking-tight mt-0.5",
+                          netSteady    ? "text-foreground" :
+                          netImproving ? "text-emerald-600 dark:text-emerald-400" :
+                                          "text-amber-600 dark:text-amber-400",
+                        ].join(" ")}
+                      >
+                        {netChange > 0 ? "+" : ""}{netChange}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* ── Chart ── */}
+                  <ChartContainer config={backlogChartConfig} className="flex-1 w-full min-h-[160px]">
+                    <AreaChart data={backlogTrend.data} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                      <defs>
+                        {/* Opened uses the foreground colour token — black in
+                            light mode, near-white in dark mode — so the line
+                            stays readable without picking up the palette tint. */}
+                        <linearGradient id="gradOpened" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%"  stopColor="hsl(var(--foreground))" stopOpacity={0.20} />
+                          <stop offset="95%" stopColor="hsl(var(--foreground))" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="gradClosed" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.32} />
+                          <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="currentColor" className="text-muted-foreground/15" />
+                      <XAxis
+                        dataKey="date"
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(v: string) => formatDate(v, period)}
+                        interval="preserveStartEnd"
+                        minTickGap={40}
+                        tick={{ fontSize: 11 }}
+                      />
+                      <YAxis tickLine={false} axisLine={false} width={28} tick={{ fontSize: 11 }} allowDecimals={false} />
+                      <ChartTooltip
+                        cursor={{ stroke: "hsl(var(--foreground))", strokeOpacity: 0.25, strokeDasharray: "3 3" }}
+                        content={
+                          <ChartTooltipContent
+                            indicator="dot"
+                            labelFormatter={(v: string) =>
+                              new Date(v + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+                            }
+                          />
+                        }
+                      />
+                      {/* Resolved drawn first so Opened sits on top — opened is
+                          the more "actionable" signal for triage at a glance. */}
+                      <Area
+                        type="monotone"
+                        dataKey="closed"
+                        stroke="#22c55e"
+                        strokeWidth={2}
+                        fill="url(#gradClosed)"
+                        activeDot={{ r: 4, strokeWidth: 2, fill: "hsl(var(--background))", stroke: "#22c55e" }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="opened"
+                        stroke="hsl(var(--foreground))"
+                        strokeWidth={2}
+                        fill="url(#gradOpened)"
+                        activeDot={{ r: 4, strokeWidth: 2, fill: "hsl(var(--background))", stroke: "hsl(var(--foreground))" }}
+                      />
+                    </AreaChart>
+                  </ChartContainer>
+                </div>
               )}
             </CardContent>
           </Card>
         );
+      }
 
       // ── First Contact Resolution ──────────────────────────────────────────────
       case "fcr_rate": {
@@ -3093,20 +3907,111 @@ export default function HomePage() {
         );
 
       // ── Atomic breakdown charts ──────────────────────────────────────────
-      case "breakdown_category":
+      case "breakdown_category": {
+        const cats     = breakdowns?.byCategory ?? [];
+        const grandTot = cats.reduce((s, c) => s + c.total, 0);
+        const maxTot   = cats.reduce((m, c) => Math.max(m, c.total), 0) || 1;
+        const top      = cats.length ? cats.reduce((b, c) => (c.total > b.total ? c : b), cats[0]!) : null;
+        // Stable per-category accent — gives each bar its own colour identity
+        // without the eye-watering rainbow effect of randomised palettes.
+        const catTones = [
+          { bar: "bg-gradient-to-r from-violet-400  to-violet-600",  dot: "bg-violet-500"  },
+          { bar: "bg-gradient-to-r from-rose-400    to-rose-600",    dot: "bg-rose-500"    },
+          { bar: "bg-gradient-to-r from-teal-400    to-teal-600",    dot: "bg-teal-500"    },
+          { bar: "bg-gradient-to-r from-amber-400   to-amber-600",   dot: "bg-amber-500"   },
+          { bar: "bg-gradient-to-r from-blue-400    to-blue-600",    dot: "bg-blue-500"    },
+          { bar: "bg-gradient-to-r from-indigo-400  to-indigo-600",  dot: "bg-indigo-500"  },
+          { bar: "bg-gradient-to-r from-emerald-400 to-emerald-600", dot: "bg-emerald-500" },
+          { bar: "bg-gradient-to-r from-fuchsia-400 to-fuchsia-600", dot: "bg-fuchsia-500" },
+        ];
+        const toneFor = (label: string) => {
+          const seed = label.split("").reduce((s, c) => s + c.charCodeAt(0), 0);
+          return catTones[seed % catTones.length]!;
+        };
         return (
           <Card key="breakdown_category" className="h-full flex flex-col">
-            <CardHeader>
-              <CardTitle className="text-sm">By Category</CardTitle>
-              <CardDescription>Ticket distribution · {PRESET_LABELS[preset]} · click a bar to filter</CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1">
-              {breakdownsLoading ? <Skeleton className="h-full w-full min-h-[160px]" /> : (
-                <HorizontalBarChart data={breakdowns?.byCategory ?? []} dataKey="total" labelKey="label" config={barChartConfig} onBarClick={handleCategoryBarClick} />
+            <WidgetHeader
+              title="By Category"
+              description={`Ticket distribution · ${PRESET_LABELS[preset]} · click to filter`}
+              icon={Tag}
+              iconColor="text-fuchsia-500"
+            />
+            <CardContent className="flex-1 pb-4">
+              {breakdownsLoading ? (
+                <div className="space-y-2.5">
+                  <Skeleton className="h-14 w-full rounded-lg" />
+                  {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-9 w-full rounded-lg" />)}
+                </div>
+              ) : !cats.length ? (
+                <EmptyState icon={Tag} title="No categories" description="Category data appears once tickets are created." />
+              ) : (
+                <div className="flex flex-col h-full gap-3">
+
+                  {/* ── Top-category callout strip ── */}
+                  {top && (
+                    <div className="rounded-lg border border-fuchsia-500/25 bg-gradient-to-br from-fuchsia-500/[0.08] via-fuchsia-500/[0.04] to-transparent px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
+                          Largest bucket
+                        </span>
+                        <span className="ml-auto text-[10px] font-semibold tabular-nums text-muted-foreground">
+                          {grandTot} total
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-2 mt-0.5">
+                        <span className="text-sm font-bold tracking-tight truncate">{top.label}</span>
+                        <span className="text-xl font-bold tabular-nums tracking-tight text-fuchsia-600 dark:text-fuchsia-400 shrink-0">
+                          {top.total}
+                          <span className="text-[11px] font-medium text-muted-foreground ml-1">
+                            ({grandTot > 0 ? Math.round((top.total / grandTot) * 100) : 0}%)
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Bar list ── */}
+                  <ul className="space-y-1.5 flex-1 min-h-0 overflow-y-auto pr-1">
+                    {cats.map((c) => {
+                      const tone = toneFor(c.label);
+                      const pct   = (c.total / maxTot) * 100;
+                      const share = grandTot > 0 ? Math.round((c.total / grandTot) * 100) : 0;
+                      return (
+                        <li key={c.label}>
+                          <button
+                            type="button"
+                            onClick={() => handleCategoryBarClick({ category: c.category, label: c.label })}
+                            className="group w-full text-left rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50 focus:bg-muted/60 focus:outline-none"
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className={`h-2 w-2 rounded-full shrink-0 ${tone.dot}`} />
+                              <span className="text-[12.5px] font-medium truncate flex-1 group-hover:text-foreground">
+                                {c.label}
+                              </span>
+                              <span className="text-[10px] tabular-nums text-muted-foreground shrink-0">
+                                {share}%
+                              </span>
+                              <span className="text-sm font-bold tabular-nums shrink-0 w-7 text-right">
+                                {c.total}
+                              </span>
+                            </div>
+                            <div className="relative h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={`absolute inset-y-0 left-0 rounded-full transition-all ${tone.bar}`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
               )}
             </CardContent>
           </Card>
         );
+      }
       case "breakdown_priority":
         return (
           <Card key="breakdown_priority" className="h-full flex flex-col">
@@ -3139,19 +4044,51 @@ export default function HomePage() {
       // ── Atomic CSAT tiles & cards ────────────────────────────────────────
       case "csat_avg_rating":
         return (
-          <MetricCard key="csat_avg_rating" fillCard title="Avg Rating"    value={csat?.avgRating != null ? `${csat.avgRating} / 5` : "—"} icon={Star}      loading={csatLoading} variant={csatAvgVariant}      hint="Average CSAT score across all submitted ratings." />
+          <MetricCard
+            key="csat_avg_rating" fillCard
+            title="Avg Rating"
+            value={csat?.avgRating != null ? `${csat.avgRating} / 5` : "—"}
+            icon={Star} loading={csatLoading}
+            accentColor="#f59e0b"
+            sub={csat ? csatHealthLabel(csatAvgVariant) : undefined}
+            hint="Average CSAT score across all submitted ratings."
+          />
         );
       case "csat_positive_rate":
         return (
-          <MetricCard key="csat_positive_rate" fillCard title="Positive Rate" value={pct(csat?.positiveRate)} icon={ThumbsUp}   loading={csatLoading} variant={csatPositiveVariant} hint="Percentage of ratings that were 4★ or 5★." />
+          <MetricCard
+            key="csat_positive_rate" fillCard
+            title="Positive Rate"
+            value={pct(csat?.positiveRate)}
+            icon={ThumbsUp} loading={csatLoading}
+            accentColor="#10b981"
+            sub={csat ? csatHealthLabel(csatPositiveVariant) : undefined}
+            hint="Percentage of ratings that were 4★ or 5★."
+          />
         );
       case "csat_negative_rate":
         return (
-          <MetricCard key="csat_negative_rate" fillCard title="Negative Rate" value={pct(csat?.negativeRate)} icon={ThumbsDown} loading={csatLoading} variant={csatNegativeVariant} hint="Percentage of ratings that were 1★ or 2★." />
+          <MetricCard
+            key="csat_negative_rate" fillCard
+            title="Negative Rate"
+            value={pct(csat?.negativeRate)}
+            icon={ThumbsDown} loading={csatLoading}
+            accentColor="#f43f5e"
+            sub={csat ? csatHealthLabel(csatNegativeVariant) : undefined}
+            hint="Percentage of ratings that were 1★ or 2★. Lower is better."
+          />
         );
       case "csat_response_rate":
         return (
-          <MetricCard key="csat_response_rate" fillCard title="Response Rate" value={csat != null ? `${csat.responseRate}%` : "—"} icon={BarChart2} loading={csatLoading} hint="Percentage of resolved/closed tickets that received a rating." />
+          <MetricCard
+            key="csat_response_rate" fillCard
+            title="Response Rate"
+            value={csat != null ? `${csat.responseRate}%` : "—"}
+            icon={BarChart2} loading={csatLoading}
+            accentColor="#6366f1"
+            sub={csat?.totalRatings != null ? `${csat.totalRatings.toLocaleString()} rating${csat.totalRatings === 1 ? "" : "s"} collected` : undefined}
+            hint="Percentage of resolved/closed tickets that received a rating."
+          />
         );
       case "csat_distribution":
         return (
@@ -3489,7 +4426,7 @@ export default function HomePage() {
           >
             {orderedWidgets.map(w => {
               const currentItem = gridLayout.find(l => l.i === w.id);
-              const currentW    = currentItem?.w ?? (w.w ?? WIDGET_LAYOUT_DEFAULTS[w.id].w);
+              const currentW    = currentItem?.w ?? (w.w ?? layoutDefaultFor(w.id).w);
               const appearance  = (w as any).appearance as WidgetAppearance | undefined;
               return (
                 <div key={w.id}>

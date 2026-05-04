@@ -178,6 +178,118 @@ The Support Team`,
   <p style="color:#6b7280;font-size:13px;margin-top:32px">Best regards,<br>The Support Team</p>
 </div>`,
   },
+  {
+    event: "saas.renewal_soon",
+    title: "SaaS Subscription Renewal Upcoming",
+    emailSubject: "Renewal upcoming: {{entity.title}} ({{entity.number}})",
+    body: `Hi {{recipient.name}},
+
+A SaaS subscription is approaching its renewal date.
+
+Subscription: {{entity.number}} — {{entity.title}}
+
+{{note}}
+
+Review the subscription in {{helpdesk.name}} to confirm the plan, seat count, and renewal terms before billing.
+
+— SaaS Management`,
+    bodyHtml: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#0f172a">
+  <div style="display:inline-block;padding:4px 10px;border-radius:9999px;background:#eef2ff;color:#4338ca;font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase">Renewal upcoming</div>
+  <h2 style="margin:16px 0 4px;color:#4338ca">{{entity.title}}</h2>
+  <p style="color:#475569;margin:0 0 20px">Hi {{recipient.name}}, a SaaS subscription is approaching its renewal date.</p>
+  <table style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;width:100%;margin:0 0 20px">
+    <tr><td style="color:#64748b;font-size:12px;padding:4px 0">Subscription</td><td style="font-weight:600;padding:4px 0">{{entity.number}}</td></tr>
+    <tr><td style="color:#64748b;font-size:12px;padding:4px 0">App</td><td style="padding:4px 0">{{entity.title}}</td></tr>
+  </table>
+  <p style="margin:0 0 16px">{{note}}</p>
+  <p style="color:#64748b;font-size:13px;margin:0">Review the subscription in <strong>{{helpdesk.name}}</strong> to confirm plan, seats, and renewal terms before billing.</p>
+  <p style="color:#94a3b8;font-size:12px;margin-top:28px">— SaaS Management</p>
+</div>`,
+  },
+  {
+    event: "license.expiry_soon",
+    title: "Software License Expiring Soon",
+    emailSubject: "License expiring: {{entity.title}} ({{entity.number}})",
+    body: `Hi {{recipient.name}},
+
+A software license is approaching its expiry date.
+
+License: {{entity.number}} — {{entity.title}}
+
+{{note}}
+
+Plan renewal or replacement before the expiry date to avoid service interruption.
+
+— Asset Management`,
+    bodyHtml: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#0f172a">
+  <div style="display:inline-block;padding:4px 10px;border-radius:9999px;background:#fff7ed;color:#c2410c;font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase">Expiring soon</div>
+  <h2 style="margin:16px 0 4px;color:#c2410c">{{entity.title}}</h2>
+  <p style="color:#475569;margin:0 0 20px">Hi {{recipient.name}}, a software license is approaching its expiry date.</p>
+  <table style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:16px;width:100%;margin:0 0 20px">
+    <tr><td style="color:#64748b;font-size:12px;padding:4px 0">License</td><td style="font-weight:600;padding:4px 0">{{entity.number}}</td></tr>
+    <tr><td style="color:#64748b;font-size:12px;padding:4px 0">Product</td><td style="padding:4px 0">{{entity.title}}</td></tr>
+  </table>
+  <p style="margin:0 0 16px">{{note}}</p>
+  <p style="color:#64748b;font-size:13px;margin:0">Plan renewal or replacement before the expiry date to avoid service interruption.</p>
+  <p style="color:#94a3b8;font-size:12px;margin-top:28px">— Asset Management</p>
+</div>`,
+  },
+  {
+    event: "license.expired",
+    title: "Software License Expired",
+    emailSubject: "License expired: {{entity.title}} ({{entity.number}})",
+    body: `Hi {{recipient.name}},
+
+A software license has passed its expiry date and may no longer be entitled to use.
+
+License: {{entity.number}} — {{entity.title}}
+
+{{note}}
+
+Confirm renewal status or revoke assignments to remain compliant.
+
+— Asset Management`,
+    bodyHtml: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#0f172a">
+  <div style="display:inline-block;padding:4px 10px;border-radius:9999px;background:#fef2f2;color:#b91c1c;font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase">Expired</div>
+  <h2 style="margin:16px 0 4px;color:#b91c1c">{{entity.title}}</h2>
+  <p style="color:#475569;margin:0 0 20px">Hi {{recipient.name}}, a software license has passed its expiry date and may no longer be entitled to use.</p>
+  <table style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;width:100%;margin:0 0 20px">
+    <tr><td style="color:#64748b;font-size:12px;padding:4px 0">License</td><td style="font-weight:600;padding:4px 0">{{entity.number}}</td></tr>
+    <tr><td style="color:#64748b;font-size:12px;padding:4px 0">Product</td><td style="padding:4px 0">{{entity.title}}</td></tr>
+  </table>
+  <p style="margin:0 0 16px">{{note}}</p>
+  <p style="color:#64748b;font-size:13px;margin:0">Confirm renewal status or revoke assignments to remain compliant.</p>
+  <p style="color:#94a3b8;font-size:12px;margin-top:28px">— Asset Management</p>
+</div>`,
+  },
+  {
+    event: "license.over_limit",
+    title: "Software License Over Seat Limit",
+    emailSubject: "License over limit: {{entity.title}} ({{entity.number}})",
+    body: `Hi {{recipient.name}},
+
+A software license has more active assignments than the seats it covers.
+
+License: {{entity.number}} — {{entity.title}}
+
+{{note}}
+
+Reclaim unused seats or procure additional capacity to remain compliant.
+
+— Asset Management`,
+    bodyHtml: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#0f172a">
+  <div style="display:inline-block;padding:4px 10px;border-radius:9999px;background:#fef2f2;color:#b91c1c;font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase">Over limit</div>
+  <h2 style="margin:16px 0 4px;color:#b91c1c">{{entity.title}}</h2>
+  <p style="color:#475569;margin:0 0 20px">Hi {{recipient.name}}, a software license has more active assignments than the seats it covers.</p>
+  <table style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;width:100%;margin:0 0 20px">
+    <tr><td style="color:#64748b;font-size:12px;padding:4px 0">License</td><td style="font-weight:600;padding:4px 0">{{entity.number}}</td></tr>
+    <tr><td style="color:#64748b;font-size:12px;padding:4px 0">Product</td><td style="padding:4px 0">{{entity.title}}</td></tr>
+  </table>
+  <p style="margin:0 0 16px">{{note}}</p>
+  <p style="color:#64748b;font-size:13px;margin:0">Reclaim unused seats or procure additional capacity to remain compliant.</p>
+  <p style="color:#94a3b8;font-size:12px;margin-top:28px">— Asset Management</p>
+</div>`,
+  },
 ];
 
 // ── Routes ────────────────────────────────────────────────────────────────────

@@ -20,8 +20,8 @@ import { Button } from "@/components/ui/button";
 import { useBranding } from "@/lib/useBranding";
 import { useSettings } from "@/hooks/useSettings";
 import {
-  Activity, Sparkles, Mail, Globe, ExternalLink, Copy, Check, X,
-  ShieldCheck, Layers, Cpu, Zap, MessageSquare,
+  Activity, Mail, Globe, ExternalLink, Copy, Check, X,
+  ShieldCheck, MessageSquare,
 } from "lucide-react";
 
 // Build-time constants — Vite injects these at build. The `__APP_VERSION__`
@@ -37,13 +37,6 @@ interface AboutDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const STACK = [
-  { icon: Sparkles,      label: "AI",         value: "OpenAI GPT" },
-  { icon: Layers,        label: "Frontend",   value: "React + Vite" },
-  { icon: Cpu,           label: "Backend",    value: "Bun + Express" },
-  { icon: Zap,           label: "Database",   value: "PostgreSQL + Prisma" },
-];
-
 const FEATURES = [
   "AI-classified inbound email tickets",
   "Multi-channel intake (email, portal, API)",
@@ -58,7 +51,12 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
   const [copied, setCopied] = useState(false);
 
   const productName  = general?.helpdeskName  || branding?.companyName || "Zentra";
-  const subtitle     = branding?.platformSubtitle || "Service Desk";
+  // Engraved subtitle and copyright — intentionally NOT pulled from any
+  // branding/general setting so they always identify the underlying ITSM
+  // product, even when an operator has rebranded the helpdesk for their
+  // own organisation.
+  const ENGRAVED_SUBTITLE  = "ITSM MANAGEMENT · AI-Powered ITSM";
+  const ENGRAVED_COPYRIGHT = "© 2026 Zentra. All rights reserved.";
   const accentColor  = branding?.primaryColor  || "#6366f1";
   const supportEmail = branding?.serviceDeskEmail || general?.supportEmail || "";
   const websiteUrl   = branding?.companyWebsite || "";
@@ -136,7 +134,7 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
             <div className="min-w-0">
               <h2 className="text-xl font-bold tracking-tight leading-tight">{productName}</h2>
               <p className="text-xs font-medium text-muted-foreground mt-0.5">
-                {subtitle} · AI-Powered ITSM
+                {ENGRAVED_SUBTITLE}
               </p>
               <button
                 type="button"
@@ -177,34 +175,6 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
                 </li>
               ))}
             </ul>
-          </div>
-
-          {/* Stack */}
-          <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
-              Built with
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {STACK.map(({ icon: Icon, label, value }) => (
-                <div
-                  key={label}
-                  className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-1.5"
-                >
-                  <span
-                    className="flex h-6 w-6 items-center justify-center rounded-md border bg-background/80 shrink-0"
-                    style={{ borderColor: `${accentColor}30` }}
-                  >
-                    <Icon className="h-3 w-3" style={{ color: accentColor }} />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60 leading-none">
-                      {label}
-                    </p>
-                    <p className="text-[11px] font-medium truncate mt-0.5">{value}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
 
           {/* Useful links — only render rows where the operator actually
@@ -251,7 +221,7 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
         {/* ── Footer ────────────────────────────────────────────────────── */}
         <div className="border-t border-border/60 px-7 py-3 bg-muted/20 flex items-center justify-between gap-3">
           <p className="text-[10px] text-muted-foreground/70">
-            © {new Date().getFullYear()} {branding?.companyName || productName}. All rights reserved.
+            {ENGRAVED_COPYRIGHT}
           </p>
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => onOpenChange(false)}>
             Close

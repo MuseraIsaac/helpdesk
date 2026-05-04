@@ -1,8 +1,12 @@
 /**
  * Trash (Recycle Bin) API
  *
- * Provides a unified view of all soft-deleted ITSM records across entity types.
- * All mutations require admin or supervisor role.
+ * Provides a view of soft-deleted ITSM records.
+ *
+ * Visibility model:
+ *   - admins and supervisors  see and manage everything in trash
+ *   - all other authenticated users see and manage only items they themselves
+ *     deleted (matched by `deletedById`)
  *
  * GET    /api/trash            — list items in trash (filterable by type, paginated)
  * GET    /api/trash/summary    — counts per entity type + expiry info
@@ -14,13 +18,28 @@
 
 import { Router } from "express";
 import { z }      from "zod/v4";
-import { requireAuth }  from "../middleware/require-auth";
-import { requireAdmin } from "../middleware/require-admin";
-import { validate }     from "../lib/validate";
-import { getSection }   from "../lib/settings";
-import prisma           from "../db";
+import { requireAuth } from "../middleware/require-auth";
+import { Role }        from "core/constants/role.ts";
+import { validate }    from "../lib/validate";
+import { getSection }  from "../lib/settings";
+import prisma          from "../db";
 
 const router = Router();
+
+/**
+ * Returns a Prisma `where` filter that scopes deleted records to the current
+ * user when they aren't an admin/supervisor. Privileged roles see all trash;
+ * everyone else sees only what they themselves deleted.
+ */
+function scopedWhere(user: { id: string; role: string }) {
+  const isPrivileged = user.role === Role.admin || user.role === Role.supervisor;
+  if (isPrivileged) return { deletedAt: { not: null } } as const;
+  return { deletedAt: { not: null }, deletedById: user.id } as const;
+}
+
+function isPrivileged(user: { role: string }) {
+  return user.role === Role.admin || user.role === Role.supervisor;
+}
 
 // ── Entity type registry ──────────────────────────────────────────────────────
 
@@ -52,8 +71,8 @@ async function fetchDeleted(
   offset: number,
   limit:  number,
   retentionDays: number,
+  where:  { deletedAt: { not: null }; deletedById?: string },
 ): Promise<TrashItem[]> {
-  const where = { deletedAt: { not: null } } as const;
 
   switch (type) {
     case "ticket": {
@@ -303,18 +322,19 @@ const permanentSchema = z.object({
 
 // ── GET /api/trash ────────────────────────────────────────────────────────────
 
-router.get("/", requireAuth, requireAdmin, async (req, res) => {
+router.get("/", requireAuth, async (req, res) => {
   const query = validate(listQuerySchema, req.query, res);
   if (!query) return;
 
   const settings      = await getSection("trash");
   const retentionDays = settings.retentionDays;
   const typesToFetch  = query.type ? [query.type] : ENTITY_TYPES;
+  const where         = scopedWhere(req.user);
 
   const allItems: TrashItem[] = [];
   await Promise.all(
     typesToFetch.map(async (t) => {
-      const items = await fetchDeleted(t, query.offset, query.limit, retentionDays);
+      const items = await fetchDeleted(t, query.offset, query.limit, retentionDays, where);
       allItems.push(...items);
     }),
   );
@@ -323,15 +343,20 @@ router.get("/", requireAuth, requireAdmin, async (req, res) => {
   allItems.sort((a, b) => new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime());
   const page = allItems.slice(0, query.limit);
 
-  res.json({ items: page, retentionDays, total: allItems.length });
+  res.json({
+    items:        page,
+    retentionDays,
+    total:        allItems.length,
+    scope:        isPrivileged(req.user) ? "all" : "own",
+  });
 });
 
 // ── GET /api/trash/summary ────────────────────────────────────────────────────
 
-router.get("/summary", requireAuth, requireAdmin, async (req, res) => {
+router.get("/summary", requireAuth, async (req, res) => {
   const settings      = await getSection("trash");
   const retentionDays = settings.retentionDays;
-  const where         = { deletedAt: { not: null } };
+  const where         = scopedWhere(req.user);
 
   const [
     tickets, incidents, requests, problems, changes, assets, kbArticles,
@@ -354,31 +379,39 @@ router.get("/summary", requireAuth, requireAdmin, async (req, res) => {
   };
   const total  = Object.values(counts).reduce((s, v) => s + v, 0);
 
-  res.json({ counts, total, retentionDays, enabled: settings.enabled });
+  res.json({
+    counts, total, retentionDays,
+    enabled: settings.enabled,
+    scope:   isPrivileged(req.user) ? "all" : "own",
+  });
 });
 
 // ── POST /api/trash/restore ───────────────────────────────────────────────────
 
-router.post("/restore", requireAuth, requireAdmin, async (req, res) => {
+router.post("/restore", requireAuth, async (req, res) => {
   const data = validate(restoreSchema, req.body, res);
   if (!data) return;
 
   const clear = { deletedAt: null, deletedById: null, deletedByName: null };
+  // Non-privileged users can only act on items they themselves deleted.
+  const ownerFilter = isPrivileged(req.user) ? {} : { deletedById: req.user.id };
   let restored = 0;
 
   for (const { type, id } of data.items) {
+    const where = { id, ...ownerFilter };
+    let count = 0;
     switch (type) {
-      case "ticket":            await prisma.ticket.update({ where: { id }, data: clear }); break;
-      case "incident":          await prisma.incident.update({ where: { id }, data: clear }); break;
-      case "request":           await prisma.serviceRequest.update({ where: { id }, data: clear }); break;
-      case "problem":           await prisma.problem.update({ where: { id }, data: clear }); break;
-      case "change":            await prisma.change.update({ where: { id }, data: clear }); break;
-      case "asset":             await prisma.asset.update({ where: { id }, data: clear }); break;
-      case "kb_article":        await prisma.kbArticle.update({ where: { id }, data: clear }); break;
-      case "saas_subscription": await prisma.saaSSubscription.update({ where: { id }, data: clear }); break;
-      case "software_license":  await prisma.softwareLicense.update({ where: { id }, data: clear }); break;
+      case "ticket":            count = (await prisma.ticket.updateMany({ where, data: clear })).count; break;
+      case "incident":          count = (await prisma.incident.updateMany({ where, data: clear })).count; break;
+      case "request":           count = (await prisma.serviceRequest.updateMany({ where, data: clear })).count; break;
+      case "problem":           count = (await prisma.problem.updateMany({ where, data: clear })).count; break;
+      case "change":            count = (await prisma.change.updateMany({ where, data: clear })).count; break;
+      case "asset":             count = (await prisma.asset.updateMany({ where, data: clear })).count; break;
+      case "kb_article":        count = (await prisma.kbArticle.updateMany({ where, data: clear })).count; break;
+      case "saas_subscription": count = (await prisma.saaSSubscription.updateMany({ where, data: clear })).count; break;
+      case "software_license":  count = (await prisma.softwareLicense.updateMany({ where, data: clear })).count; break;
     }
-    restored++;
+    restored += count;
   }
 
   res.json({ restored });
@@ -388,14 +421,19 @@ router.post("/restore", requireAuth, requireAdmin, async (req, res) => {
 // { items: [{type,id}] }            — permanently delete specific items
 // { emptyAll: true }                — permanently delete everything in trash
 
-router.delete("/", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/", requireAuth, async (req, res) => {
   const data = validate(permanentSchema, req.body, res);
   if (!data) return;
+
+  // Scope every destructive query to either all-trash (privileged) or just the
+  // current user's own trash (everyone else).
+  const baseScope = scopedWhere(req.user);
+  const ownerFilter = isPrivileged(req.user) ? {} : { deletedById: req.user.id };
 
   let deleted = 0;
 
   if (data.emptyAll) {
-    const where = { where: { deletedAt: { not: null } } };
+    const where = { where: baseScope };
     // Delete in FK-safe order (child records first where needed)
     const [t, i, req_, p, c, a, kb, sa, sl] = await Promise.all([
       prisma.ticket.deleteMany(where),
@@ -411,18 +449,20 @@ router.delete("/", requireAuth, requireAdmin, async (req, res) => {
     deleted = t.count + i.count + req_.count + p.count + c.count + a.count + kb.count + sa.count + sl.count;
   } else if (data.items?.length) {
     for (const { type, id } of data.items) {
+      const where = { id, ...ownerFilter };
+      let count = 0;
       switch (type) {
-        case "ticket":            await prisma.ticket.delete({ where: { id } }); break;
-        case "incident":          await prisma.incident.delete({ where: { id } }); break;
-        case "request":           await prisma.serviceRequest.delete({ where: { id } }); break;
-        case "problem":           await prisma.problem.delete({ where: { id } }); break;
-        case "change":            await prisma.change.delete({ where: { id } }); break;
-        case "asset":             await prisma.asset.delete({ where: { id } }); break;
-        case "kb_article":        await prisma.kbArticle.delete({ where: { id } }); break;
-        case "saas_subscription": await prisma.saaSSubscription.delete({ where: { id } }); break;
-        case "software_license":  await prisma.softwareLicense.delete({ where: { id } }); break;
+        case "ticket":            count = (await prisma.ticket.deleteMany({ where })).count; break;
+        case "incident":          count = (await prisma.incident.deleteMany({ where })).count; break;
+        case "request":           count = (await prisma.serviceRequest.deleteMany({ where })).count; break;
+        case "problem":           count = (await prisma.problem.deleteMany({ where })).count; break;
+        case "change":            count = (await prisma.change.deleteMany({ where })).count; break;
+        case "asset":             count = (await prisma.asset.deleteMany({ where })).count; break;
+        case "kb_article":        count = (await prisma.kbArticle.deleteMany({ where })).count; break;
+        case "saas_subscription": count = (await prisma.saaSSubscription.deleteMany({ where })).count; break;
+        case "software_license":  count = (await prisma.softwareLicense.deleteMany({ where })).count; break;
       }
-      deleted++;
+      deleted += count;
     }
   }
 

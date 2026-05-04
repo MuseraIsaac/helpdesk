@@ -44,6 +44,22 @@ const FIELD_SELECT = {
   options: true, displayOrder: true, createdAt: true, updatedAt: true,
 } as const;
 
+// GET /api/custom-fields/all
+//
+// Returns every custom field across all entity types — for use cases that
+// need a global registry (e.g. the dashboard widget library, where admins
+// can add a distribution widget for any custom field they've defined).
+// Entity-type-scoped widgets shouldn't use this — it's intentionally
+// unfiltered.
+router.get("/all", requireAuth, async (_req, res) => {
+  const fields = await prisma.customField.findMany({
+    where: { ticketTypeId: null, visible: true },
+    select: FIELD_SELECT,
+    orderBy: [{ entityType: "asc" }, { displayOrder: "asc" }, { createdAt: "asc" }],
+  });
+  res.json({ fields });
+});
+
 // GET /api/custom-fields?entityType=ticket[&ticketTypeId=5]
 router.get("/", requireAuth, async (req, res) => {
   const parsed = formEntityTypeSchema.safeParse(req.query.entityType);

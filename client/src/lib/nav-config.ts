@@ -86,6 +86,14 @@ export interface NavSection {
   permission?: Permission;
   /** If set, the entire section is hidden unless the user's role is in this list. */
   roles?: readonly Role[];
+  /**
+   * When true, the section header becomes a click-to-expand dropdown
+   * rather than always-rendered. Use for long, infrequently-visited
+   * sections (e.g. Administration) so they don't dominate the sidebar.
+   */
+  collapsible?: boolean;
+  /** Initial expanded state when collapsible is true. Default: false. */
+  defaultExpanded?: boolean;
 }
 
 // ── Navigation structure ───────────────────────────────────────────────────────
@@ -248,7 +256,7 @@ export const NAV_SECTIONS: NavSection[] = [
         to: "/templates",
         label: "Templates",
         icon: FileText,
-        roles: ["admin"],
+        permission: "templates.view",
       },
     ],
   },
@@ -271,10 +279,15 @@ export const NAV_SECTIONS: NavSection[] = [
 
   // ── Administration ─────────────────────────────────────────────────────────
   // The entire section is admin-only via the section-level `roles` gate.
+  // `collapsible` makes Layout render it as a click-to-expand dropdown so
+  // the long admin list doesn't dominate the sidebar — most admins only
+  // dip into these screens occasionally.
   {
     id: "administration",
     label: "Administration",
     roles: ["admin"],
+    collapsible: true,
+    defaultExpanded: false,
     items: [
       {
         id: "ticket-types",
@@ -336,6 +349,17 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Audit Log",
         icon: ScrollText,
       },
+    ],
+  },
+
+  // ── Workspace (visible to everyone) ────────────────────────────────────────
+  // Trash sits here so any authenticated user can reach their own recycle
+  // bin. The server scopes the listing — admins/supervisors see everything,
+  // everyone else sees only what they themselves deleted.
+  {
+    id: "workspace",
+    label: "Workspace",
+    items: [
       {
         id: "trash",
         to: "/admin/trash",

@@ -15,7 +15,8 @@ import { useBranding } from "../lib/useBranding";
 import ProfileMenu from "./ProfileMenu";
 import NotificationBell from "./NotificationBell";
 import GlobalSearch from "./GlobalSearch";
-import { Settings, ChevronLeft, ChevronRight, Menu, X, Search, LogOut } from "lucide-react";
+import { Settings, ChevronLeft, ChevronRight, ChevronDown, Menu, X, Search, LogOut } from "lucide-react";
+import SidebarRail from "./SidebarRail";
 
 // ── Sidebar collapse — persisted to localStorage ──────────────────────────────
 
@@ -92,8 +93,10 @@ function SidebarNavItem({ item, collapsed, onClick }: { item: NavItem; collapsed
       className={({ isActive }) => [
         "group relative flex items-center rounded-lg text-[13px] font-medium transition-all duration-150",
         collapsed ? "justify-center p-2.5 mx-0.5" : "gap-3 px-3 py-2",
+        // Active item: gradient backdrop + soft inset highlight + subtle shadow
+        // Inactive: keep low contrast so the active row visually pops
         isActive
-          ? "bg-sidebar-primary/[0.13] text-sidebar-primary font-semibold"
+          ? "bg-gradient-to-r from-sidebar-primary/[0.18] via-sidebar-primary/[0.10] to-sidebar-primary/[0.04] text-sidebar-primary font-semibold shadow-[inset_0_1px_0_rgb(255_255_255_/_0.04)]"
           : "text-sidebar-foreground/55 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent",
       ].join(" ")}
     >
@@ -136,9 +139,56 @@ function SidebarNavItem({ item, collapsed, onClick }: { item: NavItem; collapsed
 
 function SectionLabel({ label }: { label: string }) {
   return (
-    <p className="px-3 pt-3 pb-1 text-[9.5px] font-bold uppercase tracking-[0.14em] text-sidebar-foreground/30 select-none">
+    <p className="px-3 pt-3 pb-1 text-[9.5px] font-bold uppercase tracking-[0.14em] select-none flex items-center gap-1.5 text-sidebar-foreground/45">
+      {/* Tiny gradient stripe gives the label a colour identity without
+          fighting the overall neutral sidebar palette. */}
+      <span className="h-[2px] w-3 rounded-full bg-gradient-to-r from-sidebar-primary/60 to-sidebar-primary/0" />
       {label}
     </p>
+  );
+}
+
+// ── Collapsible section header ───────────────────────────────────────────────
+//
+// Renders the section label as a clickable button with a rotating chevron
+// + a small count badge so admins can see how many items are tucked away
+// without expanding. The expanded state is persisted to localStorage so
+// "open Administration once, stays open between visits" feels right.
+
+function CollapsibleSectionHeader({
+  label,
+  count,
+  expanded,
+  onToggle,
+}: {
+  label: string;
+  count: number;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      className={[
+        "group w-full flex items-center gap-1.5 pl-3 pr-2 pt-3 pb-1",
+        "text-[9.5px] font-bold uppercase tracking-[0.14em] select-none",
+        "text-sidebar-foreground/45 hover:text-sidebar-foreground/70 transition-colors",
+      ].join(" ")}
+    >
+      <span className="h-[2px] w-3 rounded-full bg-gradient-to-r from-sidebar-primary/60 to-sidebar-primary/0" />
+      <span>{label}</span>
+      <span className="text-[9px] font-semibold tabular-nums text-sidebar-foreground/30 group-hover:text-sidebar-foreground/50 transition-colors">
+        {count}
+      </span>
+      <ChevronDown
+        className={[
+          "ml-auto h-3 w-3 shrink-0 text-sidebar-foreground/35 group-hover:text-sidebar-foreground/60 transition-transform duration-200",
+          expanded ? "rotate-0" : "-rotate-90",
+        ].join(" ")}
+      />
+    </button>
   );
 }
 
@@ -161,6 +211,35 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
   const logoDataUrl      = branding?.logoDataUrl;
   const companyName      = branding?.companyName      || "Zentra";
   const platformSubtitle = branding?.platformSubtitle || "Service Desk";
+  const location = useLocation();
+
+  // Persisted expanded-state for collapsible sections. Auto-expands when
+  // the active route lives inside the section so the user sees the
+  // current page on first navigation. Subsequent toggles are remembered
+  // across page loads via localStorage.
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem("sidebar:expanded");
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  });
+  function toggleSection(id: string) {
+    setExpandedSections((prev) => {
+      const next = { ...prev, [id]: !(prev[id] ?? false) };
+      try { localStorage.setItem("sidebar:expanded", JSON.stringify(next)); } catch { /* quota */ }
+      return next;
+    });
+  }
+  function isSectionExpanded(section: NavSection): boolean {
+    if (!section.collapsible) return true;
+    // Force-open when the active route is inside this section, so the
+    // user can always see where they are.
+    const containsActive = section.items.some((item) =>
+      item.end ? location.pathname === item.to : location.pathname === item.to || location.pathname.startsWith(item.to + "/"),
+    );
+    if (containsActive) return true;
+    return expandedSections[section.id] ?? section.defaultExpanded ?? false;
+  }
 
   const orbStyle: React.CSSProperties = {
     background: "linear-gradient(135deg, var(--sidebar-primary) 0%, var(--sidebar-ring) 100%)",
@@ -173,7 +252,11 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
   };
 
   return (
-    <div className="sidebar-surface flex flex-col h-full select-none border-r border-sidebar-border">
+    // Outer flex row: sidebar body on the left, decorative rail on the right.
+    // The rail spans the full sidebar height and replaces the previous flat
+    // border-r — same separation, more presence.
+    <div className="flex h-full">
+    <div className="sidebar-surface flex flex-col h-full min-h-0 select-none flex-1 border-r border-sidebar-border">
 
       {/* ── Wordmark ── */}
       <div className={[
@@ -217,16 +300,38 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
           })
           .map((section: NavSection) => {
           const visibleItems = section.items.filter((item) => isNavItemVisible(item, role));
+          // In collapsed-rail mode the chevron is meaningless (the labels
+          // aren't rendered), so we always show every visible item there.
+          const expanded = collapsed ? true : isSectionExpanded(section);
           return (
             <div key={section.id}>
               {!collapsed
-                ? <SectionLabel label={section.label} />
+                ? section.collapsible
+                    ? <CollapsibleSectionHeader
+                        label={section.label}
+                        count={visibleItems.length}
+                        expanded={expanded}
+                        onToggle={() => toggleSection(section.id)}
+                      />
+                    : <SectionLabel label={section.label} />
                 : <div className="h-px bg-sidebar-border mx-2 my-2" aria-hidden />
               }
-              <div className="space-y-0.5">
-                {visibleItems.map((item) => (
-                  <SidebarNavItem key={item.id} item={item} collapsed={collapsed} onClick={onClose} />
-                ))}
+              {/* Smooth expand/collapse — uses grid-template-rows trick so
+                  height transitions even though the inner content height
+                  is unknown at compile time. */}
+              <div
+                className={[
+                  "grid transition-[grid-template-rows] duration-200 ease-out",
+                  expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+                ].join(" ")}
+              >
+                <div className="overflow-hidden">
+                  <div className="space-y-0.5">
+                    {visibleItems.map((item) => (
+                      <SidebarNavItem key={item.id} item={item} collapsed={collapsed} onClick={onClose} />
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           );
@@ -246,7 +351,7 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
               "group relative flex items-center rounded-lg text-[13px] font-medium transition-all duration-150",
               collapsed ? "justify-center p-2.5 mx-0.5" : "gap-3 px-3 py-2",
               isActive
-                ? "bg-sidebar-primary/[0.13] text-sidebar-primary font-semibold"
+                ? "bg-gradient-to-r from-sidebar-primary/[0.18] via-sidebar-primary/[0.10] to-sidebar-primary/[0.04] text-sidebar-primary font-semibold shadow-[inset_0_1px_0_rgb(255_255_255_/_0.04)]"
                 : "text-sidebar-foreground/55 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent",
             ].join(" ")}
           >
@@ -281,7 +386,7 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
             </button>
           </div>
         ) : (
-          <div className="mx-2 mb-3 mt-1 rounded-xl bg-sidebar-accent border border-sidebar-border p-2.5 flex items-center gap-2.5">
+          <div className="mx-2 mb-3 mt-1 rounded-xl bg-gradient-to-br from-sidebar-primary/[0.08] via-sidebar-accent to-sidebar-accent border border-sidebar-border p-2.5 flex items-center gap-2.5 shadow-sm">
             <div
               className="h-8 w-8 rounded-full flex items-center justify-center text-[11px] font-bold text-white shrink-0 ring-2 ring-sidebar-border"
               style={avatarStyle}
@@ -328,6 +433,10 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
         )}
       </div>
     </div>
+      {/* Decorative rail — sits flush against the sidebar's right edge. Uses
+       *  the sidebar-primary token so it picks up palette colour shifts. */}
+      <SidebarRail side="right" tone="sidebar" />
+    </div>
   );
 }
 
@@ -372,7 +481,8 @@ export default function Layout() {
       {/* ── Desktop sidebar ── */}
       <aside className={[
         "hidden lg:flex flex-col shrink-0 sticky top-0 h-screen overflow-hidden transition-[width] duration-200",
-        collapsed ? "w-[52px]" : "w-60",
+        // Width includes the 6px decorative rail on the right edge.
+        collapsed ? "w-[58px]" : "w-[252px]",
       ].join(" ")}>
         <SidebarContent {...sharedProps} onToggleCollapse={toggle} />
       </aside>

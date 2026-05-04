@@ -16,6 +16,7 @@ import {
   CheckCircle2, FileEdit, Archive, ChevronRight, ArrowLeft,
   Settings2, AlertTriangle, Loader2, MoreHorizontal,
   UserCheck, ShieldCheck, Unlock, Search, Building2,
+  Trash2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -103,15 +104,20 @@ const STATUS_CONFIG = {
 function GrantRoleDialog({
   teamId,
   teamName,
+  existingRoles,
   onClose,
 }: {
   teamId: number;
   teamName: string;
+  /** All duty-plan roles currently assigned to this team — shown above the
+   *  grant form so admins can revoke and reassign in one place. */
+  existingRoles: DutyPlanRole[];
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState("");
   const [roleType, setRoleType] = useState<"manager" | "mandated">("manager");
+  const [revokingId, setRevokingId] = useState<number | null>(null);
 
   const { data: membersData } = useQuery({
     queryKey: ["team-members", teamId],
@@ -124,7 +130,7 @@ function GrantRoleDialog({
   });
   const members = membersData?.members ?? [];
 
-  const mutation = useMutation({
+  const grantMutation = useMutation({
     mutationFn: () => axios.post("/api/duty-plans/roles", { teamId, userId, roleType }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["duty-plan-roles"] });
@@ -134,19 +140,90 @@ function GrantRoleDialog({
     onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to grant role"),
   });
 
+  // Revoke is per-row — a single dialog handles many roles, so we track
+  // which row is in flight via revokingId so only its button shows the
+  // spinner.
+  const revokeMutation = useMutation({
+    mutationFn: (roleId: number) => axios.delete(`/api/duty-plans/roles/${roleId}`),
+    onMutate: (roleId) => { setRevokingId(roleId); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["duty-plan-roles"] });
+      toast.success("Role revoked");
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.error ?? "Failed to revoke role"),
+    onSettled: () => { setRevokingId(null); },
+  });
+
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <Shield className="size-4 text-primary" />
-            Grant Duty Plan Role
+            Manage Duty Plan Roles
           </DialogTitle>
           <p className="text-xs text-muted-foreground mt-0.5">Team: {teamName}</p>
         </DialogHeader>
+
         <div className="space-y-4 py-2">
+
+          {/* ── Existing roles + per-row revoke ──────────────────────── */}
+          {existingRoles.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Current roles</label>
+              <div className="rounded-lg border divide-y bg-muted/20">
+                {existingRoles.map((r) => {
+                  const isRevoking = revokeMutation.isPending && revokingId === r.id;
+                  return (
+                    <div key={r.id} className="flex items-center gap-2 px-2.5 py-2">
+                      <span
+                        className={cn(
+                          "flex h-7 w-7 items-center justify-center rounded-md border shrink-0",
+                          r.roleType === "manager"
+                            ? "bg-primary/10 border-primary/25 text-primary"
+                            : "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400",
+                        )}
+                      >
+                        {r.roleType === "manager"
+                          ? <ShieldCheck className="size-3.5" />
+                          : <UserCheck className="size-3.5" />}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{r.user.name}</p>
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          <span className="capitalize">{r.roleType}</span>
+                          {r.user.email && <> · {r.user.email}</>}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 text-muted-foreground hover:text-destructive shrink-0"
+                        title={`Revoke ${r.roleType} role from ${r.user.name}`}
+                        disabled={isRevoking}
+                        onClick={() => {
+                          if (window.confirm(`Revoke ${r.roleType} role from ${r.user.name}?`)) {
+                            revokeMutation.mutate(r.id);
+                          }
+                        }}
+                      >
+                        {isRevoking
+                          ? <Loader2 className="size-3.5 animate-spin" />
+                          : <Trash2 className="size-3.5" />}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── Grant new role ──────────────────────────────────────── */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium">Team member</label>
+            <label className="text-xs font-medium">
+              {existingRoles.length > 0 ? "Grant another role" : "Team member"}
+            </label>
             <Select value={userId} onValueChange={setUserId}>
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue placeholder="Select agent…" />
@@ -188,10 +265,10 @@ function GrantRoleDialog({
           </div>
           <Button
             className="w-full gap-1.5"
-            onClick={() => mutation.mutate()}
-            disabled={!userId || mutation.isPending}
+            onClick={() => grantMutation.mutate()}
+            disabled={!userId || grantMutation.isPending}
           >
-            {mutation.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+            {grantMutation.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
             Grant role
           </Button>
         </div>
@@ -428,6 +505,7 @@ export default function DutyPlanPage() {
         <GrantRoleDialog
           teamId={grantTarget.id}
           teamName={grantTarget.name}
+          existingRoles={roles.filter((r) => r.teamId === grantTarget.id)}
           onClose={() => setGrantTarget(null)}
         />
       )}

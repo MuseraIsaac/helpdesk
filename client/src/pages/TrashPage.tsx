@@ -74,6 +74,8 @@ interface TrashSummary {
   total:          number;
   retentionDays:  number;
   enabled:        boolean;
+  /** "all" → admins/supervisors see everything; "own" → user sees only their deletions */
+  scope?:         "all" | "own";
 }
 
 // ── Entity metadata ───────────────────────────────────────────────────────────
@@ -395,21 +397,39 @@ export default function TrashPage() {
             )}
           </div>
           <p className="text-sm text-muted-foreground max-w-xl leading-relaxed">
-            Deleted records are kept here for{" "}
-            <strong>{summary?.retentionDays ?? 30} days</strong> before automatic purge.
-            You can restore any item or permanently delete it now.
+            {summary?.scope === "own" ? (
+              <>
+                Showing items <strong>you have deleted</strong>. Items are kept for{" "}
+                <strong>{summary?.retentionDays ?? 30} days</strong> before automatic purge —
+                restore them here or remove them permanently.
+              </>
+            ) : (
+              <>
+                Deleted records are kept here for{" "}
+                <strong>{summary?.retentionDays ?? 30} days</strong> before automatic purge.
+                You can restore any item or permanently delete it now.
+              </>
+            )}
           </p>
+          {summary?.scope === "own" && (
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground w-fit">
+              <Shield className="h-3 w-3" />
+              Personal view — admins and supervisors see all deletions
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Button variant="ghost" size="icon" onClick={() => refetch()} title="Refresh">
             <RefreshCw className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/settings/trash">
-              <Settings className="h-3.5 w-3.5 mr-1.5" />
-              Settings
-            </Link>
-          </Button>
+          {summary?.scope !== "own" && (
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/settings/trash">
+                <Settings className="h-3.5 w-3.5 mr-1.5" />
+                Settings
+              </Link>
+            </Button>
+          )}
         </div>
       </div>
 

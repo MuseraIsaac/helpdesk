@@ -447,20 +447,37 @@ router.post(
 
     switch (data.action) {
       case "delete": {
-        const active = await prisma.asset.count({
+        // Partial-delete semantics, matching the dialog copy: active assets
+        // (deployed / in use) are skipped; the rest are moved to the trash.
+        // Previously this returned 409 for the whole batch as soon as a
+        // single active asset was selected, which made the bulk delete
+        // appear to silently do nothing when one in-use device was mixed
+        // into a batch of retired ones.
+        const activeIds = await prisma.asset.findMany({
           where: { id: { in: data.ids }, status: { in: ["deployed", "in_use"] } },
-        });
-        if (active > 0) {
+          select: { id: true },
+        }).then(rows => new Set(rows.map(r => r.id)));
+
+        const deletableIds = data.ids.filter((id) => !activeIds.has(id));
+
+        if (deletableIds.length === 0) {
+          // Every selected asset is active — nothing to delete. Surface a
+          // 409 so the client can show a clear error toast (and so this
+          // case stays distinguishable from a successful 0-count result,
+          // which would happen when ids reference already-deleted rows).
           res.status(409).json({
-            error: `${active} selected asset(s) are active (deployed or in use). Retire or return them first.`,
+            error: `All ${activeIds.size} selected asset(s) are active (deployed or in use). Retire or return them first.`,
+            affected: 0,
+            skipped:  activeIds.size,
           });
           return;
         }
+
         const { count } = await prisma.asset.updateMany({
-          where: { id: { in: data.ids }, deletedAt: null },
+          where: { id: { in: deletableIds }, deletedAt: null },
           data:  { deletedAt: new Date(), deletedById: req.user.id, deletedByName: req.user.name },
         });
-        res.json({ affected: count });
+        res.json({ affected: count, skipped: activeIds.size });
         break;
       }
 

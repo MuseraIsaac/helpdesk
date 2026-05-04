@@ -72,7 +72,33 @@ export const WIDGET_IDS = [
   "kb_insights",
 ] as const;
 
-export type WidgetId = (typeof WIDGET_IDS)[number];
+export type WidgetId = (typeof WIDGET_IDS)[number] | `cf:${string}:${string}`;
+
+/**
+ * Pattern for dynamic custom-field widget IDs:
+ *   cf:<entityType>:<fieldKey>     e.g. "cf:ticket:root_cause"
+ *
+ * These widgets are user-generated — admins create custom fields under
+ * Settings → Forms, and any of those fields can be added to a dashboard as a
+ * distribution widget. We can't enumerate them at compile time, so the
+ * schema accepts a regex-validated string instead.
+ */
+export const CUSTOM_FIELD_WIDGET_PATTERN = /^cf:[a-z]+:[a-zA-Z0-9_-]+$/;
+
+export function isCustomFieldWidget(id: string): id is `cf:${string}:${string}` {
+  return CUSTOM_FIELD_WIDGET_PATTERN.test(id);
+}
+
+export function parseCustomFieldWidget(id: string): { entityType: string; fieldKey: string } | null {
+  if (!isCustomFieldWidget(id)) return null;
+  const [, entityType, fieldKey] = id.split(":");
+  return { entityType: entityType!, fieldKey: fieldKey! };
+}
+
+/** Default grid placement for any new custom-field widget. */
+export const CUSTOM_FIELD_LAYOUT_DEFAULT = {
+  x: 0, w: 4, h: 4, minW: 3, minH: 3,
+} as const;
 
 export const WIDGET_META: Record<WidgetId, { label: string; description: string }> = {
   // Service Desk
@@ -311,8 +337,19 @@ export type WidgetAppearance = z.infer<typeof widgetAppearanceSchema>;
 
 // ── Zod schemas ────────────────────────────────────────────────────────────────
 
+/**
+ * Widget id validator — accepts either:
+ *   1. A known WIDGET_IDS enum value, or
+ *   2. A custom-field pattern `cf:<entityType>:<fieldKey>` for dashboard
+ *      widgets that visualise admin-defined custom fields.
+ */
+const widgetIdSchema = z.string().refine(
+  (v) => (WIDGET_IDS as readonly string[]).includes(v) || CUSTOM_FIELD_WIDGET_PATTERN.test(v),
+  { message: "Invalid widget id" },
+);
+
 export const widgetConfigSchema = z.object({
-  id:      z.enum(WIDGET_IDS),
+  id:      widgetIdSchema,
   visible: z.boolean(),
   order:   z.number().int().min(0),
   // Grid layout — optional for backwards compat with configs saved before the grid
@@ -499,11 +536,15 @@ export function splitCompositeWidgets(widgets: WidgetConfig[]): WidgetConfig[] {
       // Hide the composite but keep its definition for backwards compat
       out.push({ ...w, visible: false, order: nextOrder++ });
 
-      // Append atomics (new ones get the composite's visible state)
+      // Append atomics (new ones get the composite's visible state).
+      // Every atomic id is a known built-in (defined in COMPOSITE_TO_ATOMIC
+      // above), so the layout-defaults lookup is statically guaranteed —
+      // assert non-null to satisfy the broadened WidgetId type that now
+      // includes dynamic cf:* IDs without an entry in the Record.
       let xCursor = 0;
       for (const aid of atomics) {
         if (seen.has(aid)) continue; // user already has this atomic
-        const def = WIDGET_LAYOUT_DEFAULTS[aid];
+        const def = WIDGET_LAYOUT_DEFAULTS[aid as keyof typeof WIDGET_LAYOUT_DEFAULTS]!;
         if (xCursor + def.w > 12) xCursor = 0;
         out.push({
           id: aid,

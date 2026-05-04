@@ -195,7 +195,7 @@ function NewLicenseDialog({ onCreated }: { onCreated: () => void }) {
                   </FormItem>
                 )} />
               </div>
-              <ErrorAlert error={mutation.error} fallback="Failed to create license" />
+              {mutation.error && <ErrorAlert error={mutation.error} fallback="Failed to create license" />}
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
                 <Button type="submit" disabled={mutation.isPending}>

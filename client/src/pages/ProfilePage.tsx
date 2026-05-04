@@ -28,6 +28,7 @@ import {
 } from "core/schemas/preferences.ts";
 import {
   languages,
+  supportedLanguages,
   timezones,
   dateFormats,
   timeFormats,
@@ -266,13 +267,33 @@ function PreferencesTab() {
                 <Select value={field.value} onValueChange={field.onChange}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {languages.map((l) => (
-                      <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
-                    ))}
+                    {languages.map((l) => {
+                      const supported = supportedLanguages.has(l.value);
+                      return (
+                        <SelectItem
+                          key={l.value}
+                          value={l.value}
+                          disabled={!supported}
+                          className={!supported ? "opacity-60" : undefined}
+                        >
+                          <span className="flex items-center gap-2">
+                            <span>{l.label}</span>
+                            {!supported && (
+                              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
+                                coming soon
+                              </span>
+                            )}
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               )}
             />
+            <p className="text-[11px] text-muted-foreground">
+              Only English is currently translated. The other languages will activate as their translations ship.
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label>Timezone</Label>

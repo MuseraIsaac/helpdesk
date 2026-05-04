@@ -589,48 +589,68 @@ router.get("/incidents", async (req, res) => {
 router.get("/requests", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
+  // Aggregates BOTH standalone service_request rows AND ticket rows
+  // typed as 'service_request' via the unified_requests CTE. See
+  // lib/analytics/request-source.ts for the schema projection.
+  const { REQUEST_UNION_CTE } = await import("../lib/analytics/request-source");
+
   interface RequestStatsRow {
     total: bigint;
+    withSla: bigint;
     slaBreached: bigint;
     avgFulfillmentSeconds: number | null;
   }
-  interface TopItemRow { name: string; count: bigint; avgSeconds: number | null; }
+  interface ByStatusRow  { status: string; count: bigint }
+  interface TopItemRow   { name: string; count: bigint; avgSeconds: number | null }
 
   const [statsRows, byStatusRaw, topItemsRaw] = await Promise.all([
-    prisma.$queryRaw<RequestStatsRow[]>`
-      SELECT
-        COUNT(*)                                                            AS total,
-        COUNT(*) FILTER (WHERE "sla_breached" = true)                     AS "slaBreached",
-        ROUND(AVG(EXTRACT(EPOCH FROM (
-          COALESCE("resolved_at","closed_at") - "createdAt"
-        ))) FILTER (WHERE COALESCE("resolved_at","closed_at") IS NOT NULL))::int
-                                                                            AS "avgFulfillmentSeconds"
-      FROM service_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
-    `,
-    prisma.serviceRequest.groupBy({ by: ["status"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
-    prisma.$queryRaw<TopItemRow[]>`
-      SELECT
-        COALESCE("catalog_item_name", 'Ad-hoc Request') AS name,
-        COUNT(*)                                         AS count,
-        ROUND(AVG(EXTRACT(EPOCH FROM (
-          COALESCE("resolved_at","closed_at") - "createdAt"
-        ))) FILTER (WHERE COALESCE("resolved_at","closed_at") IS NOT NULL))::int AS "avgSeconds"
-      FROM service_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
-      GROUP BY "catalog_item_name" ORDER BY count DESC LIMIT 8
-    `,
+    prisma.$queryRawUnsafe<RequestStatsRow[]>(
+      `WITH ${REQUEST_UNION_CTE}
+       SELECT
+         COUNT(*)                                                           AS total,
+         COUNT(*) FILTER (WHERE sla_due_at IS NOT NULL)                    AS "withSla",
+         COUNT(*) FILTER (WHERE sla_due_at IS NOT NULL
+                            AND (sla_breached = true
+                              OR (resolved_at IS NOT NULL AND resolved_at > sla_due_at))) AS "slaBreached",
+         ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)))
+              FILTER (WHERE resolved_at IS NOT NULL AND resolved_at >= created_at))::int
+                                                                           AS "avgFulfillmentSeconds"
+       FROM unified_requests
+       WHERE created_at >= $1 AND created_at <= $2`,
+      since, until,
+    ),
+    prisma.$queryRawUnsafe<ByStatusRow[]>(
+      `WITH ${REQUEST_UNION_CTE}
+       SELECT COALESCE(status,'unknown') AS status, COUNT(*) AS count
+       FROM unified_requests
+       WHERE created_at >= $1 AND created_at <= $2
+       GROUP BY status ORDER BY count DESC`,
+      since, until,
+    ),
+    prisma.$queryRawUnsafe<TopItemRow[]>(
+      `WITH ${REQUEST_UNION_CTE}
+       SELECT COALESCE(catalog_item, 'Ad-hoc Request') AS name,
+              COUNT(*)                                  AS count,
+              ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)))
+                   FILTER (WHERE resolved_at IS NOT NULL AND resolved_at >= created_at))::int AS "avgSeconds"
+       FROM unified_requests
+       WHERE created_at >= $1 AND created_at <= $2
+       GROUP BY catalog_item ORDER BY count DESC LIMIT 8`,
+      since, until,
+    ),
   ]);
 
   const row = statsRows[0];
-  const total = Number(row?.total ?? 0);
+  const total       = Number(row?.total       ?? 0);
+  const withSla     = Number(row?.withSla     ?? 0);
   const slaBreached = Number(row?.slaBreached ?? 0);
-  const withSla = await prisma.serviceRequest.count({ where: { createdAt: { gte: since, lte: until }, slaDueAt: { not: null } } });
 
   res.json({
     total,
     slaBreached,
     avgFulfillmentSeconds: row?.avgFulfillmentSeconds ?? null,
     slaCompliance: withSla > 0 ? Math.round(((withSla - slaBreached) / withSla) * 100) : null,
-    byStatus:  byStatusRaw.map(r => ({ status: String(r.status), count: r._count.id })),
+    byStatus:  byStatusRaw.map(r => ({ status: r.status, count: Number(r.count) })),
     topItems:  topItemsRaw.map(r => ({ name: r.name, count: Number(r.count), avgSeconds: r.avgSeconds ?? null })),
   });
 });
@@ -1559,6 +1579,155 @@ router.get("/assets", async (req, res) => {
     // ── Trends ────────────────────────────────────────────────────────────────
     createdTrend:  createdTimeSeries,
     retiredTrend:  retiredTimeSeries,
+  });
+});
+
+// ── GET /api/reports/custom-field-distribution ───────────────────────────────
+//
+// Returns a value-frequency breakdown for an admin-defined custom field on
+// any ITSM entity. Drives the "Custom Field" dashboard widgets — one widget
+// per custom field the admin has created on the relevant form.
+//
+// Query: ?entityType=ticket|incident|request|change|problem
+//        &fieldKey=<the custom field's `key` value>
+//        &from=YYYY-MM-DD&to=YYYY-MM-DD     (optional date filter)
+//
+// Response: {
+//   field:    { key, label, type, options },
+//   buckets:  [{ value, label, count }, …]   // sorted desc by count
+//   total:    number,                        // rows seen in window
+//   missing:  number,                        // rows where the field is empty
+// }
+router.get("/custom-field-distribution", async (req, res) => {
+  const entityTypeRaw = String(req.query.entityType ?? "").toLowerCase();
+  const fieldKey      = String(req.query.fieldKey   ?? "").trim();
+  const { fromDate, toDate } = parseDateRange(req.query.from, req.query.to);
+
+  // Map URL entity type → Prisma table name + a reasonable created-at column.
+  // The custom-field JSON column is `customFields` on every model already.
+  const ENTITY_TABLES: Record<string, { table: string; createdAt: string }> = {
+    ticket:   { table: "ticket",            createdAt: '"createdAt"'  },
+    incident: { table: "incident",          createdAt: '"createdAt"'  },
+    request:  { table: "service_request",   createdAt: '"createdAt"'  },
+    change:   { table: "change_request",    createdAt: '"createdAt"'  },
+    problem:  { table: "problem",           createdAt: '"createdAt"'  },
+  };
+  const meta = ENTITY_TABLES[entityTypeRaw];
+  if (!meta) {
+    res.status(400).json({ error: "Invalid entityType — must be one of: ticket, incident, request, change, problem" });
+    return;
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(fieldKey)) {
+    res.status(400).json({ error: "fieldKey is required and must contain only [A-Za-z0-9_-]" });
+    return;
+  }
+
+  // Look up the custom-field definition so we know its label + option ordering
+  // — and so we can confirm it actually exists for this entity type.
+  const fieldDef = await prisma.customField.findFirst({
+    where:  { entityType: entityTypeRaw as never, key: fieldKey, ticketTypeId: null },
+    select: { key: true, label: true, fieldType: true, options: true },
+  });
+  if (!fieldDef) {
+    res.status(404).json({ error: "Custom field not found for the given entity type." });
+    return;
+  }
+
+  // SQL: extract the JSON value at `customFields->>fieldKey` and group by it.
+  // The JSON column is text-coerced via ->>; null/empty values are handled
+  // separately so admins can see how many rows are missing the field.
+  // Using parameterised queries via Prisma.sql ensures the dynamic table name
+  // and field key are safe — table name is whitelisted above; fieldKey is
+  // regex-validated above.
+  const where: string[] = ['"deletedAt" IS NULL'];
+  const params: (Date | string)[] = [];
+  if (fromDate) {
+    params.push(fromDate);
+    where.push(`${meta.createdAt} >= $${params.length}::timestamp`);
+  }
+  if (toDate) {
+    params.push(toDate);
+    where.push(`${meta.createdAt} <= $${params.length}::timestamp`);
+  }
+  // Final positional arg is the field key
+  params.push(fieldKey);
+  const fieldKeyArg = `$${params.length}`;
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  type Row = { bucket: string | null; count: bigint };
+  const rows = await prisma.$queryRawUnsafe<Row[]>(
+    `
+    SELECT
+      "customFields" ->> ${fieldKeyArg}        AS bucket,
+      COUNT(*)                                  AS count
+    FROM "${meta.table}"
+    ${whereSql}
+    GROUP BY "customFields" ->> ${fieldKeyArg}
+    ORDER BY count DESC, bucket NULLS LAST
+    `,
+    ...params,
+  );
+
+  // For multiselect fields the JSON value is an array stored as a JSON string.
+  // We expand each element so the distribution counts each tag, not the
+  // raw string representation. Other types are returned as-is.
+  const isMulti = fieldDef.fieldType === "multiselect";
+  const expanded = new Map<string, number>();
+  let missing = 0;
+  let total   = 0;
+
+  for (const r of rows) {
+    const c = Number(r.count);
+    total += c;
+    if (r.bucket == null || r.bucket === "" || r.bucket === "[]") {
+      missing += c;
+      continue;
+    }
+    if (isMulti) {
+      // Try to parse a JSON array; fall back to comma-split for safety.
+      try {
+        const arr = JSON.parse(r.bucket);
+        if (Array.isArray(arr) && arr.length > 0) {
+          for (const v of arr) {
+            const key = String(v);
+            expanded.set(key, (expanded.get(key) ?? 0) + c);
+          }
+          continue;
+        }
+      } catch {
+        // not valid JSON — fall through
+      }
+      missing += c;
+    } else {
+      expanded.set(r.bucket, (expanded.get(r.bucket) ?? 0) + c);
+    }
+  }
+
+  // Build buckets — preserve the field's option ordering when known so the
+  // chart reads in the same order users saw on the form.
+  const optionOrder = new Map<string, number>(
+    (fieldDef.options ?? []).map((o, i) => [o, i]),
+  );
+  const buckets = Array.from(expanded.entries())
+    .map(([value, count]) => ({
+      value,
+      label: value,
+      count,
+      _order: optionOrder.get(value) ?? Number.MAX_SAFE_INTEGER,
+    }))
+    .sort((a, b) => b.count - a.count || a._order - b._order)
+    .map(({ _order, ...rest }) => { void _order; return rest; });
+
+  res.json({
+    field: {
+      key:      fieldDef.key,
+      label:    fieldDef.label,
+      type:     fieldDef.fieldType,
+      options:  fieldDef.options ?? [],
+    },
+    buckets,
+    total,
+    missing,
   });
 });
 

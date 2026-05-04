@@ -30,6 +30,7 @@ import EscalationRulesManager from "@/components/EscalationRulesManager";
 import {
   Upload, X, Sparkles, Monitor, ShieldCheck, ShieldX, Check, Plus,
   Ticket as TicketIcon, AlertTriangle, ShoppingBag, GitMerge, Bug, Server, Database, Hash,
+  KeyRound, Cloud, Bell,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -106,6 +107,7 @@ import {
 } from "core/schemas/settings.ts";
 import {
   languages,
+  supportedLanguages,
   timezones,
   dateFormats,
   timeFormats,
@@ -174,12 +176,35 @@ export function GeneralSection() {
       </SettingsGroup>
 
       <SettingsGroup title="Locale">
-        <SettingsField label="Language" htmlFor="language">
+        <SettingsField
+          label="Language"
+          description="Only English is currently translated. Other languages appear here for forward compatibility but are disabled until their translations ship."
+          htmlFor="language"
+        >
           <Controller name="language" control={control} render={({ field }) => (
             <Select value={field.value} onValueChange={field.onChange}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {languages.map((l) => <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>)}
+                {languages.map((l) => {
+                  const supported = supportedLanguages.has(l.value);
+                  return (
+                    <SelectItem
+                      key={l.value}
+                      value={l.value}
+                      disabled={!supported}
+                      className={!supported ? "opacity-60" : undefined}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span>{l.label}</span>
+                        {!supported && (
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
+                            coming soon
+                          </span>
+                        )}
+                      </span>
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           )} />
@@ -3532,9 +3557,27 @@ export function ApprovalsSection() {
 export function CmdbSection() {
   const { data, isLoading } = useSettings("cmdb");
   const update = useUpdateSettings("cmdb");
-  const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, watch, formState: { isDirty, errors } } =
     useForm<CmdbSettings>({ resolver: zodResolver(cmdbSettingsSchema), defaultValues: cmdbSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
+
+  // Recipient pickers for license / SaaS alerts
+  const { data: agentsData } = useQuery<{ agents: { id: string; name: string; email: string }[] }>({
+    queryKey: ["agents-simple-cmdb"],
+    queryFn: () => axios.get("/api/agents").then((r) => r.data),
+  });
+  const { data: teamsData } = useQuery<{ teams: { id: number; name: string; color?: string }[] }>({
+    queryKey: ["teams-simple-cmdb"],
+    queryFn: () => axios.get("/api/teams").then((r) => r.data),
+  });
+  const agents = agentsData?.agents ?? [];
+  const teams  = teamsData?.teams ?? [];
+
+  const licenseInApp = watch("licenseAlertsInAppEnabled");
+  const licenseEmail = watch("licenseAlertsEmailEnabled");
+  const saasInApp    = watch("saasAlertsInAppEnabled");
+  const saasEmail    = watch("saasAlertsEmailEnabled");
+  const anyAlertEnabled = licenseInApp || licenseEmail || saasInApp || saasEmail;
 
   return (
     <SettingsFormShell
@@ -3627,6 +3670,169 @@ export function CmdbSection() {
           </div>
         ))}
       </SettingsGroup>
+
+      {/* ── License & SaaS Alerts ─────────────────────────────────────── */}
+      <SettingsGroup title="License & SaaS Alerts">
+        <p className="text-sm text-muted-foreground -mt-1 mb-3">
+          Send alerts when software licenses expire or go over seat limit, and when SaaS subscriptions
+          are about to renew. All alerts are off by default — turn each channel on per category, then
+          choose who receives them. Email delivery additionally requires SendGrid to be configured in
+          {" "}<Link to="/settings/integrations" className="text-primary underline underline-offset-2">Integrations</Link>{" "}
+          and the global email switch in
+          {" "}<Link to="/settings/notifications" className="text-primary underline underline-offset-2">Notifications</Link>.
+        </p>
+
+        {/* Software licenses */}
+        <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <KeyRound className="h-4 w-4 text-amber-600" />
+            <p className="text-sm font-semibold">Software licenses</p>
+          </div>
+          <SettingsSwitchRow label="In-app notifications" description="Show alerts in the notification center for licenses expiring soon, expired, or over the seat limit.">
+            <Controller name="licenseAlertsInAppEnabled" control={control} render={({ field }) => (
+              <Switch checked={field.value} onCheckedChange={field.onChange} />
+            )} />
+          </SettingsSwitchRow>
+          <SettingsSwitchRow label="Email notifications" description="Send the same alerts as email using the License-related templates.">
+            <Controller name="licenseAlertsEmailEnabled" control={control} render={({ field }) => (
+              <Switch checked={field.value} onCheckedChange={field.onChange} />
+            )} />
+          </SettingsSwitchRow>
+          <SettingsField label="Warning lead time (days)" description="How many days before the expiry date the warning alert should fire." htmlFor="licenseExpiryWarningDays">
+            <div className="flex items-center gap-2">
+              <Input id="licenseExpiryWarningDays" type="number" min={1} max={365} className="w-24" {...register("licenseExpiryWarningDays", { valueAsNumber: true })} />
+              <span className="text-xs text-muted-foreground">days before expiry</span>
+            </div>
+            {errors.licenseExpiryWarningDays && <p className="text-xs text-destructive mt-1">{errors.licenseExpiryWarningDays.message}</p>}
+          </SettingsField>
+          <SettingsSwitchRow label="Alert when expired" description="Also send an alert once a license has passed its expiry date.">
+            <Controller name="licenseNotifyOnExpired" control={control} render={({ field }) => (
+              <Switch checked={field.value} onCheckedChange={field.onChange} />
+            )} />
+          </SettingsSwitchRow>
+          <SettingsSwitchRow label="Alert when over seat limit" description="Send an alert when active assignments exceed the license's totalSeats.">
+            <Controller name="licenseNotifyOnOverLimit" control={control} render={({ field }) => (
+              <Switch checked={field.value} onCheckedChange={field.onChange} />
+            )} />
+          </SettingsSwitchRow>
+        </div>
+
+        {/* SaaS subscriptions */}
+        <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Cloud className="h-4 w-4 text-indigo-600" />
+            <p className="text-sm font-semibold">SaaS subscriptions</p>
+          </div>
+          <SettingsSwitchRow label="In-app notifications" description="Show alerts in the notification center when a subscription is approaching renewal.">
+            <Controller name="saasAlertsInAppEnabled" control={control} render={({ field }) => (
+              <Switch checked={field.value} onCheckedChange={field.onChange} />
+            )} />
+          </SettingsSwitchRow>
+          <SettingsSwitchRow label="Email notifications" description="Send the same alerts as email using the SaaS renewal template.">
+            <Controller name="saasAlertsEmailEnabled" control={control} render={({ field }) => (
+              <Switch checked={field.value} onCheckedChange={field.onChange} />
+            )} />
+          </SettingsSwitchRow>
+          <SettingsField label="Renewal lead time (days)" description="How many days before the renewal date the alert should fire." htmlFor="saasRenewalWarningDays">
+            <div className="flex items-center gap-2">
+              <Input id="saasRenewalWarningDays" type="number" min={1} max={365} className="w-24" {...register("saasRenewalWarningDays", { valueAsNumber: true })} />
+              <span className="text-xs text-muted-foreground">days before renewal</span>
+            </div>
+            {errors.saasRenewalWarningDays && <p className="text-xs text-destructive mt-1">{errors.saasRenewalWarningDays.message}</p>}
+          </SettingsField>
+        </div>
+
+        {/* Recipients */}
+        <div className={`rounded-lg border bg-muted/20 p-4 space-y-3 ${!anyAlertEnabled ? "opacity-60" : ""}`}>
+          <div className="flex items-center gap-2">
+            <Bell className="h-4 w-4 text-emerald-600" />
+            <p className="text-sm font-semibold">Recipients</p>
+          </div>
+          {!anyAlertEnabled && (
+            <p className="text-xs text-muted-foreground">
+              Enable at least one license or SaaS alert above to start delivering notifications.
+            </p>
+          )}
+
+          <SettingsSwitchRow label="Notify license / subscription owners" description="Always include the user listed in the Owner field of the license or subscription record.">
+            <Controller name="notifyAssetOwners" control={control} render={({ field }) => (
+              <Switch checked={field.value} onCheckedChange={field.onChange} />
+            )} />
+          </SettingsSwitchRow>
+
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium">Specific users</p>
+            <p className="text-xs text-muted-foreground">Pick admins or asset managers who should always receive these alerts.</p>
+            <Controller
+              name="alertRecipientUserIds"
+              control={control}
+              render={({ field }) => {
+                const selected: string[] = Array.isArray(field.value) ? (field.value as string[]) : [];
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-56 overflow-y-auto rounded-md border bg-background p-2">
+                    {agents.length === 0 && <p className="text-xs text-muted-foreground p-2">No users available.</p>}
+                    {agents.map((u) => {
+                      const checked = selected.includes(u.id);
+                      return (
+                        <label key={u.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/60 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-border accent-primary"
+                            checked={checked}
+                            onChange={(e) => {
+                              if (e.target.checked) field.onChange([...selected, u.id]);
+                              else field.onChange(selected.filter((x) => x !== u.id));
+                            }}
+                          />
+                          <span className="text-sm truncate">{u.name}</span>
+                          <span className="text-[11px] text-muted-foreground truncate">{u.email}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+              }}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium">Teams</p>
+            <p className="text-xs text-muted-foreground">All members of the selected teams will receive alerts.</p>
+            <Controller
+              name="alertRecipientTeamIds"
+              control={control}
+              render={({ field }) => {
+                const selected: number[] = Array.isArray(field.value) ? (field.value as number[]) : [];
+                return (
+                  <div className="flex flex-wrap gap-2">
+                    {teams.length === 0 && <p className="text-xs text-muted-foreground">No teams available.</p>}
+                    {teams.map((t) => {
+                      const checked = selected.includes(t.id);
+                      return (
+                        <button
+                          type="button"
+                          key={t.id}
+                          onClick={() => {
+                            if (checked) field.onChange(selected.filter((x) => x !== t.id));
+                            else field.onChange([...selected, t.id]);
+                          }}
+                          className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                            checked
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-background hover:bg-muted/60 border-border"
+                          }`}
+                        >
+                          {t.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      </SettingsGroup>
     </SettingsFormShell>
   );
 }
@@ -3647,11 +3853,15 @@ interface NotifTemplate {
 }
 
 const NOTIF_EVENT_LABELS: Record<string, string> = {
-  "ticket.created":    "Auto-Response: Ticket Received (sent to customer)",
-  "ticket.assigned":   "Ticket Assigned to Agent / Team",
-  "ticket.escalated":  "Ticket Escalated to Agent / Team",
-  "incident.escalated":"Incident Escalated to Agent / Team",
-  "sla.breached":      "SLA Breach Alert",
+  "ticket.created":     "Auto-Response: Ticket Received (sent to customer)",
+  "ticket.assigned":    "Ticket Assigned to Agent / Team",
+  "ticket.escalated":   "Ticket Escalated to Agent / Team",
+  "incident.escalated": "Incident Escalated to Agent / Team",
+  "sla.breached":       "SLA Breach Alert",
+  "saas.renewal_soon":  "SaaS Subscription Renewal Upcoming",
+  "license.expiry_soon":"Software License Expiring Soon",
+  "license.expired":    "Software License Expired",
+  "license.over_limit": "Software License Over Seat Limit",
 };
 
 function NotificationEmailTemplates() {

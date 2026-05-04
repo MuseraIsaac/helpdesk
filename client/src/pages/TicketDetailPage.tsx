@@ -1235,13 +1235,28 @@ export default function TicketDetailPage() {
         />
       )}
 
-      {/* Template dialog */}
+      {/* Template dialog — capture the source ticket's structured fields
+          alongside the title + body so the template can replay them onto
+          a new ticket, not just the text. */}
       <SaveAsTemplateDialog
         open={templateDialog}
         onOpenChange={setTemplateDialog}
         type="ticket"
         defaultTitle={ticket.subject}
         defaultBody={ticket.body}
+        defaultFields={{
+          category:           ticket.category           ?? null,
+          ticketType:         ticket.ticketType         ?? null,
+          customTicketTypeId: ticket.customTicketTypeId ?? null,
+          priority:           ticket.priority           ?? null,
+          severity:           ticket.severity           ?? null,
+          impact:             ticket.impact             ?? null,
+          urgency:            ticket.urgency            ?? null,
+          affectedSystem:     ticket.affectedSystem     ?? null,
+          teamId:             ticket.teamId             ?? null,
+          assignedToId:       ticket.assignedTo?.id     ?? null,
+          customFields:       (ticket.customFields ?? {}) as Record<string, unknown>,
+        }}
       />
 
       {/* Scenario automation sheet */}
