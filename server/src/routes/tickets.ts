@@ -108,15 +108,23 @@ router.get("/stats/daily-volume", requireAuth, async (_req, res) => {
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
   thirtyDaysAgo.setHours(0, 0, 0, 0);
 
-  const tickets = await prisma.ticket.findMany({
-    where: { createdAt: { gte: thirtyDaysAgo } },
-    select: { createdAt: true },
-  });
+  // SQL-side bucket — pulls back at most 30 rows over the wire instead of
+  // every ticket's createdAt for the period. Critical for low-latency
+  // dashboard refresh once volume scales.
+  type Row = { date: Date; count: bigint };
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT date_trunc('day', "createdAt")::date AS date,
+           COUNT(*)::bigint                     AS count
+      FROM "ticket"
+     WHERE "createdAt" >= ${thirtyDaysAgo}
+       AND "deleted_at" IS NULL
+     GROUP BY 1
+     ORDER BY 1
+  `;
 
   const countsByDate = new Map<string, number>();
-  for (const t of tickets) {
-    const dateKey = t.createdAt.toISOString().slice(0, 10);
-    countsByDate.set(dateKey, (countsByDate.get(dateKey) ?? 0) + 1);
+  for (const r of rows) {
+    countsByDate.set(r.date.toISOString().slice(0, 10), Number(r.count));
   }
 
   const data: { date: string; tickets: number }[] = [];
@@ -127,6 +135,9 @@ router.get("/stats/daily-volume", requireAuth, async (_req, res) => {
     data.push({ date: dateKey, tickets: countsByDate.get(dateKey) ?? 0 });
   }
 
+  // Cache hint — dashboard refetches this every minute or so; 30 s of
+  // shared CDN/proxy cache is harmless and shaves repeat hits.
+  res.set("Cache-Control", "private, max-age=30");
   res.json({ data });
 });
 

@@ -513,7 +513,7 @@ function TemplateTabContent({
   templates,
   isLoading,
   search,
-  canManage,
+  canManageTemplate,
   onEdit,
   onDuplicate,
   onDelete,
@@ -523,7 +523,7 @@ function TemplateTabContent({
   templates: Template[] | undefined;
   isLoading: boolean;
   search: string;
-  canManage: boolean;
+  canManageTemplate: (t: Template) => boolean;
   onEdit: (t: Template) => void;
   onDuplicate: (t: Template) => void;
   onDelete: (t: Template) => void;
@@ -579,7 +579,7 @@ function TemplateTabContent({
         <TemplateCard
           key={t.id}
           template={t}
-          canManage={canManage}
+          canManage={canManageTemplate(t)}
           onEdit={() => onEdit(t)}
           onDuplicate={() => onDuplicate(t)}
           onDelete={() => onDelete(t)}
@@ -598,7 +598,12 @@ type DialogState =
 
 export default function TemplatesPage() {
   const { data: session } = useSession();
-  const canManage = session?.user?.role === "admin" || session?.user?.role === "supervisor";
+  const userId = session?.user?.id ?? "";
+  const isPrivileged = session?.user?.role === "admin" || session?.user?.role === "supervisor";
+  // Per-template manage check: own templates are always editable by their
+  // creator; admins/supervisors can manage every template regardless of
+  // ownership. Mirrors the server-side rule in routes/templates.ts.
+  const canManageTemplate = (t: Template) => isPrivileged || t.createdById === userId;
 
   const [activeTab, setActiveTab] = useState<TemplateType>("ticket");
   const [search, setSearch] = useState("");
@@ -705,7 +710,7 @@ export default function TemplatesPage() {
               templates={data}
               isLoading={isLoading}
               search={search}
-              canManage={canManage}
+              canManageTemplate={canManageTemplate}
               onEdit={(tmpl) => setDialog({ mode: "edit", template: tmpl })}
               onDuplicate={(tmpl) => duplicateMutation.mutate(tmpl)}
               onDelete={(tmpl) => setDeleting(tmpl)}
@@ -729,7 +734,14 @@ export default function TemplatesPage() {
             key={dialog?.mode === "edit" ? dialog.template.id : `create-${activeTab}`}
             template={dialog?.mode === "edit" ? dialog.template : undefined}
             defaultType={dialogType}
-            canManage={canManage}
+            // For an edit, manage permission is per-template (creator or
+            // privileged role); for a create, the user owns the new template
+            // by definition so they can always manage it.
+            canManage={
+              dialog?.mode === "edit"
+                ? canManageTemplate(dialog.template)
+                : true
+            }
             onSuccess={close}
           />
         </DialogContent>

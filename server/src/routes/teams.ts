@@ -9,6 +9,7 @@ import {
   setTeamMembersSchema,
 } from "core/schemas/teams.ts";
 import { logSystemAudit } from "../lib/audit";
+import { setShortCache } from "../lib/cache-control";
 import prisma from "../db";
 
 const router = Router();
@@ -19,6 +20,7 @@ router.use(requireAuth);
 // ── List teams (with members — used by ticket sidebar for agent filtering) ───
 
 router.get("/", async (_req, res) => {
+  setShortCache(res);
   const teams = await prisma.team.findMany({
     orderBy: { name: "asc" },
     select: {

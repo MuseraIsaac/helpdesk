@@ -408,72 +408,71 @@ export type CloneDashboardInput  = z.infer<typeof cloneDashboardSchema>;
  * Used when a user has no saved personal dashboard.
  * Not stored in the DB — always derived from this constant.
  *
- * Layout philosophy — top-to-bottom service-desk story:
- *   Row 1  (h=2)  ── Volume snapshot:         total · open · resolved · escalated
- *   Row 2  (h=2)  ── Performance snapshot:    MTTA · MTTR · SLA compliance · SLA breached
- *   Row 3  (h=5)  ── Trends:                  tickets per day · agent leaderboard
- *   Row 4  (h=5)  ── What & where:            category · priority · aging
- *   Row 5  (h=2)  ── Customer satisfaction:   avg rating · positive · negative · response rate
- *   Row 6  (h=5)  ── Quality deep-dives:      SLA by dimension · CSAT distribution
+ * Snapshotted on 2026-05-04 from the admin's "Service Desk Pulse"
+ * dashboard so every new user opens onto the curated layout the team
+ * has been actively iterating on, instead of the original generic
+ * baseline. Visible widgets carry over their accent colours and
+ * chart-type overrides so the appearance is identical to the source.
  *
- * Total height: ~21 rows. Tells a coherent story without overwhelming.
- * Less-essential ITSM-module widgets stay registered but hidden so they can
- * be toggled on with one click in the customizer.
+ * Visible (in render order):
+ *   Row 1 (h=2): volume_open · volume_total · perf_mtta · perf_mttr · volume_reopened
+ *   Row 2 (h=5): backlog_trend (6w)            · by_assignee (5w)
+ *   Row 3 (h=4): breakdown_aging · breakdown_priority · channel_breakdown
+ *   Row 4 (h=5): top_open_tickets (full width)
+ *
+ * Less-essential widgets stay registered but hidden so they can be
+ * toggled on with one click in the customizer.
  */
 export const SYSTEM_DEFAULT_CONFIG: DashboardConfigData = {
   period:  30,
   density: "comfortable",
   widgets: [
-    // ── Row 1 — Volume snapshot (4 stat tiles, full-width row, h=2) ──────────
-    { id: "volume_total",        visible: true,  order: 0,  x: 0, y:  0, w: 3, h: 2 },
-    { id: "volume_open",         visible: true,  order: 1,  x: 3, y:  0, w: 3, h: 2 },
-    { id: "volume_resolved",     visible: true,  order: 2,  x: 6, y:  0, w: 3, h: 2 },
-    { id: "volume_escalated",    visible: true,  order: 3,  x: 9, y:  0, w: 3, h: 2 },
+    // ── Row 1 — Volume + performance stat tiles ─────────────────────────────
+    { id: "volume_open",         visible: true,  order: 0,  x: 0, y:  0, w: 3, h: 2, appearance: { accentColor: "#f97316" } },
+    { id: "volume_total",        visible: true,  order: 1,  x: 3, y:  0, w: 2, h: 2, appearance: { accentColor: "#10b981" } },
+    { id: "perf_mtta",           visible: true,  order: 2,  x: 5, y:  0, w: 2, h: 2, appearance: { accentColor: "#3b82f6" } },
+    { id: "perf_mttr",           visible: true,  order: 3,  x: 7, y:  0, w: 2, h: 2, appearance: { accentColor: "#8b5cf6" } },
+    { id: "volume_reopened",     visible: true,  order: 4,  x: 9, y:  0, w: 2, h: 2, appearance: { accentColor: "#EAB308" } },
 
-    // ── Row 2 — Performance snapshot (4 stat tiles, full-width row, h=2) ────
-    { id: "perf_mtta",           visible: true,  order: 4,  x: 0, y:  2, w: 3, h: 2 },
-    { id: "perf_mttr",           visible: true,  order: 5,  x: 3, y:  2, w: 3, h: 2 },
-    { id: "perf_sla_compliance", visible: true,  order: 6,  x: 6, y:  2, w: 3, h: 2 },
-    { id: "perf_sla_breached",   visible: true,  order: 7,  x: 9, y:  2, w: 3, h: 2 },
+    // ── Row 2 — Backlog trend + assignee load ───────────────────────────────
+    { id: "backlog_trend",       visible: true,  order: 5,  x: 0, y:  2, w: 6, h: 5, appearance: { accentColor: "#10b981" } },
+    { id: "by_assignee",         visible: true,  order: 6,  x: 6, y:  2, w: 5, h: 5 },
 
-    // ── Row 3 — Trend + leaderboard ─────────────────────────────────────────
-    { id: "tickets_per_day",     visible: true,  order: 8,  x: 0, y:  4, w: 7, h: 4 },
-    { id: "agent_leaderboard",   visible: true,  order: 9,  x: 7, y:  4, w: 5, h: 4 },
+    // ── Row 3 — Aging · priority · channel breakdowns ───────────────────────
+    { id: "breakdown_aging",     visible: true,  order: 7,  x: 0, y:  7, w: 4, h: 4, appearance: { accentColor: "#f59e0b" } },
+    { id: "breakdown_priority",  visible: true,  order: 8,  x: 4, y:  7, w: 4, h: 4, appearance: { chartType: "pie", accentColor: "#ef4444" } },
+    { id: "channel_breakdown",   visible: true,  order: 9,  x: 8, y:  7, w: 4, h: 4, appearance: { accentColor: "#06b6d4" } },
 
-    // ── Row 4 — Category / priority / aging breakdowns ──────────────────────
-    { id: "breakdown_category",  visible: true,  order: 10, x: 0, y:  8, w: 4, h: 4 },
-    { id: "breakdown_priority",  visible: true,  order: 11, x: 4, y:  8, w: 4, h: 4 },
-    { id: "breakdown_aging",     visible: true,  order: 12, x: 8, y:  8, w: 4, h: 4 },
-
-    // ── Row 5 — Customer satisfaction stat tiles ────────────────────────────
-    { id: "csat_avg_rating",     visible: true,  order: 13, x: 0, y: 12, w: 3, h: 2 },
-    { id: "csat_positive_rate",  visible: true,  order: 14, x: 3, y: 12, w: 3, h: 2 },
-    { id: "csat_negative_rate",  visible: true,  order: 15, x: 6, y: 12, w: 3, h: 2 },
-    { id: "csat_response_rate",  visible: true,  order: 16, x: 9, y: 12, w: 3, h: 2 },
-
-    // ── Row 6 — Quality deep-dives ──────────────────────────────────────────
-    { id: "sla_by_dimension",    visible: true,  order: 17, x: 0, y: 14, w: 6, h: 4 },
-    { id: "csat_distribution",   visible: true,  order: 18, x: 6, y: 14, w: 6, h: 4 },
+    // ── Row 4 — Oldest open tickets ─────────────────────────────────────────
+    { id: "top_open_tickets",    visible: true,  order: 10, x: 0, y: 11, w: 12, h: 5 },
 
     // ── Off-by-default — toggle on from the customizer when needed ──────────
     // Stat extras
-    { id: "volume_reopened",     visible: false, order: 19, x: 0, w: 3, h: 2 },
-    { id: "perf_ai_resolution",  visible: false, order: 20, x: 0, w: 3, h: 2 },
+    { id: "volume_resolved",     visible: false, order: 11, x: 0, w: 3, h: 2 },
+    { id: "volume_escalated",    visible: false, order: 12, x: 0, w: 3, h: 2 },
+    { id: "perf_ai_resolution",  visible: false, order: 13, x: 0, w: 3, h: 2 },
+    { id: "perf_sla_compliance", visible: false, order: 14, x: 0, w: 3, h: 2 },
+    { id: "perf_sla_breached",   visible: false, order: 15, x: 0, w: 3, h: 2 },
     // Composite originals — kept for backwards compatibility
-    { id: "volume",              visible: false, order: 21, x: 0, w: 12, h: 3 },
-    { id: "performance",         visible: false, order: 22, x: 0, w: 12, h: 3 },
-    { id: "breakdowns",          visible: false, order: 23, x: 0, w: 12, h: 6 },
-    { id: "csat",                visible: false, order: 24, x: 0, w: 12, h: 8 },
+    { id: "volume",              visible: false, order: 16, x: 0, w: 12, h: 3 },
+    { id: "performance",         visible: false, order: 17, x: 0, w: 12, h: 3 },
+    { id: "breakdowns",          visible: false, order: 18, x: 0, w: 12, h: 5 },
+    { id: "csat",                visible: false, order: 19, x: 0, w: 12, h: 7 },
     // Service-desk extras
-    { id: "by_assignee",         visible: false, order: 25, x: 0, w:  6, h: 5 },
-    { id: "channel_breakdown",   visible: false, order: 26, x: 0, w:  4, h: 6 },
-    { id: "backlog_trend",       visible: false, order: 27, x: 0, w:  8, h: 6 },
-    { id: "top_open_tickets",    visible: false, order: 28, x: 0, w:  8, h: 6 },
+    { id: "tickets_per_day",     visible: false, order: 20, x: 0, w:  6, h: 4 },
+    { id: "breakdown_category",  visible: false, order: 21, x: 0, w:  4, h: 4 },
     // Quality extras
-    { id: "csat_trend",          visible: false, order: 29, x: 0, w:  6, h: 6 },
-    { id: "csat_recent",         visible: false, order: 30, x: 0, w:  6, h: 5 },
-    { id: "fcr_rate",            visible: false, order: 31, x: 0, w:  4, h: 5 },
-    { id: "resolution_dist",     visible: false, order: 32, x: 0, w:  6, h: 6 },
+    { id: "sla_by_dimension",    visible: false, order: 22, x: 0, w:  6, h: 5 },
+    { id: "csat_trend",          visible: false, order: 23, x: 0, w:  6, h: 5 },
+    { id: "fcr_rate",            visible: false, order: 24, x: 0, w:  4, h: 4 },
+    { id: "resolution_dist",     visible: false, order: 25, x: 0, w:  6, h: 5 },
+    { id: "csat_avg_rating",     visible: false, order: 26, x: 0, w:  3, h: 2 },
+    { id: "csat_positive_rate",  visible: false, order: 27, x: 0, w:  3, h: 2 },
+    { id: "csat_negative_rate",  visible: false, order: 28, x: 0, w:  3, h: 2 },
+    { id: "csat_response_rate",  visible: false, order: 29, x: 0, w:  3, h: 2 },
+    { id: "csat_distribution",   visible: false, order: 30, x: 0, w:  6, h: 4 },
+    { id: "csat_recent",         visible: false, order: 31, x: 0, w:  6, h: 4 },
+    { id: "agent_leaderboard",   visible: false, order: 32, x: 0, w:  6, h: 5 },
     // ITSM module deep-dives
     { id: "incident_analytics",  visible: false, order: 33, x: 0, w: 12, h: 8 },
     { id: "request_fulfillment", visible: false, order: 34, x: 0, w:  6, h: 6 },

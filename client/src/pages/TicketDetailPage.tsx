@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useParams, Link } from "react-router";
+import { useParams, useNavigate, Link } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { type Ticket } from "core/constants/ticket.ts";
@@ -457,6 +457,7 @@ function LinkedCIsSection({
 
 export default function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { data: session } = useSession();
   const { data: ticketSettings } = useSettings("tickets");
   const defaultReplyMode: ReplyType = ticketSettings?.replyDefaultMode ?? "reply_all";
@@ -660,6 +661,22 @@ export default function TicketDetailPage() {
               {presenceEnabled && session?.user && (
                 <PresenceIndicator viewers={viewers} currentUserId={session.user.id} />
               )}
+
+              {/* New Ticket — quick path to start a fresh ticket without
+               *  navigating back to the tickets list first. Visually
+               *  primary-tinted so it stands out from the Watch/Merge/etc.
+               *  outline buttons that act on the current ticket. */}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5 h-8 border-primary/40 text-primary hover:bg-primary/10 hover:border-primary/60 shadow-sm"
+                onClick={() => navigate("/tickets/new")}
+                title="Create a new ticket"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">New Ticket</span>
+              </Button>
 
               {/* Watch / Unwatch */}
               <Button

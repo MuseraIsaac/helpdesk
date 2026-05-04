@@ -3,6 +3,7 @@ import Sentry from "./lib/sentry";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import compression from "compression";
 import rateLimit from "express-rate-limit";
 import { toNodeHandler } from "better-auth/node";
 import { auth, reloadAuth } from "./lib/auth";
@@ -143,6 +144,13 @@ app.use(
     credentials: true,
   })
 );
+
+// gzip compression — biggest single win for the agent ticket list endpoint
+// (large JSON with last-reply / last-note previews) and dashboard payloads.
+// Threshold of 1 KB skips compressing tiny responses where the CPU cost
+// outweighs the saving. Uses the default zlib level for a balanced
+// CPU / size trade-off.
+app.use(compression({ threshold: 1024 }));
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

@@ -29,13 +29,16 @@ const adapter = new PrismaPg({
   // Recycle our own idle clients after 30 s — well under typical server-side
   // idle timeouts (60 s+) so we never reuse a half-dead socket
   idleTimeoutMillis:   30_000,
-  // Connection cap — TicketsPage fires ~8 parallel API calls on first load
-  // (session, me, teams, agents, status configs, ticket types, tickets
-  // findMany+count). The original cap of 10 saturated when pg-boss workers
-  // also drew from the pool. Lift modestly to 15 — going higher (e.g. 25)
-  // tripped the remote DB's per-IP connection limit and produced 28P01
-  // auth-failed errors as the server defensively rejected new connections.
-  max:                 15,
+  // Connection cap — sized for ~100 concurrent agents. Each agent's first
+  // page fires ~8 parallel queries (session, me, teams, agents, status
+  // configs, ticket types, tickets findMany+count); a small pool queues
+  // requests under burst and shows up as latency spikes. Configurable via
+  // DATABASE_POOL_MAX so ops can tune to the remote DB's actual per-IP
+  // connection budget without a code change. pg-boss takes another 5 on
+  // top of this. With Postgres `max_connections` typically at 100, 40 is
+  // a comfortable middle ground (40 + 5 = 45 used, ≥55 free for other
+  // services and headroom).
+  max: Number(process.env.DATABASE_POOL_MAX) || 40,
   // The remote DB at 138.199.153.57 has ~140 ms RTT and occasional
   // slow-handshake bursts under load. 10s was tight; 30s gives the
   // Postgres SASL handshake enough room to complete without forcing the

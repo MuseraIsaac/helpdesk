@@ -59,6 +59,8 @@ import {
   ChevronDown,
   Search as SearchIcon,
   Sparkles,
+  Settings2,
+  ExternalLink,
 } from "lucide-react";
 import { useSession } from "@/lib/auth-client";
 
@@ -757,6 +759,24 @@ export default function NewTicketPage() {
                       </Button>
                     </div>
                   )}
+                  {/* Manage templates — opens the full Templates library in a
+                      new tab so the agent doesn't lose their in-progress
+                      ticket draft. */}
+                  <div className="px-2 py-1.5 border-t bg-muted/20 flex items-center justify-between gap-2">
+                    <p className="text-[10px] text-muted-foreground/80 pl-1">
+                      {ticketTemplates.length} template{ticketTemplates.length === 1 ? "" : "s"} available
+                    </p>
+                    <a
+                      href="/templates"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline rounded-md px-2 py-1 hover:bg-primary/5 transition-colors"
+                    >
+                      <Settings2 className="h-3 w-3" />
+                      Manage templates
+                      <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+                    </a>
+                  </div>
                 </PopoverContent>
               </Popover>
 
