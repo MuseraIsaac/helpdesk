@@ -168,6 +168,10 @@ export const auditActions = [
   "kb.article_archived",
   "kb.article_submitted_review",
   "kb.article_approved",
+
+  // ── Reports (captureReportEvents) ──────────────────────────────────────
+  "report.exported",
+  "report.shared",
 ] as const;
 
 export type AuditAction = (typeof auditActions)[number];

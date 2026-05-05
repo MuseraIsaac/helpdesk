@@ -32,6 +32,7 @@ import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 import { categoryLabel } from "core/constants/ticket-category.ts";
 import { priorityLabel } from "core/constants/ticket-priority.ts";
 import prisma from "../db";
+import { logSystemAudit } from "../lib/audit";
 import { buildStyledWorkbook } from "../lib/excel-export";
 import {
   buildCsv, buildFilename, buildPeriodLabel, isoDate, isoTs,
@@ -1121,6 +1122,17 @@ router.post("/export", async (req, res) => {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.send(csv);
   }
+
+  void logSystemAudit(req.user!.id, "report.exported", {
+    section,
+    sectionLabel: title,
+    format,
+    period:   period ?? null,
+    from:     from ?? null,
+    to:       to ?? null,
+    filterDesc,
+    filename,
+  });
 });
 
 export default router;

@@ -62,6 +62,8 @@ interface ConnectedWidgetProps {
   widget: WidgetLayout;
   /** Canvas-level date range (used when widget has no per-widget override). */
   canvasDateRange: { preset: string };
+  /** Canvas-level filter set applied to widgets without their own override. */
+  canvasFilters?: { logic: "and" | "or"; conditions: unknown[] };
   cellHeight: number;
   editMode: boolean;
   onEdit:      () => void;
@@ -70,16 +72,20 @@ interface ConnectedWidgetProps {
 }
 
 function ConnectedWidget({
-  widget, canvasDateRange, cellHeight, editMode, onEdit, onDuplicate, onRemove,
+  widget, canvasDateRange, canvasFilters, cellHeight, editMode, onEdit, onDuplicate, onRemove,
 }: ConnectedWidgetProps) {
   const dateRange = widget.dateRange ?? canvasDateRange;
+  // Canvas-level filters apply when the widget has no per-widget override.
+  // Widget-specific filters trump canvas defaults so individual widgets can
+  // be scoped tighter than the report as a whole.
+  const filters = widget.filters ?? canvasFilters;
 
   const { data, isLoading, error, refetch } = useMetricQuery(
     widget.id,
     {
       metricId:            widget.metricId,
       dateRange,
-      filters:             widget.filters,
+      filters,
       groupBy:             widget.groupBy,
       visualization:       widget.visualization,
       sort:                widget.sort,
@@ -132,6 +138,8 @@ function ConnectedWidget({
 export interface ReportCanvasProps {
   widgets: WidgetLayout[];
   dateRange: { preset: string };
+  /** Canvas-level filters applied to every widget that hasn't set its own. */
+  filters?: { logic: "and" | "or"; conditions: unknown[] };
   editMode: boolean;
   containerWidth: number;
   onLayoutChange: (updated: WidgetLayout[]) => void;
@@ -143,6 +151,7 @@ export interface ReportCanvasProps {
 export function ReportCanvas({
   widgets,
   dateRange,
+  filters,
   editMode,
   containerWidth,
   onLayoutChange,
@@ -200,6 +209,7 @@ export function ReportCanvas({
               <ConnectedWidget
                 widget={widget}
                 canvasDateRange={dateRange}
+                canvasFilters={filters}
                 cellHeight={cellHeight}
                 editMode={editMode}
                 onEdit={() => onEditWidget(widget.id)}

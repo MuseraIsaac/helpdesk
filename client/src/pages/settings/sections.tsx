@@ -4390,6 +4390,11 @@ export function AuditSection() {
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
+        <SettingsSwitchRow label="Report events" description="Report downloads (CSV / XLSX) and reports shared via email.">
+          <Controller name="captureReportEvents" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
       </SettingsGroup>
 
       <SettingsGroup title="Export">

@@ -748,6 +748,7 @@ export const auditSettingsSchema = z.object({
   captureSettingsChanges:      z.boolean().default(true),
   captureUserManagement:       z.boolean().default(true),
   captureKbEvents:             z.boolean().default(false),
+  captureReportEvents:         z.boolean().default(true),
   // Export
   exportEnabled:               z.boolean().default(true),
   exportFormat:                z.enum(["json", "csv"]).default("json"),

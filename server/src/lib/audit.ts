@@ -76,6 +76,7 @@ type CaptureSetting = keyof Pick<
   | "captureSettingsChanges"
   | "captureUserManagement"
   | "captureKbEvents"
+  | "captureReportEvents"
 >;
 
 const ACTION_CATEGORY: Partial<Record<AuditAction, CaptureSetting>> = {
@@ -205,6 +206,9 @@ const ACTION_CATEGORY: Partial<Record<AuditAction, CaptureSetting>> = {
   "kb.article_archived":          "captureKbEvents",
   "kb.article_submitted_review":  "captureKbEvents",
   "kb.article_approved":          "captureKbEvents",
+  // ── Reports ─────────────────────────────────────────────────────────────
+  "report.exported":          "captureReportEvents",
+  "report.shared":            "captureReportEvents",
 };
 
 // ── Settings cache (1-minute TTL) ─────────────────────────────────────────────
@@ -288,6 +292,8 @@ export async function logAudit(
  *   kb.article_archived  { articleId: number, title: string }
  *   kb.article_submitted_review { articleId: number, title: string }
  *   kb.article_approved  { articleId: number, title: string }
+ *   report.exported     { section, sectionLabel, format: "csv"|"xlsx", period?, from?, to?, filterDesc? }
+ *   report.shared       { section, sectionLabel, recipientCount, recipients: string[], reportId?, period?, from?, to? }
  */
 export async function logSystemAudit(
   actorId: string | null,

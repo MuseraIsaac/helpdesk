@@ -27,16 +27,54 @@ function fmtSeconds(s: number): string {
   return `${(s / 86400).toFixed(1)}d`;
 }
 
+// Per-unit tone family — picks up a coloured backdrop and value tint so the
+// stat reads as a meaningful indicator instead of a floating number.
+function unitTone(unit?: string) {
+  switch (unit) {
+    case "percent":
+      return {
+        wash: "from-emerald-500/[0.06] via-transparent to-transparent",
+        text: "text-emerald-700 dark:text-emerald-300",
+        glow: "bg-emerald-500/15",
+      };
+    case "seconds":
+    case "hours":
+    case "days":
+      return {
+        wash: "from-blue-500/[0.06] via-transparent to-transparent",
+        text: "text-blue-700 dark:text-blue-300",
+        glow: "bg-blue-500/15",
+      };
+    case "score":
+      return {
+        wash: "from-amber-500/[0.06] via-transparent to-transparent",
+        text: "text-amber-700 dark:text-amber-300",
+        glow: "bg-amber-500/15",
+      };
+    default:
+      return {
+        wash: "from-violet-500/[0.06] via-transparent to-transparent",
+        text: "text-foreground",
+        glow: "bg-violet-500/15",
+      };
+  }
+}
+
 // ── Stat (simple) ─────────────────────────────────────────────────────────────
 
 export function StatWidget({ result }: { result: StatResult }) {
+  const tone = unitTone(result.unit);
   return (
-    <div className="flex flex-col justify-center h-full px-1 py-1 select-none">
-      <p className="text-[2.4rem] font-bold tabular-nums leading-none tracking-tight text-foreground">
+    <div className="relative flex flex-col justify-center h-full px-1 py-1 select-none overflow-hidden">
+      {/* Subtle backdrop wash + ambient glow orb in the corner */}
+      <div className={cn("absolute inset-0 bg-gradient-to-br pointer-events-none", tone.wash)} />
+      <div className={cn("absolute -top-6 -right-6 h-20 w-20 rounded-full blur-2xl pointer-events-none", tone.glow)} />
+
+      <p className={cn("relative text-[2.4rem] font-bold tabular-nums leading-none tracking-tight", tone.text)}>
         {formatValue(result.value, result.unit)}
       </p>
       {result.sub && (
-        <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">{result.sub}</p>
+        <p className="relative text-[11px] text-muted-foreground mt-2 leading-relaxed">{result.sub}</p>
       )}
     </div>
   );
@@ -46,11 +84,13 @@ export function StatWidget({ result }: { result: StatResult }) {
 
 export function StatChangeWidget({ result }: { result: StatChangeResult }) {
   const dir = result.changeDirection;
+  const tone = unitTone(result.unit);
 
-  const deltaColor =
-    dir === "up"   ? "text-emerald-500 dark:text-emerald-400" :
-    dir === "down" ? "text-destructive" :
-    "text-muted-foreground";
+  // Delta pill — full coloured tinted background, not just text+icon
+  const deltaPill =
+    dir === "up"   ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30" :
+    dir === "down" ? "bg-red-500/15     text-red-700     dark:text-red-300     border-red-500/30"     :
+                     "bg-muted/60       text-muted-foreground                   border-border/50";
 
   const DeltaIcon =
     dir === "up"   ? TrendingUp :
@@ -58,30 +98,36 @@ export function StatChangeWidget({ result }: { result: StatChangeResult }) {
     Minus;
 
   return (
-    <div className="flex flex-col justify-center h-full px-1 py-1 select-none">
-      <p className="text-[2.4rem] font-bold tabular-nums leading-none tracking-tight text-foreground">
+    <div className="relative flex flex-col justify-center h-full px-1 py-1 select-none overflow-hidden">
+      <div className={cn("absolute inset-0 bg-gradient-to-br pointer-events-none", tone.wash)} />
+      <div className={cn("absolute -top-6 -right-6 h-20 w-20 rounded-full blur-2xl pointer-events-none", tone.glow)} />
+
+      <p className={cn("relative text-[2.4rem] font-bold tabular-nums leading-none tracking-tight", tone.text)}>
         {formatValue(result.value, result.unit)}
       </p>
 
       {result.changePercent != null && (
-        <div className={cn("flex items-center gap-1 mt-2", deltaColor)}>
-          <DeltaIcon className="h-3.5 w-3.5 shrink-0" />
-          <span className="text-xs font-semibold tabular-nums">
+        <div className="relative flex items-center gap-1.5 mt-2">
+          <span className={cn(
+            "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums",
+            deltaPill,
+          )}>
+            <DeltaIcon className="h-3 w-3 shrink-0" />
             {result.changePercent > 0 ? "+" : ""}{result.changePercent}
             {result.unit === "percent" ? " pp" : "%"}
           </span>
-          <span className="text-[10px] text-muted-foreground font-normal">vs prev. period</span>
+          <span className="text-[10px] text-muted-foreground font-normal">vs prev.</span>
         </div>
       )}
 
       {result.previousValue != null && (
-        <p className="text-[10px] text-muted-foreground mt-1">
-          Prev: {formatValue(result.previousValue, result.unit)}
+        <p className="relative text-[10px] text-muted-foreground mt-1">
+          Prev: <span className="tabular-nums">{formatValue(result.previousValue, result.unit)}</span>
         </p>
       )}
 
       {result.sub && (
-        <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">{result.sub}</p>
+        <p className="relative text-[11px] text-muted-foreground mt-1 leading-relaxed">{result.sub}</p>
       )}
     </div>
   );

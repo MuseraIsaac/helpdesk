@@ -115,116 +115,247 @@ async function main() {
       {
         name: "Service Desk Overview",
         description:
-          "Core ticket health: volume, SLA compliance, first response, resolution times, and escalation stats.",
+          "Executive snapshot of service desk health — volume, SLA, response and resolution speed, AI deflection, backlog, and the longest-waiting open tickets.",
         config: {
           dateRange: { preset: "last_30_days" },
           layout: "grid",
           widgets: [
-            { id: "w_curated_1",  metricId: "tickets.volume",             visualization: "line",         limit: 50, compareWithPrevious: false, x: 0,  y: 0,  w: 8, h: 3 },
-            { id: "w_curated_2",  metricId: "tickets.sla_compliance",     visualization: "number",       limit: 10, compareWithPrevious: true,  x: 8,  y: 0,  w: 4, h: 3 },
-            { id: "w_curated_3",  metricId: "tickets.first_response_time",visualization: "number",       limit: 10, compareWithPrevious: true,  x: 0,  y: 3,  w: 3, h: 2 },
-            { id: "w_curated_4",  metricId: "tickets.resolution_time",    visualization: "number",       limit: 10, compareWithPrevious: true,  x: 3,  y: 3,  w: 3, h: 2 },
-            { id: "w_curated_5",  metricId: "tickets.fcr",                visualization: "number",       limit: 10, compareWithPrevious: false, x: 6,  y: 3,  w: 3, h: 2 },
-            { id: "w_curated_6",  metricId: "tickets.ai_resolution_rate", visualization: "number",       limit: 10, compareWithPrevious: false, x: 9,  y: 3,  w: 3, h: 2 },
-            { id: "w_curated_7",  metricId: "tickets.status_distribution",visualization: "donut",        limit: 10, compareWithPrevious: false, x: 0,  y: 5,  w: 4, h: 4 },
-            { id: "w_curated_8",  metricId: "tickets.priority_distribution",visualization: "donut",      limit: 10, compareWithPrevious: false, x: 4,  y: 5,  w: 4, h: 4 },
-            { id: "w_curated_9",  metricId: "tickets.aging",              visualization: "histogram",    limit: 10, compareWithPrevious: false, x: 8,  y: 5,  w: 4, h: 4 },
-            { id: "w_curated_10", metricId: "tickets.top_open",           visualization: "table",        limit: 10, compareWithPrevious: false, x: 0,  y: 9,  w: 12, h: 4 },
+            // KPI strip — eight headline metrics
+            { id: "w_sdo_k1",  metricId: "tickets.volume",                visualization: "number",         limit: 10, compareWithPrevious: true,  x: 0, y: 0,  w: 3, h: 2 },
+            { id: "w_sdo_k2",  metricId: "tickets.sla_compliance",        visualization: "number",         limit: 10, compareWithPrevious: true,  x: 3, y: 0,  w: 3, h: 2 },
+            { id: "w_sdo_k3",  metricId: "tickets.fcr",                   visualization: "number",         limit: 10, compareWithPrevious: false, x: 6, y: 0,  w: 3, h: 2 },
+            { id: "w_sdo_k4",  metricId: "tickets.ai_resolution_rate",    visualization: "number",         limit: 10, compareWithPrevious: false, x: 9, y: 0,  w: 3, h: 2 },
+            { id: "w_sdo_k5",  metricId: "tickets.first_response_time",   visualization: "number",         limit: 10, compareWithPrevious: true,  x: 0, y: 2,  w: 3, h: 2 },
+            { id: "w_sdo_k6",  metricId: "tickets.resolution_time",       visualization: "number",         limit: 10, compareWithPrevious: true,  x: 3, y: 2,  w: 3, h: 2 },
+            { id: "w_sdo_k7",  metricId: "tickets.overdue",               visualization: "number",         limit: 10, compareWithPrevious: false, x: 6, y: 2,  w: 3, h: 2 },
+            { id: "w_sdo_k8",  metricId: "tickets.assigned_not_replied",  visualization: "number",         limit: 10, compareWithPrevious: false, x: 9, y: 2,  w: 3, h: 2 },
+            // Trends
+            { id: "w_sdo_t1",  metricId: "tickets.volume",                visualization: "line",           limit: 50, compareWithPrevious: false, x: 0, y: 4,  w: 8, h: 3 },
+            { id: "w_sdo_d1",  metricId: "tickets.priority_distribution", visualization: "donut",          limit: 10, compareWithPrevious: false, x: 8, y: 4,  w: 4, h: 3 },
+            { id: "w_sdo_t2",  metricId: "tickets.backlog",               visualization: "area",           limit: 50, compareWithPrevious: false, x: 0, y: 7,  w: 8, h: 3 },
+            { id: "w_sdo_d2",  metricId: "tickets.status_distribution",   visualization: "donut",          limit: 10, compareWithPrevious: false, x: 8, y: 7,  w: 4, h: 3 },
+            // Breakdowns
+            { id: "w_sdo_b1",  metricId: "tickets.aging",                 visualization: "histogram",      limit: 10, compareWithPrevious: false, x: 0, y: 10, w: 4, h: 4 },
+            { id: "w_sdo_b2",  metricId: "tickets.by_team",               visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 4, y: 10, w: 4, h: 4 },
+            { id: "w_sdo_b3",  metricId: "tickets.by_agent",              visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 8, y: 10, w: 4, h: 4 },
+            // Operational table
+            { id: "w_sdo_tbl", metricId: "tickets.top_open",              visualization: "table",          limit: 10, compareWithPrevious: false, x: 0, y: 14, w: 12, h: 4 },
           ],
         },
       },
       {
         name: "Ticket Performance Deep-Dive",
         description:
-          "Volume trend, backlog growth, category and priority breakdowns, and resolution distribution histogram.",
+          "Volume and backlog trends, resolution-time and aging histograms, and category, priority, team and agent breakdowns of ticket flow.",
         config: {
           dateRange: { preset: "last_30_days" },
           layout: "grid",
           widgets: [
-            { id: "w_tp_1", metricId: "tickets.backlog",            visualization: "line",      limit: 50, compareWithPrevious: false, x: 0, y: 0, w: 12, h: 3 },
-            { id: "w_tp_2", metricId: "tickets.volume",             visualization: "bar",       limit: 50, compareWithPrevious: false, x: 0, y: 3, w: 8,  h: 3 },
-            { id: "w_tp_3", metricId: "tickets.by_team",            visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 8, y: 3, w: 4, h: 3 },
-            { id: "w_tp_4", metricId: "tickets.resolution_time",    visualization: "histogram", limit: 50, compareWithPrevious: false, x: 0, y: 6, w: 6,  h: 4 },
-            { id: "w_tp_5", metricId: "tickets.by_agent",           visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 6, y: 6, w: 6, h: 4 },
+            // KPI strip
+            { id: "w_tp_k1", metricId: "tickets.volume",                visualization: "number",         limit: 10, compareWithPrevious: true,  x: 0, y: 0,  w: 3, h: 2 },
+            { id: "w_tp_k2", metricId: "tickets.fcr",                   visualization: "number",         limit: 10, compareWithPrevious: false, x: 3, y: 0,  w: 3, h: 2 },
+            { id: "w_tp_k3", metricId: "tickets.resolution_time",       visualization: "number",         limit: 10, compareWithPrevious: true,  x: 6, y: 0,  w: 3, h: 2 },
+            { id: "w_tp_k4", metricId: "tickets.first_response_time",   visualization: "number",         limit: 10, compareWithPrevious: true,  x: 9, y: 0,  w: 3, h: 2 },
+            // Trends
+            { id: "w_tp_t1", metricId: "tickets.volume",                visualization: "line",           limit: 50, compareWithPrevious: false, x: 0, y: 2,  w: 12, h: 3 },
+            { id: "w_tp_t2", metricId: "tickets.backlog",               visualization: "area",           limit: 50, compareWithPrevious: false, x: 0, y: 5,  w: 12, h: 3 },
+            // Distributions
+            { id: "w_tp_h1", metricId: "tickets.resolution_time",       visualization: "histogram",      limit: 50, compareWithPrevious: false, x: 0, y: 8,  w: 6, h: 4 },
+            { id: "w_tp_h2", metricId: "tickets.aging",                 visualization: "histogram",      limit: 50, compareWithPrevious: false, x: 6, y: 8,  w: 6, h: 4 },
+            // Breakdowns
+            { id: "w_tp_d1", metricId: "tickets.priority_distribution", visualization: "donut",          limit: 10, compareWithPrevious: false, x: 0, y: 12, w: 4, h: 4 },
+            { id: "w_tp_d2", metricId: "tickets.status_distribution",   visualization: "donut",          limit: 10, compareWithPrevious: false, x: 4, y: 12, w: 4, h: 4 },
+            { id: "w_tp_d3", metricId: "tickets.by_team",               visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 8, y: 12, w: 4, h: 4 },
+            { id: "w_tp_d4", metricId: "tickets.by_agent",              visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 0, y: 16, w: 6, h: 4 },
+            // Operational
+            { id: "w_tp_tbl",metricId: "tickets.top_open",              visualization: "table",          limit: 10, compareWithPrevious: false, x: 6, y: 16, w: 6, h: 4 },
           ],
         },
       },
       {
         name: "SLA Health Report",
         description:
-          "SLA compliance rates by priority, category, and team. Agent leaderboard with breach counts.",
+          "SLA compliance across tickets and incidents — overall, by priority, category and team, plus agent leaderboard and currently breached or at-risk tickets.",
         config: {
           dateRange: { preset: "last_30_days" },
           layout: "grid",
           widgets: [
-            { id: "w_sla_1", metricId: "tickets.sla_compliance",     visualization: "number",       limit: 10, compareWithPrevious: true,  x: 0, y: 0, w: 4,  h: 2 },
-            { id: "w_sla_2", metricId: "tickets.overdue",            visualization: "number",       limit: 10, compareWithPrevious: false, x: 4, y: 0, w: 4,  h: 2 },
-            { id: "w_sla_3", metricId: "tickets.assigned_not_replied",visualization: "number",       limit: 10, compareWithPrevious: false, x: 8, y: 0, w: 4,  h: 2 },
-            { id: "w_sla_4", metricId: "tickets.sla_compliance",     visualization: "bar_horizontal",limit: 10, compareWithPrevious: false, x: 0, y: 2, w: 6,  h: 4, groupBy: "priority" },
-            { id: "w_sla_5", metricId: "tickets.sla_compliance",     visualization: "bar_horizontal",limit: 10, compareWithPrevious: false, x: 6, y: 2, w: 6,  h: 4, groupBy: "team" },
-            { id: "w_sla_6", metricId: "agent.sla_compliance",       visualization: "leaderboard",  limit: 10, compareWithPrevious: false, x: 0, y: 6, w: 12, h: 5 },
+            // KPI strip — SLA + incident SLA + live operational
+            { id: "w_sla_k1", metricId: "tickets.sla_compliance",      visualization: "number",         limit: 10, compareWithPrevious: true,  x: 0, y: 0,  w: 3, h: 2 },
+            { id: "w_sla_k2", metricId: "incidents.sla_compliance",    visualization: "number",         limit: 10, compareWithPrevious: false, x: 3, y: 0,  w: 3, h: 2 },
+            { id: "w_sla_k3", metricId: "tickets.overdue",             visualization: "number",         limit: 10, compareWithPrevious: false, x: 6, y: 0,  w: 3, h: 2 },
+            { id: "w_sla_k4", metricId: "tickets.assigned_not_replied",visualization: "number",         limit: 10, compareWithPrevious: false, x: 9, y: 0,  w: 3, h: 2 },
+            // Secondary KPIs — speed
+            { id: "w_sla_k5", metricId: "tickets.first_response_time", visualization: "number",         limit: 10, compareWithPrevious: true,  x: 0, y: 2,  w: 3, h: 2 },
+            { id: "w_sla_k6", metricId: "tickets.resolution_time",     visualization: "number",         limit: 10, compareWithPrevious: true,  x: 3, y: 2,  w: 3, h: 2 },
+            { id: "w_sla_k7", metricId: "incidents.mttr",              visualization: "number",         limit: 10, compareWithPrevious: true,  x: 6, y: 2,  w: 3, h: 2 },
+            { id: "w_sla_k8", metricId: "tickets.fcr",                 visualization: "number",         limit: 10, compareWithPrevious: false, x: 9, y: 2,  w: 3, h: 2 },
+            // SLA breakdowns
+            { id: "w_sla_b1", metricId: "tickets.sla_compliance",      visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 0, y: 4,  w: 6, h: 4, groupBy: "priority" },
+            { id: "w_sla_b2", metricId: "tickets.sla_compliance",      visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 6, y: 4,  w: 6, h: 4, groupBy: "team" },
+            { id: "w_sla_b3", metricId: "tickets.sla_compliance",      visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 0, y: 8,  w: 6, h: 4, groupBy: "category" },
+            { id: "w_sla_b4", metricId: "agent.sla_compliance",        visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 6, y: 8,  w: 6, h: 4 },
+            // Agent leaderboard + outstanding tickets
+            { id: "w_sla_lb", metricId: "agent.sla_compliance",        visualization: "leaderboard",    limit: 10, compareWithPrevious: false, x: 0, y: 12, w: 12, h: 5 },
+            { id: "w_sla_tbl",metricId: "tickets.top_open",            visualization: "table",          limit: 10, compareWithPrevious: false, x: 0, y: 17, w: 12, h: 4 },
           ],
         },
       },
       {
         name: "Agent Performance",
         description:
-          "Per-agent tickets resolved, first response speed, CSAT scores, and FCR rates.",
+          "Comprehensive agent scorecard — overview, productivity, SLA, workload & backlog, quality, period-over-period trends, and per-agent leaderboards.",
         config: {
           dateRange: { preset: "last_30_days" },
           layout: "grid",
           widgets: [
-            { id: "w_ag_1", metricId: "agent.tickets_resolved",      visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 0, y: 0, w: 6, h: 5 },
-            { id: "w_ag_2", metricId: "agent.workload",              visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 6, y: 0, w: 6, h: 5 },
-            { id: "w_ag_3", metricId: "agent.avg_resolution_time",   visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 0, y: 5, w: 4, h: 5 },
-            { id: "w_ag_4", metricId: "agent.first_response_time",   visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 4, y: 5, w: 4, h: 5 },
-            { id: "w_ag_5", metricId: "agent.csat_score",            visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 8, y: 5, w: 4, h: 5 },
+            // ── 1. Agent Performance Overview ──────────────────────────────
+            { id: "w_ag_o1", title: "Total Tickets",      metricId: "tickets.volume",             visualization: "number",      limit: 10, compareWithPrevious: true,  x: 0, y: 0,  w: 3, h: 2 },
+            { id: "w_ag_o2", title: "Resolved",           metricId: "tickets.resolved",           visualization: "number",      limit: 10, compareWithPrevious: true,  x: 3, y: 0,  w: 3, h: 2 },
+            { id: "w_ag_o3", title: "Open",               metricId: "realtime.open_tickets",      visualization: "number",      limit: 10, compareWithPrevious: false, x: 6, y: 0,  w: 3, h: 2 },
+            { id: "w_ag_o4", title: "SLA Compliance",     metricId: "tickets.sla_compliance",     visualization: "number",      limit: 10, compareWithPrevious: true,  x: 9, y: 0,  w: 3, h: 2 },
+            { id: "w_ag_o5", title: "Avg First Response", metricId: "tickets.first_response_time",visualization: "number",      limit: 10, compareWithPrevious: true,  x: 0, y: 2,  w: 3, h: 2 },
+            { id: "w_ag_o6", title: "Avg Resolution",     metricId: "tickets.resolution_time",    visualization: "number",      limit: 10, compareWithPrevious: true,  x: 3, y: 2,  w: 3, h: 2 },
+            { id: "w_ag_o7", title: "CSAT",               metricId: "csat.avg_score",             visualization: "number",      limit: 10, compareWithPrevious: true,  x: 6, y: 2,  w: 3, h: 2 },
+            { id: "w_ag_o8", title: "Reopen Rate",        metricId: "tickets.reopen_rate",        visualization: "number",      limit: 10, compareWithPrevious: false, x: 9, y: 2,  w: 3, h: 2 },
+
+            // ── 2. Productivity ────────────────────────────────────────────
+            { id: "w_ag_p1", title: "Tickets Assigned",   metricId: "tickets.assigned_count",     visualization: "number",      limit: 10, compareWithPrevious: false, x: 0, y: 4,  w: 3, h: 2 },
+            { id: "w_ag_p2", title: "Resolved",           metricId: "tickets.resolved",           visualization: "number",      limit: 10, compareWithPrevious: false, x: 3, y: 4,  w: 3, h: 2 },
+            { id: "w_ag_p3", title: "Resolution Rate",    metricId: "tickets.resolution_rate",    visualization: "number",      limit: 10, compareWithPrevious: false, x: 6, y: 4,  w: 3, h: 2 },
+            { id: "w_ag_p4", title: "First Contact Resolution", metricId: "tickets.fcr",          visualization: "number",      limit: 10, compareWithPrevious: false, x: 9, y: 4,  w: 3, h: 2 },
+            { id: "w_ag_p5", title: "Escalation Rate",    metricId: "tickets.escalation_rate",    visualization: "number",      limit: 10, compareWithPrevious: false, x: 0, y: 6,  w: 3, h: 2 },
+            { id: "w_ag_p6", title: "Escalated",          metricId: "tickets.escalated_count",    visualization: "number",      limit: 10, compareWithPrevious: false, x: 3, y: 6,  w: 3, h: 2 },
+            { id: "w_ag_p7", title: "AI Auto-Resolved",   metricId: "tickets.ai_resolution_rate", visualization: "number",      limit: 10, compareWithPrevious: false, x: 6, y: 6,  w: 3, h: 2 },
+            { id: "w_ag_p8", title: "Reopened",           metricId: "tickets.reopened_count",     visualization: "number",      limit: 10, compareWithPrevious: false, x: 9, y: 6,  w: 3, h: 2 },
+
+            // ── 3. SLA Performance ─────────────────────────────────────────
+            { id: "w_ag_s1", title: "SLA Met",            metricId: "tickets.sla_met_count",      visualization: "number",      limit: 10, compareWithPrevious: false, x: 0, y: 8,  w: 3, h: 2 },
+            { id: "w_ag_s2", title: "SLA Breached",       metricId: "tickets.sla_breached_count", visualization: "number",      limit: 10, compareWithPrevious: false, x: 3, y: 8,  w: 3, h: 2 },
+            { id: "w_ag_s3", title: "At-Risk Tickets",    metricId: "realtime.sla_at_risk",       visualization: "number",      limit: 10, compareWithPrevious: false, x: 6, y: 8,  w: 3, h: 2 },
+            { id: "w_ag_s4", title: "SLA Compliance %",   metricId: "tickets.sla_compliance",     visualization: "number",      limit: 10, compareWithPrevious: true,  x: 9, y: 8,  w: 3, h: 2 },
+
+            // ── 4. Workload & Backlog ──────────────────────────────────────
+            { id: "w_ag_w1", title: "Open",               metricId: "realtime.open_tickets",      visualization: "number",      limit: 10, compareWithPrevious: false, x: 0, y: 10, w: 3, h: 2 },
+            { id: "w_ag_w2", title: "In Progress",        metricId: "tickets.in_progress",        visualization: "number",      limit: 10, compareWithPrevious: false, x: 3, y: 10, w: 3, h: 2 },
+            { id: "w_ag_w3", title: "Overdue",            metricId: "tickets.overdue",            visualization: "number",      limit: 10, compareWithPrevious: false, x: 6, y: 10, w: 3, h: 2 },
+            { id: "w_ag_w4", title: "Oldest Ticket",      metricId: "tickets.oldest_open",        visualization: "number",      limit: 10, compareWithPrevious: false, x: 9, y: 10, w: 3, h: 2 },
+            { id: "w_ag_w5", title: "Aging Backlog",      metricId: "tickets.aging",              visualization: "histogram",   limit: 10, compareWithPrevious: false, x: 0, y: 12, w: 12, h: 4 },
+
+            // ── 5. Quality ─────────────────────────────────────────────────
+            { id: "w_ag_q1", title: "CSAT",               metricId: "csat.avg_score",             visualization: "number",      limit: 10, compareWithPrevious: true,  x: 0, y: 16, w: 3, h: 2 },
+            { id: "w_ag_q2", title: "Ratings Count",      metricId: "csat.ratings_count",         visualization: "number",      limit: 10, compareWithPrevious: false, x: 3, y: 16, w: 3, h: 2 },
+            { id: "w_ag_q3", title: "Reopened Tickets",   metricId: "tickets.reopened_count",     visualization: "number",      limit: 10, compareWithPrevious: false, x: 6, y: 16, w: 3, h: 2 },
+            { id: "w_ag_q4", title: "QA Score",           metricId: "qa.score",                   visualization: "number",      limit: 10, compareWithPrevious: false, x: 9, y: 16, w: 3, h: 2 },
+
+            // ── 6. Trends — period-over-period & time-series ───────────────
+            { id: "w_ag_tr1", title: "Resolved Trend",        metricId: "tickets.resolved_trend",     visualization: "line", limit: 50, compareWithPrevious: false, x: 0, y: 18, w: 6, h: 4 },
+            { id: "w_ag_tr2", title: "SLA Trend",             metricId: "tickets.sla_trend",          visualization: "line", limit: 50, compareWithPrevious: false, x: 6, y: 18, w: 6, h: 4 },
+            { id: "w_ag_tr3", title: "CSAT Trend",            metricId: "csat.trend",                 visualization: "line", limit: 50, compareWithPrevious: false, x: 0, y: 22, w: 6, h: 4 },
+            { id: "w_ag_tr4", title: "Agent Volume Trend",    metricId: "agent.volume_trend",         visualization: "line", limit: 50, compareWithPrevious: false, x: 6, y: 22, w: 6, h: 4 },
+            // Period-vs-previous comparison strip
+            { id: "w_ag_tr5", title: "Volume vs Previous",    metricId: "tickets.volume",             visualization: "number",limit: 10, compareWithPrevious: true,  x: 0, y: 26, w: 3, h: 2 },
+            { id: "w_ag_tr6", title: "Resolved vs Previous",  metricId: "tickets.resolved",           visualization: "number",limit: 10, compareWithPrevious: true,  x: 3, y: 26, w: 3, h: 2 },
+            { id: "w_ag_tr7", title: "SLA vs Previous",       metricId: "tickets.sla_compliance",     visualization: "number",limit: 10, compareWithPrevious: true,  x: 6, y: 26, w: 3, h: 2 },
+            { id: "w_ag_tr8", title: "CSAT vs Previous",      metricId: "csat.avg_score",             visualization: "number",limit: 10, compareWithPrevious: true,  x: 9, y: 26, w: 3, h: 2 },
+
+            // ── Per-agent leaderboards ─────────────────────────────────────
+            { id: "w_ag_l1", metricId: "agent.tickets_resolved",    visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 0, y: 28, w: 6, h: 5 },
+            { id: "w_ag_l2", metricId: "agent.workload",            visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 6, y: 28, w: 6, h: 5 },
+            { id: "w_ag_l3", metricId: "agent.avg_resolution_time", visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 0, y: 33, w: 6, h: 5 },
+            { id: "w_ag_l4", metricId: "agent.first_response_time", visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 6, y: 33, w: 6, h: 5 },
+            { id: "w_ag_l5", metricId: "agent.csat_score",          visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 0, y: 38, w: 6, h: 5 },
+            { id: "w_ag_l6", metricId: "agent.sla_compliance",      visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 6, y: 38, w: 6, h: 5 },
+            { id: "w_ag_l7", metricId: "agent.fcr_rate",            visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 0, y: 43, w: 6, h: 5 },
+            { id: "w_ag_l8", metricId: "team.tickets_resolved",     visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 6, y: 43, w: 6, h: 5 },
+            { id: "w_ag_l9", metricId: "team.csat_score",           visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 0, y: 48, w: 12, h: 5 },
           ],
         },
       },
       {
         name: "CSAT & Quality",
-        description: "Customer satisfaction trend, rating distribution, and agent CSAT leaderboard.",
+        description:
+          "Customer satisfaction trend and rating distribution, FCR and resolution speed, plus per-agent and per-team CSAT leaderboards.",
         config: {
           dateRange: { preset: "last_30_days" },
           layout: "grid",
           widgets: [
-            { id: "w_cs_1", metricId: "csat.avg_score",   visualization: "number",     limit: 10, compareWithPrevious: true,  x: 0, y: 0, w: 4,  h: 2 },
-            { id: "w_cs_2", metricId: "tickets.fcr",      visualization: "number",     limit: 10, compareWithPrevious: true,  x: 4, y: 0, w: 4,  h: 2 },
-            { id: "w_cs_3", metricId: "csat.trend",       visualization: "line",       limit: 50, compareWithPrevious: false, x: 0, y: 2, w: 8,  h: 3 },
-            { id: "w_cs_4", metricId: "csat.distribution",visualization: "histogram",  limit: 10, compareWithPrevious: false, x: 8, y: 2, w: 4,  h: 3 },
-            { id: "w_cs_5", metricId: "agent.csat_score", visualization: "leaderboard",limit: 10, compareWithPrevious: false, x: 0, y: 5, w: 12, h: 5 },
+            // KPI strip
+            { id: "w_cs_k1", metricId: "csat.avg_score",              visualization: "number",      limit: 10, compareWithPrevious: true,  x: 0, y: 0,  w: 3, h: 2 },
+            { id: "w_cs_k2", metricId: "tickets.fcr",                 visualization: "number",      limit: 10, compareWithPrevious: false, x: 3, y: 0,  w: 3, h: 2 },
+            { id: "w_cs_k3", metricId: "tickets.resolution_time",     visualization: "number",      limit: 10, compareWithPrevious: true,  x: 6, y: 0,  w: 3, h: 2 },
+            { id: "w_cs_k4", metricId: "tickets.first_response_time", visualization: "number",      limit: 10, compareWithPrevious: true,  x: 9, y: 0,  w: 3, h: 2 },
+            // Trend + distribution
+            { id: "w_cs_t1", metricId: "csat.trend",                  visualization: "line",        limit: 50, compareWithPrevious: false, x: 0, y: 2,  w: 8, h: 3 },
+            { id: "w_cs_d1", metricId: "csat.distribution",           visualization: "histogram",   limit: 10, compareWithPrevious: false, x: 8, y: 2,  w: 4, h: 3 },
+            // Quality cross-checks
+            { id: "w_cs_d2", metricId: "tickets.priority_distribution", visualization: "donut",     limit: 10, compareWithPrevious: false, x: 0, y: 5,  w: 4, h: 4 },
+            { id: "w_cs_d3", metricId: "tickets.status_distribution",   visualization: "donut",     limit: 10, compareWithPrevious: false, x: 4, y: 5,  w: 4, h: 4 },
+            { id: "w_cs_h1", metricId: "tickets.resolution_time",     visualization: "histogram",   limit: 50, compareWithPrevious: false, x: 8, y: 5,  w: 4, h: 4 },
+            // Leaderboards
+            { id: "w_cs_l1", metricId: "agent.csat_score",            visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 0, y: 9,  w: 6, h: 5 },
+            { id: "w_cs_l2", metricId: "team.csat_score",             visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 6, y: 9,  w: 6, h: 5 },
+            { id: "w_cs_l3", metricId: "agent.fcr_rate",              visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 0, y: 14, w: 12, h: 5 },
           ],
         },
       },
       {
         name: "ITSM Operations",
-        description: "Incidents (MTTA/MTTR), change success rate, approval turnaround, problem recurrence.",
+        description:
+          "End-to-end ITIL operations view — incident MTTA/MTTR, change success and risk profile, problem recurrence, approval turnaround, and request fulfillment.",
         config: {
           dateRange: { preset: "last_30_days" },
           layout: "grid",
           widgets: [
-            { id: "w_it_1", metricId: "incidents.mtta",          visualization: "number", limit: 10, compareWithPrevious: true,  x: 0, y: 0, w: 3, h: 2 },
-            { id: "w_it_2", metricId: "incidents.mttr",          visualization: "number", limit: 10, compareWithPrevious: true,  x: 3, y: 0, w: 3, h: 2 },
-            { id: "w_it_3", metricId: "changes.success_rate",    visualization: "number", limit: 10, compareWithPrevious: false, x: 6, y: 0, w: 3, h: 2 },
-            { id: "w_it_4", metricId: "changes.approval_time",   visualization: "number", limit: 10, compareWithPrevious: false, x: 9, y: 0, w: 3, h: 2 },
-            { id: "w_it_5", metricId: "incidents.volume",        visualization: "area",   limit: 50, compareWithPrevious: false, x: 0, y: 2, w: 6, h: 3 },
-            { id: "w_it_6", metricId: "changes.volume",          visualization: "bar",    limit: 50, compareWithPrevious: false, x: 6, y: 2, w: 6, h: 3 },
+            // Top KPIs — incidents + changes
+            { id: "w_it_k1", metricId: "incidents.mtta",            visualization: "number",         limit: 10, compareWithPrevious: true,  x: 0, y: 0,  w: 3, h: 2 },
+            { id: "w_it_k2", metricId: "incidents.mttr",            visualization: "number",         limit: 10, compareWithPrevious: true,  x: 3, y: 0,  w: 3, h: 2 },
+            { id: "w_it_k3", metricId: "incidents.major_count",     visualization: "number",         limit: 10, compareWithPrevious: false, x: 6, y: 0,  w: 3, h: 2 },
+            { id: "w_it_k4", metricId: "incidents.sla_compliance",  visualization: "number",         limit: 10, compareWithPrevious: false, x: 9, y: 0,  w: 3, h: 2 },
+            // Bottom KPIs — changes / problems / approvals / requests
+            { id: "w_it_k5", metricId: "changes.success_rate",      visualization: "number",         limit: 10, compareWithPrevious: false, x: 0, y: 2,  w: 3, h: 2 },
+            { id: "w_it_k6", metricId: "changes.approval_time",     visualization: "number",         limit: 10, compareWithPrevious: false, x: 3, y: 2,  w: 3, h: 2 },
+            { id: "w_it_k7", metricId: "approvals.turnaround_time", visualization: "number",         limit: 10, compareWithPrevious: false, x: 6, y: 2,  w: 3, h: 2 },
+            { id: "w_it_k8", metricId: "requests.fulfillment_time", visualization: "number",         limit: 10, compareWithPrevious: false, x: 9, y: 2,  w: 3, h: 2 },
+            // Problem KPIs
+            { id: "w_it_k9", metricId: "problems.volume",           visualization: "number",         limit: 10, compareWithPrevious: false, x: 0, y: 4,  w: 3, h: 2 },
+            { id: "w_it_kA", metricId: "problems.recurring",        visualization: "number",         limit: 10, compareWithPrevious: false, x: 3, y: 4,  w: 3, h: 2 },
+            { id: "w_it_kB", metricId: "problems.known_errors",     visualization: "number",         limit: 10, compareWithPrevious: false, x: 6, y: 4,  w: 3, h: 2 },
+            { id: "w_it_kC", metricId: "requests.sla_compliance",   visualization: "number",         limit: 10, compareWithPrevious: false, x: 9, y: 4,  w: 3, h: 2 },
+            // Volume trends
+            { id: "w_it_t1", metricId: "incidents.volume",          visualization: "area",           limit: 50, compareWithPrevious: false, x: 0, y: 6,  w: 6, h: 3 },
+            { id: "w_it_t2", metricId: "changes.volume",            visualization: "bar",            limit: 50, compareWithPrevious: false, x: 6, y: 6,  w: 6, h: 3 },
+            { id: "w_it_t3", metricId: "requests.volume",           visualization: "line",           limit: 50, compareWithPrevious: false, x: 0, y: 9,  w: 6, h: 3 },
+            { id: "w_it_t4", metricId: "approvals.volume",          visualization: "bar",            limit: 50, compareWithPrevious: false, x: 6, y: 9,  w: 6, h: 3 },
+            // Distributions + queues
+            { id: "w_it_d1", metricId: "changes.by_risk",           visualization: "donut",          limit: 10, compareWithPrevious: false, x: 0, y: 12, w: 4, h: 4 },
+            { id: "w_it_d2", metricId: "changes.by_type",           visualization: "donut",          limit: 10, compareWithPrevious: false, x: 4, y: 12, w: 4, h: 4 },
+            { id: "w_it_d3", metricId: "requests.top_items",        visualization: "leaderboard",    limit: 10, compareWithPrevious: false, x: 8, y: 12, w: 4, h: 4 },
+            { id: "w_it_q1", metricId: "approvals.pending_queue",   visualization: "table",          limit: 10, compareWithPrevious: false, x: 0, y: 16, w: 12, h: 4 },
           ],
         },
       },
       {
         name: "Knowledge Base Performance",
-        description: "Published article count, view trends, helpful vote ratio, and top articles.",
+        description:
+          "Article inventory, view trends, helpfulness, publishing cadence, top viewed and most helpful articles, with FCR as a self-service success proxy.",
         config: {
           dateRange: { preset: "last_30_days" },
           layout: "grid",
           widgets: [
-            { id: "w_kb_1", metricId: "kb.article_count",    visualization: "number",     limit: 10, compareWithPrevious: false, x: 0, y: 0, w: 3,  h: 2 },
-            { id: "w_kb_2", metricId: "kb.view_count",       visualization: "number",     limit: 10, compareWithPrevious: false, x: 3, y: 0, w: 3,  h: 2 },
-            { id: "w_kb_3", metricId: "kb.helpful_ratio",    visualization: "number",     limit: 10, compareWithPrevious: false, x: 6, y: 0, w: 3,  h: 2 },
-            { id: "w_kb_4", metricId: "kb.feedback_trend",   visualization: "line",       limit: 50, compareWithPrevious: false, x: 0, y: 2, w: 8,  h: 3 },
-            { id: "w_kb_5", metricId: "kb.top_articles",     visualization: "leaderboard",limit: 10, compareWithPrevious: false, x: 0, y: 5, w: 12, h: 5 },
+            // KPI strip
+            { id: "w_kb_k1", metricId: "kb.article_count",  visualization: "number",      limit: 10, compareWithPrevious: false, x: 0, y: 0,  w: 3, h: 2 },
+            { id: "w_kb_k2", metricId: "kb.view_count",     visualization: "number",      limit: 10, compareWithPrevious: false, x: 3, y: 0,  w: 3, h: 2 },
+            { id: "w_kb_k3", metricId: "kb.helpful_ratio",  visualization: "number",      limit: 10, compareWithPrevious: false, x: 6, y: 0,  w: 3, h: 2 },
+            { id: "w_kb_k4", metricId: "tickets.fcr",       visualization: "number",      limit: 10, compareWithPrevious: false, x: 9, y: 0,  w: 3, h: 2 },
+            // Inventory mix + trends
+            { id: "w_kb_d1", metricId: "kb.article_count",  visualization: "donut",       limit: 10, compareWithPrevious: false, x: 0, y: 2,  w: 4, h: 4 },
+            { id: "w_kb_t1", metricId: "kb.feedback_trend", visualization: "line",        limit: 50, compareWithPrevious: false, x: 4, y: 2,  w: 8, h: 4 },
+            { id: "w_kb_t2", metricId: "kb.published_trend",visualization: "bar",         limit: 50, compareWithPrevious: false, x: 0, y: 6,  w: 12, h: 3 },
+            // Leaderboards
+            { id: "w_kb_l1", metricId: "kb.top_articles",   visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 0, y: 9,  w: 6, h: 5 },
+            { id: "w_kb_l2", metricId: "kb.most_helpful",   visualization: "leaderboard", limit: 10, compareWithPrevious: false, x: 6, y: 9,  w: 6, h: 5 },
+            { id: "w_kb_l3", metricId: "kb.top_articles",   visualization: "table",       limit: 10, compareWithPrevious: false, x: 0, y: 14, w: 12, h: 5 },
           ],
         },
       },
@@ -235,7 +366,14 @@ async function main() {
         where: { isCurated: true, name: r.name },
       });
       if (existing) {
-        console.log(`Curated report "${r.name}" already exists — skipping.`);
+        await prisma.savedReport.update({
+          where: { id: existing.id },
+          data: {
+            description: r.description,
+            config:      r.config,
+          },
+        });
+        console.log(`Curated report "${r.name}" updated.`);
         continue;
       }
       await prisma.savedReport.create({

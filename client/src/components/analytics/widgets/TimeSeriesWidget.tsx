@@ -7,7 +7,6 @@
 import {
   LineChart, Line, AreaChart, Area,
   XAxis, YAxis, CartesianGrid,
-  ResponsiveContainer,
 } from "recharts";
 import {
   ChartContainer,
@@ -67,12 +66,16 @@ export function TimeSeriesWidget({ result, visualization, height = 200 }: Props)
 
   return (
     <ChartContainer config={config} style={{ height: chartH }}>
-      <Chart data={points} margin={{ top: 4, right: 4, left: -8, bottom: 0 }}>
+      <Chart data={points} margin={{ top: 6, right: 4, left: -8, bottom: 0 }}>
         <defs>
           {series.map((s, i) => (
             <linearGradient key={s.key} id={`grad-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%"  stopColor={PALETTE[i % PALETTE.length]} stopOpacity={0.18} />
-              <stop offset="95%" stopColor={PALETTE[i % PALETTE.length]} stopOpacity={0.01} />
+              {/* Brighter top stop + zero-opacity bottom — gives the area a
+                  satisfying "glass" feel instead of the previous near-flat
+                  watermark wash. */}
+              <stop offset="5%"  stopColor={PALETTE[i % PALETTE.length]} stopOpacity={0.30} />
+              <stop offset="60%" stopColor={PALETTE[i % PALETTE.length]} stopOpacity={0.10} />
+              <stop offset="95%" stopColor={PALETTE[i % PALETTE.length]} stopOpacity={0} />
             </linearGradient>
           ))}
         </defs>
@@ -93,7 +96,10 @@ export function TimeSeriesWidget({ result, visualization, height = 200 }: Props)
           allowDecimals={false}
           tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
         />
-        <ChartTooltip content={<ChartTooltipContent />} />
+        <ChartTooltip
+          cursor={{ stroke: "hsl(var(--primary))", strokeOpacity: 0.3, strokeDasharray: "3 3" }}
+          content={<ChartTooltipContent indicator="dot" />}
+        />
         {showLegend && <ChartLegend content={<ChartLegendContent />} />}
 
         {series.map((s, i) =>
@@ -103,10 +109,16 @@ export function TimeSeriesWidget({ result, visualization, height = 200 }: Props)
               type="monotone"
               dataKey={s.key}
               stroke={`var(--color-${s.key})`}
-              strokeWidth={1.75}
+              strokeWidth={2.25}
               fill={`url(#grad-${s.key})`}
               dot={false}
-              activeDot={{ r: 4, strokeWidth: 0 }}
+              // Background-fill ringed dot reads as a polished focus point
+              activeDot={{
+                r: 4.5,
+                strokeWidth: 2,
+                fill: "hsl(var(--background))",
+                stroke: PALETTE[i % PALETTE.length],
+              }}
             />
           ) : (
             <Line
@@ -114,9 +126,14 @@ export function TimeSeriesWidget({ result, visualization, height = 200 }: Props)
               type="monotone"
               dataKey={s.key}
               stroke={`var(--color-${s.key})`}
-              strokeWidth={1.75}
+              strokeWidth={2.25}
               dot={false}
-              activeDot={{ r: 4, strokeWidth: 0 }}
+              activeDot={{
+                r: 4.5,
+                strokeWidth: 2,
+                fill: "hsl(var(--background))",
+                stroke: PALETTE[i % PALETTE.length],
+              }}
             />
           ),
         )}

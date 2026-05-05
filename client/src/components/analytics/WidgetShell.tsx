@@ -8,7 +8,6 @@
  *   - Renders loading skeleton and error states
  *   - Passes available content height to child renderers
  */
-import { useRef } from "react";
 import {
   MoreHorizontal, GripVertical, Pencil, Copy, Trash2,
   AlertTriangle, RefreshCw,
@@ -97,16 +96,47 @@ export function WidgetShell({
 }: WidgetShellProps) {
   const contentH = totalHeight - HEADER_H - PADDING;
 
+  // Whether the rendered value already carries its own unit suffix (e.g.
+  // `4.7d`, `100%`, `3.2h`). For those units the unit badge is redundant
+  // and was actively misleading — the metric's canonical unit is "seconds"
+  // server-side (because every aggregate is computed via EXTRACT(EPOCH …)),
+  // but the formatter auto-converts to s/m/h/d at display time. Showing
+  // "SECONDS" beside `4.7d` made users think the value was wrong.
+  //
+  // Score and count get a badge because the value itself has no unit suffix.
+  const SELF_LABELLED_UNITS = new Set(["percent", "seconds", "minutes", "hours", "days"]);
+  const showBadge = !!badge && !SELF_LABELLED_UNITS.has(badge);
+
+  // Friendlier badge labels for the units that survive the filter above.
+  const badgeLabel =
+    badge === "score" ? "Score" :
+    badge === "count" ? "Count" :
+    badge;
+
+  // Tonal family so the badge picks up a matching accent — looks much more
+  // intentional than a flat grey pill.
+  const badgeTone =
+    badge === "score"    ? "bg-amber-500/12   text-amber-700   dark:text-amber-300   border-amber-500/25"   :
+    badge === "count"    ? "bg-violet-500/12  text-violet-700  dark:text-violet-300  border-violet-500/25"  :
+                           "bg-muted/60 text-muted-foreground border-border/50";
+
   return (
     <div
       className={cn(
-        "flex flex-col h-full bg-card border border-border/70 rounded-lg overflow-hidden",
-        "shadow-[0_1px_3px_0_rgb(0,0,0,0.04),0_1px_2px_-1px_rgb(0,0,0,0.04)]",
+        "relative flex flex-col h-full bg-card border border-border/70 rounded-xl overflow-hidden",
+        "shadow-[0_1px_3px_0_rgb(0,0,0,0.04),0_2px_8px_-2px_rgb(0,0,0,0.06)]",
+        "transition-shadow hover:shadow-md",
         className,
       )}
     >
+      {/* Top accent rail — picks up palette via primary, very subtle */}
+      <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-primary/40 via-primary/15 to-transparent pointer-events-none" />
+
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1.5 px-3 shrink-0" style={{ height: HEADER_H }}>
+      <div
+        className="flex items-center gap-1.5 px-3 shrink-0 border-b border-border/50 bg-gradient-to-b from-muted/30 to-transparent"
+        style={{ height: HEADER_H }}
+      >
         {/* Drag handle — only visible in edit mode */}
         {editMode && (
           <span className="drag-handle text-muted-foreground/40 hover:text-muted-foreground cursor-grab active:cursor-grabbing shrink-0">
@@ -115,14 +145,15 @@ export function WidgetShell({
         )}
 
         {/* Title */}
-        <p className="flex-1 min-w-0 text-[11px] font-semibold text-foreground truncate uppercase tracking-wide leading-none">
+        <p className="flex-1 min-w-0 text-[11px] font-bold text-foreground/85 truncate uppercase tracking-[0.08em] leading-none">
           {title}
         </p>
 
-        {/* Badge */}
-        {badge && (
-          <span className="shrink-0 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-sm font-medium tabular-nums">
-            {badge}
+        {/* Badge — only shown for units that don't already appear in the
+            rendered value (so we don't double-label "4.7d SECONDS"). */}
+        {showBadge && (
+          <span className={`shrink-0 text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md border ${badgeTone}`}>
+            {badgeLabel}
           </span>
         )}
 

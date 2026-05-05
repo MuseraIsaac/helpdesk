@@ -2,16 +2,17 @@
  * POST /api/reports/share-email
  *
  * Sends a formatted report snapshot to one or more email addresses.
- * The email includes key metrics for the requested section and a direct
- * link back to the live report in the system.
+ * The snapshot reflects the section the user is sharing — SLA, CSAT,
+ * Incidents, etc. each get their own metrics rather than a generic
+ * ticket overview.
  */
 import { Router } from "express";
 import { z } from "zod/v4";
 import { requireAuth } from "../middleware/require-auth";
 import { validate } from "../lib/validate";
 import { sendEmailJob } from "../lib/send-email";
+import { logSystemAudit } from "../lib/audit";
 import prisma from "../db";
-import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 
 const router = Router();
 router.use(requireAuth);
@@ -47,13 +48,17 @@ function fmtDate(d: Date) {
   return d.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function fmtDuration(seconds: number | null): string {
+function fmtDuration(seconds: number | null | undefined): string {
   if (seconds == null) return "—";
   if (seconds < 60)   return `${seconds}s`;
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
   const h = Math.floor(seconds / 3600);
   const m = Math.round((seconds % 3600) / 60);
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function fmtPct(num: number | null | undefined): string {
+  return num == null ? "—" : `${Math.round(num)}%`;
 }
 
 // ── Section label ─────────────────────────────────────────────────────────────
@@ -72,44 +77,454 @@ const SECTION_LABELS: Record<string, string> = {
   csat:      "CSAT",
   kb:        "Knowledge Base",
   realtime:  "Real-time",
+  assets:    "Assets",
+  insights:  "Insights",
+  library:   "Report Library",
   custom:    "Custom Report",
 };
 
-// ── Metric snapshot query ─────────────────────────────────────────────────────
+// ── Snapshot types ────────────────────────────────────────────────────────────
 
-interface OverviewSnapshot {
-  totalTickets:            bigint;
-  openTickets:             bigint;
-  resolvedTickets:         bigint;
-  breachedTickets:         bigint;
-  ticketsWithSlaTarget:    bigint;
-  avgFirstResponseSeconds: number | null;
-  avgResolutionSeconds:    number | null;
+type SnapshotRow = [label: string, value: string];
+interface Snapshot { title: string; rows: SnapshotRow[]; }
+
+// ── Per-section snapshots ─────────────────────────────────────────────────────
+
+async function ticketSnapshot(since: Date, until: Date, title = "Ticket Snapshot"): Promise<Snapshot | null> {
+  interface Row {
+    totalTickets: bigint; openTickets: bigint; resolvedTickets: bigint;
+    breachedTickets: bigint; ticketsWithSlaTarget: bigint;
+    avgFirstResponseSeconds: number | null; avgResolutionSeconds: number | null;
+  }
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT
+      COUNT(*) FILTER (WHERE status NOT IN ('new','processing'))         AS "totalTickets",
+      COUNT(*) FILTER (WHERE status = 'open')                            AS "openTickets",
+      COUNT(*) FILTER (WHERE status IN ('resolved','closed'))            AS "resolvedTickets",
+      COUNT(*) FILTER (WHERE "slaBreached" = true)                       AS "breachedTickets",
+      COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL
+                         AND status NOT IN ('new','processing'))         AS "ticketsWithSlaTarget",
+      ROUND(AVG(EXTRACT(EPOCH FROM ("firstRespondedAt" - "createdAt")))
+            FILTER (WHERE "firstRespondedAt" IS NOT NULL))::int          AS "avgFirstResponseSeconds",
+      ROUND(AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")))
+            FILTER (WHERE "resolvedAt" IS NOT NULL
+                      AND status IN ('resolved','closed')))::int         AS "avgResolutionSeconds"
+    FROM ticket
+    WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+  `;
+  const r = rows[0]; if (!r) return null;
+  const withSla = Number(r.ticketsWithSlaTarget);
+  const breached = Number(r.breachedTickets);
+  const compliance = withSla > 0 ? Math.round(((withSla - breached) / withSla) * 100) : null;
+  return {
+    title,
+    rows: [
+      ["Total Tickets",       String(Number(r.totalTickets))],
+      ["Open",                String(Number(r.openTickets))],
+      ["Resolved / Closed",   String(Number(r.resolvedTickets))],
+      ["SLA Compliance",      fmtPct(compliance)],
+      ["Avg First Response",  fmtDuration(r.avgFirstResponseSeconds)],
+      ["Avg Resolution Time", fmtDuration(r.avgResolutionSeconds)],
+    ],
+  };
 }
 
-async function fetchSnapshot(since: Date, until: Date) {
-  const rows = await prisma.$queryRawUnsafe<OverviewSnapshot[]>(
-    `SELECT
-       COUNT(*) FILTER (WHERE status NOT IN ('new','processing'))         AS "totalTickets",
-       COUNT(*) FILTER (WHERE status = 'open')                           AS "openTickets",
-       COUNT(*) FILTER (WHERE status IN ('resolved','closed'))           AS "resolvedTickets",
-       COUNT(*) FILTER (WHERE "slaBreached" = true)                      AS "breachedTickets",
-       COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL
-                          AND status NOT IN ('new','processing'))         AS "ticketsWithSlaTarget",
-       ROUND(AVG(EXTRACT(EPOCH FROM ("firstRespondedAt" - "createdAt")))
-               FILTER (WHERE "firstRespondedAt" IS NOT NULL))::int       AS "avgFirstResponseSeconds",
-       ROUND(AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")))
-               FILTER (WHERE "resolvedAt" IS NOT NULL
-                         AND status IN ('resolved','closed')))::int      AS "avgResolutionSeconds"
-     FROM ticket
-     WHERE "createdAt" >= $1 AND "createdAt" <= $2`,
-    since,
-    until,
+async function slaSnapshot(since: Date, until: Date): Promise<Snapshot | null> {
+  interface Row {
+    withSla: bigint; breached: bigint; metOnTime: bigint;
+    avgFirstResponseSeconds: number | null; avgResolutionSeconds: number | null;
+  }
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT
+      COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL
+                         AND status NOT IN ('new','processing'))         AS "withSla",
+      COUNT(*) FILTER (WHERE "slaBreached" = true)                       AS breached,
+      COUNT(*) FILTER (WHERE "slaBreached" = false
+                         AND status IN ('resolved','closed'))            AS "metOnTime",
+      ROUND(AVG(EXTRACT(EPOCH FROM ("firstRespondedAt" - "createdAt")))
+            FILTER (WHERE "firstRespondedAt" IS NOT NULL))::int          AS "avgFirstResponseSeconds",
+      ROUND(AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")))
+            FILTER (WHERE "resolvedAt" IS NOT NULL
+                      AND status IN ('resolved','closed')))::int         AS "avgResolutionSeconds"
+    FROM ticket
+    WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+  `;
+  const r = rows[0]; if (!r) return null;
+  const withSla = Number(r.withSla);
+  const breached = Number(r.breached);
+  const compliance = withSla > 0 ? Math.round(((withSla - breached) / withSla) * 100) : null;
+  return {
+    title: "SLA Snapshot",
+    rows: [
+      ["Tickets Tracked",       String(withSla)],
+      ["Met On Time",           String(Number(r.metOnTime))],
+      ["Breached",              String(breached)],
+      ["SLA Compliance",        fmtPct(compliance)],
+      ["Avg First Response",    fmtDuration(r.avgFirstResponseSeconds)],
+      ["Avg Resolution Time",   fmtDuration(r.avgResolutionSeconds)],
+    ],
+  };
+}
+
+async function agentSnapshot(since: Date, until: Date): Promise<Snapshot | null> {
+  interface Row { agentName: string; resolved: bigint; }
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT COALESCE(u.name, 'Unknown') AS "agentName",
+           COUNT(*) FILTER (WHERE t.status IN ('resolved','closed')) AS resolved
+    FROM ticket t
+    JOIN "user" u ON u.id = t."assignedToId"
+    WHERE t.status NOT IN ('new','processing')
+      AND t."assignedToId" IS NOT NULL
+      AND t."createdAt" >= ${since} AND t."createdAt" <= ${until}
+    GROUP BY u.name
+    ORDER BY resolved DESC, "agentName" ASC
+    LIMIT 5
+  `;
+  if (rows.length === 0) return { title: "Top Agents", rows: [["No resolved tickets in this period", "—"]] };
+  return {
+    title: "Top Agents (by Resolved)",
+    rows: rows.map(r => [r.agentName, String(Number(r.resolved))] as SnapshotRow),
+  };
+}
+
+async function teamSnapshot(since: Date, until: Date): Promise<Snapshot | null> {
+  interface Row { teamName: string; total: bigint; resolved: bigint; }
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT COALESCE(tm.name, 'Unassigned') AS "teamName",
+           COUNT(*) AS total,
+           COUNT(*) FILTER (WHERE t.status IN ('resolved','closed')) AS resolved
+    FROM ticket t
+    LEFT JOIN team tm ON tm.id = t."team_id"
+    WHERE t.status NOT IN ('new','processing')
+      AND t."createdAt" >= ${since} AND t."createdAt" <= ${until}
+    GROUP BY tm.name
+    ORDER BY total DESC
+    LIMIT 6
+  `;
+  if (rows.length === 0) return { title: "Team Performance", rows: [["No tickets in this period", "—"]] };
+  return {
+    title: "Team Performance",
+    rows: rows.map(r => [
+      r.teamName,
+      `${Number(r.resolved)} / ${Number(r.total)} resolved`,
+    ] as SnapshotRow),
+  };
+}
+
+async function incidentSnapshot(since: Date, until: Date): Promise<Snapshot | null> {
+  interface Row {
+    total: bigint; majorCount: bigint; slaBreached: bigint;
+    open: bigint; mtta: number | null; mttr: number | null;
+  }
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE "is_major" = true)                AS "majorCount",
+      COUNT(*) FILTER (WHERE "sla_breached" = true)            AS "slaBreached",
+      COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed')) AS open,
+      ROUND(AVG(EXTRACT(EPOCH FROM ("acknowledged_at" - "createdAt")))
+            FILTER (WHERE "acknowledged_at" IS NOT NULL))::int  AS mtta,
+      ROUND(AVG(EXTRACT(EPOCH FROM ("resolved_at" - "createdAt")))
+            FILTER (WHERE "resolved_at" IS NOT NULL
+                      AND status IN ('resolved','closed')))::int AS mttr
+    FROM incident WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+  `;
+  const r = rows[0]; if (!r) return null;
+  return {
+    title: "Incident Snapshot",
+    rows: [
+      ["Total Incidents",      String(Number(r.total))],
+      ["Open",                 String(Number(r.open))],
+      ["Major Incidents",      String(Number(r.majorCount))],
+      ["SLA Breached",         String(Number(r.slaBreached))],
+      ["Mean Time To Ack",     fmtDuration(r.mtta)],
+      ["Mean Time To Resolve", fmtDuration(r.mttr)],
+    ],
+  };
+}
+
+async function requestSnapshot(since: Date, until: Date): Promise<Snapshot | null> {
+  const { REQUEST_UNION_CTE } = await import("../lib/analytics/request-source");
+  interface Row {
+    total: bigint; open: bigint; fulfilled: bigint;
+    withSla: bigint; slaBreached: bigint;
+    avgFulfillmentSeconds: number | null;
+  }
+  const rows = await prisma.$queryRawUnsafe<Row[]>(
+    `WITH ${REQUEST_UNION_CTE}
+     SELECT
+       COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE resolved_at IS NULL)                       AS open,
+       COUNT(*) FILTER (WHERE resolved_at IS NOT NULL)                   AS fulfilled,
+       COUNT(*) FILTER (WHERE sla_due_at IS NOT NULL)                    AS "withSla",
+       COUNT(*) FILTER (WHERE sla_due_at IS NOT NULL
+                          AND (sla_breached = true
+                            OR (resolved_at IS NOT NULL AND resolved_at > sla_due_at))) AS "slaBreached",
+       ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)))
+            FILTER (WHERE resolved_at IS NOT NULL AND resolved_at >= created_at))::int
+                                                                          AS "avgFulfillmentSeconds"
+     FROM unified_requests
+     WHERE created_at >= $1 AND created_at <= $2`,
+    since, until,
   );
-  return rows[0] ?? null;
+  const r = rows[0]; if (!r) return null;
+  const withSla = Number(r.withSla);
+  const breached = Number(r.slaBreached);
+  const compliance = withSla > 0 ? Math.round(((withSla - breached) / withSla) * 100) : null;
+  return {
+    title: "Service Request Snapshot",
+    rows: [
+      ["Total Requests",      String(Number(r.total))],
+      ["Open",                String(Number(r.open))],
+      ["Fulfilled",           String(Number(r.fulfilled))],
+      ["SLA Compliance",      fmtPct(compliance)],
+      ["Avg Fulfillment",     fmtDuration(r.avgFulfillmentSeconds)],
+    ],
+  };
+}
+
+async function problemSnapshot(since: Date, until: Date): Promise<Snapshot | null> {
+  interface Row {
+    total: bigint; open: bigint; resolved: bigint;
+    knownErrors: bigint; avgResolutionDays: number | null;
+  }
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE "resolved_at" IS NULL AND "closed_at" IS NULL) AS open,
+      COUNT(*) FILTER (WHERE "resolved_at" IS NOT NULL OR "closed_at" IS NOT NULL) AS resolved,
+      COUNT(*) FILTER (WHERE "is_known_error" = true) AS "knownErrors",
+      ROUND(AVG(EXTRACT(EPOCH FROM (
+        COALESCE("resolved_at","closed_at") - "createdAt"
+      )) / 86400.0) FILTER (WHERE COALESCE("resolved_at","closed_at") IS NOT NULL), 1)
+        AS "avgResolutionDays"
+    FROM problem WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+  `;
+  const r = rows[0]; if (!r) return null;
+  const days = r.avgResolutionDays;
+  return {
+    title: "Problem Snapshot",
+    rows: [
+      ["Total Problems",       String(Number(r.total))],
+      ["Open",                 String(Number(r.open))],
+      ["Resolved",             String(Number(r.resolved))],
+      ["Known Errors",         String(Number(r.knownErrors))],
+      ["Avg Resolution",       days == null ? "—" : `${Number(days).toFixed(1)} days`],
+    ],
+  };
+}
+
+async function approvalSnapshot(since: Date, until: Date): Promise<Snapshot | null> {
+  interface Row {
+    total: bigint; pending: bigint; approved: bigint; rejected: bigint;
+    avgTurnaroundSeconds: number | null;
+  }
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE status = 'pending')  AS pending,
+      COUNT(*) FILTER (WHERE status = 'approved') AS approved,
+      COUNT(*) FILTER (WHERE status = 'rejected') AS rejected,
+      ROUND(AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")))
+            FILTER (WHERE "resolvedAt" IS NOT NULL AND status IN ('approved','rejected')))::int
+            AS "avgTurnaroundSeconds"
+    FROM approval_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+  `;
+  const r = rows[0]; if (!r) return null;
+  return {
+    title: "Approval Snapshot",
+    rows: [
+      ["Total Approvals",     String(Number(r.total))],
+      ["Pending",             String(Number(r.pending))],
+      ["Approved",            String(Number(r.approved))],
+      ["Rejected",            String(Number(r.rejected))],
+      ["Avg Turnaround",      fmtDuration(r.avgTurnaroundSeconds)],
+    ],
+  };
+}
+
+async function changeSnapshot(since: Date, until: Date): Promise<Snapshot | null> {
+  interface Row {
+    total: bigint; failed: bigint; emergency: bigint;
+    completed: bigint; avgApprovalSec: number | null;
+  }
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT
+      COUNT(*)                                            AS total,
+      COUNT(*) FILTER (WHERE c.state = 'failed')          AS failed,
+      COUNT(*) FILTER (WHERE c.state = 'completed')       AS completed,
+      COUNT(*) FILTER (WHERE c.change_type = 'emergency') AS emergency,
+      ROUND(AVG(EXTRACT(EPOCH FROM (ar."resolvedAt" - ar."createdAt")))
+            FILTER (WHERE ar."resolvedAt" IS NOT NULL))::int AS "avgApprovalSec"
+    FROM change_request c
+    LEFT JOIN approval_request ar
+      ON ar.subject_type = 'change_request' AND ar.subject_id = c.id::text
+    WHERE c."createdAt" >= ${since} AND c."createdAt" <= ${until}
+  `;
+  const r = rows[0]; if (!r) return null;
+  const total = Number(r.total);
+  const failed = Number(r.failed);
+  const successRate = total > 0 ? Math.round(((total - failed) / total) * 100) : null;
+  return {
+    title: "Change Snapshot",
+    rows: [
+      ["Total Changes",       String(total)],
+      ["Completed",           String(Number(r.completed))],
+      ["Failed",              String(failed)],
+      ["Emergency",           String(Number(r.emergency))],
+      ["Success Rate",        fmtPct(successRate)],
+      ["Avg Approval Time",   fmtDuration(r.avgApprovalSec)],
+    ],
+  };
+}
+
+async function csatSnapshot(since: Date, until: Date): Promise<Snapshot | null> {
+  interface Row {
+    total: bigint; avgRating: number | null; positive: bigint; negative: bigint;
+  }
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT
+      COUNT(*) AS total,
+      ROUND(AVG(rating)::numeric, 2)::float8 AS "avgRating",
+      COUNT(*) FILTER (WHERE rating >= 4) AS positive,
+      COUNT(*) FILTER (WHERE rating <= 2) AS negative
+    FROM csat_rating
+    WHERE "submittedAt" >= ${since} AND "submittedAt" <= ${until}
+  `;
+  const r = rows[0]; if (!r) return null;
+  const total = Number(r.total);
+  const positive = Number(r.positive);
+  const negative = Number(r.negative);
+  const positivePct = total > 0 ? Math.round((positive / total) * 100) : null;
+  const negativePct = total > 0 ? Math.round((negative / total) * 100) : null;
+  return {
+    title: "CSAT Snapshot",
+    rows: [
+      ["Total Responses",     String(total)],
+      ["Average Rating",      r.avgRating == null ? "—" : `${Number(r.avgRating).toFixed(2)} / 5`],
+      ["Positive (4–5★)",     `${positive} (${fmtPct(positivePct)})`],
+      ["Negative (1–2★)",     `${negative} (${fmtPct(negativePct)})`],
+    ],
+  };
+}
+
+async function kbSnapshot(since: Date, until: Date): Promise<Snapshot | null> {
+  interface ArticleRow { totalArticles: bigint; published: bigint; }
+  interface SearchRow  { searches: bigint; zero: bigint; }
+  const [aRows, sRows] = await Promise.all([
+    prisma.$queryRaw<ArticleRow[]>`
+      SELECT COUNT(*) AS "totalArticles",
+             COUNT(*) FILTER (WHERE status = 'published') AS published
+      FROM kb_article
+    `,
+    prisma.$queryRaw<SearchRow[]>`
+      SELECT COUNT(*) AS searches,
+             COUNT(*) FILTER (WHERE "resultCount" = 0) AS zero
+      FROM kb_search_log
+      WHERE "created_at" >= ${since} AND "created_at" <= ${until}
+    `,
+  ]);
+  const a = aRows[0]; const s = sRows[0];
+  const searches = Number(s?.searches ?? 0);
+  const zero = Number(s?.zero ?? 0);
+  const zeroRate = searches > 0 ? Math.round((zero / searches) * 100) : null;
+  return {
+    title: "Knowledge Base Snapshot",
+    rows: [
+      ["Total Articles",      String(Number(a?.totalArticles ?? 0))],
+      ["Published",           String(Number(a?.published ?? 0))],
+      ["Searches in Period",  String(searches)],
+      ["Zero-Result Rate",    fmtPct(zeroRate)],
+    ],
+  };
+}
+
+async function realtimeSnapshot(): Promise<Snapshot | null> {
+  interface Row {
+    open: bigint; unassigned: bigint; overdue: bigint; processing: bigint;
+  }
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT
+      COUNT(*) FILTER (WHERE status = 'open')                          AS open,
+      COUNT(*) FILTER (WHERE status = 'open' AND "assignedToId" IS NULL) AS unassigned,
+      COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed','new','processing')
+                         AND "resolutionDueAt" IS NOT NULL
+                         AND "resolutionDueAt" < NOW())                AS overdue,
+      COUNT(*) FILTER (WHERE status = 'processing')                    AS processing
+    FROM ticket
+  `;
+  const r = rows[0]; if (!r) return null;
+  return {
+    title: "Live Operations",
+    rows: [
+      ["Open Tickets",        String(Number(r.open))],
+      ["Unassigned",          String(Number(r.unassigned))],
+      ["Overdue (SLA)",       String(Number(r.overdue))],
+      ["AI Processing",       String(Number(r.processing))],
+    ],
+  };
+}
+
+async function customSnapshot(reportId: number | null | undefined, since: Date, until: Date): Promise<Snapshot | null> {
+  if (!reportId) {
+    return ticketSnapshot(since, until, "Ticket Snapshot");
+  }
+  const report = await prisma.savedReport.findUnique({
+    where: { id: reportId },
+    select: { name: true, description: true, config: true, updatedAt: true, owner: { select: { name: true } } },
+  });
+  if (!report) return ticketSnapshot(since, until, "Ticket Snapshot");
+
+  const config = (report.config ?? {}) as { widgets?: unknown[] };
+  const widgetCount = Array.isArray(config.widgets) ? config.widgets.length : 0;
+
+  const rows: SnapshotRow[] = [
+    ["Report Name",   report.name],
+    ["Owner",         report.owner?.name ?? "—"],
+    ["Widgets",       String(widgetCount)],
+    ["Last Updated",  fmtDate(report.updatedAt)],
+  ];
+  if (report.description) {
+    const desc = report.description.length > 80
+      ? report.description.slice(0, 77) + "…"
+      : report.description;
+    rows.splice(1, 0, ["Description", desc]);
+  }
+  return { title: "Custom Report", rows };
+}
+
+// ── Snapshot dispatcher ───────────────────────────────────────────────────────
+
+async function buildSnapshot(
+  section: string,
+  since: Date,
+  until: Date,
+  reportId: number | null | undefined,
+): Promise<Snapshot | null> {
+  switch (section) {
+    case "overview":  return ticketSnapshot(since, until, "Ticket Snapshot");
+    case "tickets":   return ticketSnapshot(since, until, "Ticket Snapshot");
+    case "sla":       return slaSnapshot(since, until);
+    case "agents":    return agentSnapshot(since, until);
+    case "teams":     return teamSnapshot(since, until);
+    case "incidents": return incidentSnapshot(since, until);
+    case "requests":  return requestSnapshot(since, until);
+    case "problems":  return problemSnapshot(since, until);
+    case "approvals": return approvalSnapshot(since, until);
+    case "changes":   return changeSnapshot(since, until);
+    case "csat":      return csatSnapshot(since, until);
+    case "kb":        return kbSnapshot(since, until);
+    case "realtime":  return realtimeSnapshot();
+    case "custom":    return customSnapshot(reportId, since, until);
+    default:          return ticketSnapshot(since, until, "Ticket Snapshot");
+  }
 }
 
 // ── HTML email builder ────────────────────────────────────────────────────────
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 function buildEmailHtml(opts: {
   senderName:   string;
@@ -118,34 +533,23 @@ function buildEmailHtml(opts: {
   appUrl:       string;
   reportPath:   string;
   message?:     string;
-  snapshot:     OverviewSnapshot | null;
+  snapshot:     Snapshot | null;
 }) {
   const { senderName, sectionLabel, periodLabel, appUrl, reportPath, message, snapshot } = opts;
-
-  const slaCompliance = snapshot && Number(snapshot.ticketsWithSlaTarget) > 0
-    ? `${Math.round(((Number(snapshot.ticketsWithSlaTarget) - Number(snapshot.breachedTickets)) / Number(snapshot.ticketsWithSlaTarget)) * 100)}%`
-    : "—";
 
   const metricsHtml = snapshot ? `
     <table width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;border-collapse:collapse;">
       <tr>
         <td style="padding:4px 0 8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;">
-          Ticket Snapshot
+          ${escapeHtml(snapshot.title)}
         </td>
       </tr>
     </table>
     <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f9fafb;border-radius:8px;overflow:hidden;">
-      ${[
-        ["Total Tickets",          String(Number(snapshot.totalTickets))],
-        ["Open",                   String(Number(snapshot.openTickets))],
-        ["Resolved / Closed",      String(Number(snapshot.resolvedTickets))],
-        ["SLA Compliance",         slaCompliance],
-        ["Avg First Response",     fmtDuration(snapshot.avgFirstResponseSeconds)],
-        ["Avg Resolution Time",    fmtDuration(snapshot.avgResolutionSeconds)],
-      ].map(([label, value], i) => `
+      ${snapshot.rows.map(([label, value], i) => `
         <tr style="border-top:${i === 0 ? "none" : "1px solid #e5e7eb"};">
-          <td style="padding:10px 16px;font-size:13px;color:#374151;">${label}</td>
-          <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">${value}</td>
+          <td style="padding:10px 16px;font-size:13px;color:#374151;">${escapeHtml(label)}</td>
+          <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">${escapeHtml(value)}</td>
         </tr>
       `).join("")}
     </table>
@@ -154,7 +558,7 @@ function buildEmailHtml(opts: {
   const messageHtml = message ? `
     <div style="margin:20px 0;padding:14px 16px;background:#f0f4ff;border-left:3px solid #6366f1;border-radius:0 6px 6px 0;">
       <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.06em;">Message</p>
-      <p style="margin:0;font-size:13px;color:#374151;white-space:pre-line;">${message.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+      <p style="margin:0;font-size:13px;color:#374151;white-space:pre-line;">${escapeHtml(message)}</p>
     </div>
   ` : "";
 
@@ -175,8 +579,8 @@ function buildEmailHtml(opts: {
               <p style="margin:0 0 4px;font-size:12px;font-weight:500;color:rgba(255,255,255,0.75);text-transform:uppercase;letter-spacing:0.08em;">
                 Report Shared
               </p>
-              <h1 style="margin:0;font-size:22px;font-weight:700;color:#ffffff;">${sectionLabel} Report</h1>
-              <p style="margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.8);">${periodLabel}</p>
+              <h1 style="margin:0;font-size:22px;font-weight:700;color:#ffffff;">${escapeHtml(sectionLabel)} Report</h1>
+              <p style="margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.8);">${escapeHtml(periodLabel)}</p>
             </td>
           </tr>
 
@@ -184,7 +588,7 @@ function buildEmailHtml(opts: {
           <tr>
             <td style="padding:28px 32px 8px;">
               <p style="margin:0 0 6px;font-size:14px;color:#374151;">
-                <strong style="color:#111827;">${senderName.replace(/</g, "&lt;")}</strong> shared a report with you.
+                <strong style="color:#111827;">${escapeHtml(senderName)}</strong> shared a report with you.
               </p>
               ${messageHtml}
               ${metricsHtml}
@@ -236,8 +640,14 @@ router.post("/share-email", async (req, res) => {
     ? `${fmtDate(since)} – ${fmtDate(until)}`
     : `Last ${period ?? "30"} days`;
 
-  // Fetch overview snapshot for all sections (provides useful context)
-  const snapshot = await fetchSnapshot(since, until);
+  // Build the section-specific snapshot. Fall back to null if the query
+  // throws — the email still goes out with the link, just no metrics block.
+  let snapshot: Snapshot | null = null;
+  try {
+    snapshot = await buildSnapshot(section, since, until, reportId);
+  } catch (err) {
+    console.error(`[reports-share] snapshot failed for section=${section}:`, err);
+  }
 
   // Build the link back to the report
   const appUrl = process.env.APP_URL
@@ -273,6 +683,19 @@ router.post("/share-email", async (req, res) => {
       }),
     });
   }
+
+  void logSystemAudit(sender.id, "report.shared", {
+    section,
+    sectionLabel,
+    recipientCount: emails.length,
+    recipients: emails,
+    reportId:   reportId ?? null,
+    period:     period ?? null,
+    from:       from ?? null,
+    to:         to ?? null,
+    periodLabel,
+    hasMessage: Boolean(message && message.length > 0),
+  });
 
   res.json({ ok: true, sent: emails.length });
 });

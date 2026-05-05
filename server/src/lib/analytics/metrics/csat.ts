@@ -103,4 +103,23 @@ const csatDistribution: MetricDefinition = {
   },
 };
 
-export const CSAT_METRICS: MetricDefinition[] = [csatAvgScore, csatTrend, csatDistribution];
+const csatRatingsCount: MetricDefinition = {
+  id: "csat.ratings_count", label: "Ratings Count",
+  description: "Total CSAT ratings submitted in the period.",
+  domain: "csat", unit: "count",
+  supportedVisualizations: ["number"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(ctx) {
+      interface Row { count: bigint }
+      const [row] = await ctx.db.$queryRaw<Row[]>`
+        SELECT COUNT(*) AS count FROM csat_rating
+        WHERE "submittedAt" >= ${ctx.dateRange.since} AND "submittedAt" <= ${ctx.dateRange.until}
+      `;
+      return { type: "stat", value: Number(row?.count ?? 0), label: "Ratings", unit: "count" };
+    },
+  },
+};
+
+export const CSAT_METRICS: MetricDefinition[] = [csatAvgScore, csatTrend, csatDistribution, csatRatingsCount];

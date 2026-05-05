@@ -67,6 +67,8 @@ import {
   Send,
   PlayCircle,
   StopCircle,
+  FileDown,
+  Mail,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -94,7 +96,7 @@ type ActionCategory =
   | "lifecycle" | "assignment" | "sla" | "communication" | "automation" | "merge"
   | "incident" | "problem" | "change" | "request"
   | "asset" | "approval" | "customer" | "team"
-  | "auth" | "settings" | "user" | "kb" | "other";
+  | "auth" | "settings" | "user" | "kb" | "report" | "other";
 
 interface ActionConfig {
   label: string;
@@ -325,6 +327,10 @@ const ACTION_CONFIG: Record<string, ActionConfig> = {
   "team.deleted":               { label: "Team Deleted",       category: "team",     icon: Users,          color: "text-red-600",      bg: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20"                 },
   "team.member_added":          { label: "Member Added",       category: "team",     icon: UserPlus,       color: "text-emerald-600",  bg: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20" },
   "team.member_removed":        { label: "Member Removed",     category: "team",     icon: UserMinus,      color: "text-amber-600",    bg: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"       },
+
+  // Reports
+  "report.exported":            { label: "Report Downloaded",  category: "report",   icon: FileDown,       color: "text-cyan-600",     bg: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border-cyan-500/20"             },
+  "report.shared":              { label: "Report Shared",      category: "report",   icon: Mail,           color: "text-indigo-600",   bg: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20"     },
 };
 
 const CATEGORY_LABELS: Record<ActionCategory, string> = {
@@ -346,6 +352,7 @@ const CATEGORY_LABELS: Record<ActionCategory, string> = {
   settings:     "Settings Changes",
   user:         "User Management",
   kb:           "Knowledge Base",
+  report:       "Reports",
   other:        "Other",
 };
 
@@ -445,6 +452,22 @@ function renderMetaSummary(action: string, meta: Record<string, unknown>): strin
     case "kb.article_submitted_review":
     case "kb.article_approved":
       return m.title ? String(m.title) : "";
+    // Reports
+    case "report.exported": {
+      const label  = (m.sectionLabel as string) ?? (m.section as string) ?? "Report";
+      const format = m.format ? String(m.format).toUpperCase() : "";
+      return format ? `${label} — ${format}` : label;
+    }
+    case "report.shared": {
+      const label = (m.sectionLabel as string) ?? (m.section as string) ?? "Report";
+      const count = Number(m.recipientCount ?? 0);
+      const recipients = (m.recipients as string[] | undefined) ?? [];
+      const preview = recipients.slice(0, 2).join(", ");
+      const extra   = recipients.length > 2 ? ` +${recipients.length - 2} more` : "";
+      return count > 0
+        ? `${label} → ${preview}${extra} (${count} recipient${count === 1 ? "" : "s"})`
+        : label;
+    }
     // Incidents
     case "incident.created":
       return m.entityTitle ? `${m.entityTitle}${m.isMajor ? " (MAJOR)" : ""}` : "";
@@ -973,6 +996,7 @@ export default function AuditLogPage() {
           if (!settings.captureSettingsChanges) off.push("Settings changes");
           if (!settings.captureUserManagement) off.push("User management");
           if (!settings.captureKbEvents)       off.push("KB events");
+          if (!settings.captureReportEvents)   off.push("Report events");
           if (off.length === 0) return null;
           return (
             <div className="border-b border-blue-500/20 bg-blue-500/5 px-6 py-2.5">

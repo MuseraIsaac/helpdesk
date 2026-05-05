@@ -34,6 +34,8 @@ import { usePrintReport } from "@/hooks/usePrintReport";
 import { ReportCanvas }      from "@/components/analytics/ReportCanvas";
 import { MetricLibrary, defaultSize } from "@/components/analytics/MetricLibrary";
 import { WidgetConfigPanel } from "@/components/analytics/WidgetConfigPanel";
+import { ReportFiltersBar }  from "@/components/analytics/ReportFiltersBar";
+import type { FilterSet }    from "core/schemas/analytics.ts";
 import {
   getReport, createReport, updateReport, exportMetric,
   type WidgetLayout, type ReportConfig, type MetricMeta, listMetrics,
@@ -118,6 +120,7 @@ export default function CustomReportPage() {
   const [reportName, setReportName] = useState("Untitled Report");
   const [widgets,   setWidgets]   = useState<WidgetLayout[]>([]);
   const [preset,    setPreset]    = useState("last_30_days");
+  const [filters,   setFilters]   = useState<FilterSet | undefined>(undefined);
 
   // Widget editor state
   const [editingId,  setEditingId]  = useState<string | null>(null);
@@ -143,6 +146,7 @@ export default function CustomReportPage() {
     setWidgets(Array.isArray(reportData.config?.widgets) ? reportData.config.widgets : []);
     const p = (reportData.config?.dateRange as { preset?: string } | undefined)?.preset ?? "last_30_days";
     setPreset(p);
+    setFilters((reportData.config?.filters as FilterSet | undefined) ?? undefined);
     setEditMode(false);
     setIsDirty(false);
   }, [reportData]);
@@ -164,6 +168,7 @@ export default function CustomReportPage() {
     mutationFn: async () => {
       const config: ReportConfig = {
         dateRange: { preset },
+        ...(filters && filters.conditions.length > 0 ? { filters } : {}),
         widgets,
         layout: "grid",
       };
@@ -238,6 +243,7 @@ export default function CustomReportPage() {
     setWidgets(data.config.widgets);
     const p = (data.config.dateRange as { preset?: string }).preset ?? "last_30_days";
     setPreset(p);
+    setFilters((data.config.filters as FilterSet | undefined) ?? undefined);
     setEditMode(false);
     setIsDirty(false);
   }
@@ -455,6 +461,19 @@ export default function CustomReportPage() {
         </div>
       )}
 
+      {/* ── Canvas filters — scopes every widget on the report ───────────
+       *
+       * In edit mode this is a row of clickable filter pills (status,
+       * priority, category, type, team, organisation, channel). In view
+       * mode it collapses to a read-only summary row showing only the
+       * filters that are actually set, so the report's scope is visible
+       * without entering edit. Hidden when no filters are set in view mode. */}
+      <ReportFiltersBar
+        filters={filters}
+        onChange={(f) => { setFilters(f); setIsDirty(true); }}
+        editable={editMode && !isCuratedView}
+      />
+
       {/* ── Body — sidebar + canvas as a natural-height row ─────────────── */}
       <div className="flex min-h-[calc(100vh-160px)]">
 
@@ -478,6 +497,7 @@ export default function CustomReportPage() {
           <ReportCanvas
             widgets={widgets}
             dateRange={{ preset }}
+            filters={filters}
             editMode={editMode}
             containerWidth={Math.max(containerWidth - 32, 400)}
             onLayoutChange={updateWidgets}

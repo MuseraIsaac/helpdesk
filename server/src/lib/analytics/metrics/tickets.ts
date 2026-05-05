@@ -746,6 +746,400 @@ const ticketsAssignedNotReplied: MetricDefinition = {
   },
 };
 
+// ── tickets.resolved ──────────────────────────────────────────────────────────
+
+const ticketsResolved: MetricDefinition = {
+  id:    "tickets.resolved",
+  label: "Resolved Tickets",
+  description: "Number of tickets resolved within the selected period.",
+  domain: "tickets",
+  unit:  "count",
+  supportedVisualizations: ["number", "number_change"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(ctx) {
+      const [row] = await ctx.db.$queryRawUnsafe<RawCount[]>(
+        `SELECT COUNT(*) AS count FROM ticket
+         WHERE "resolvedAt" >= $1 AND "resolvedAt" <= $2
+           AND status IN ('resolved','closed')`,
+        ctx.dateRange.since, ctx.dateRange.until,
+      );
+      const value = Number(row?.count ?? 0);
+
+      if (ctx.comparison) {
+        const [prev] = await ctx.db.$queryRawUnsafe<RawCount[]>(
+          `SELECT COUNT(*) AS count FROM ticket
+           WHERE "resolvedAt" >= $1 AND "resolvedAt" <= $2
+             AND status IN ('resolved','closed')`,
+          ctx.comparison.since, ctx.comparison.until,
+        );
+        const prevValue = Number(prev?.count ?? 0);
+        const chg = value - prevValue;
+        const pct = prevValue > 0 ? Math.round((chg / prevValue) * 100) : null;
+        return {
+          type: "stat_change", value, previousValue: prevValue,
+          changePercent: pct,
+          changeDirection: chg > 0 ? "up" : chg < 0 ? "down" : "neutral",
+          label: "Resolved", unit: "count",
+        };
+      }
+      return { type: "stat", value, label: "Resolved", unit: "count" };
+    },
+  },
+};
+
+// ── tickets.in_progress ───────────────────────────────────────────────────────
+
+const ticketsInProgress: MetricDefinition = {
+  id:    "tickets.in_progress",
+  label: "In Progress Tickets",
+  description: "Tickets currently in 'in_progress' status (live snapshot).",
+  domain: "tickets",
+  unit:  "count",
+  supportedVisualizations: ["number"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(_ctx) {
+      const [row] = await _ctx.db.$queryRaw<RawCount[]>`
+        SELECT COUNT(*) AS count FROM ticket WHERE status = 'in_progress'
+      `;
+      return { type: "stat", value: Number(row?.count ?? 0), label: "In Progress", unit: "count" };
+    },
+  },
+};
+
+// ── tickets.oldest_open ───────────────────────────────────────────────────────
+
+const ticketsOldestOpen: MetricDefinition = {
+  id:    "tickets.oldest_open",
+  label: "Oldest Open Ticket",
+  description: "Age in days of the oldest currently-open ticket (live snapshot).",
+  domain: "tickets",
+  unit:  "days",
+  supportedVisualizations: ["number"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(_ctx) {
+      interface Row { days: number | null; ticket_number: string | null }
+      const [row] = await _ctx.db.$queryRaw<Row[]>`
+        SELECT FLOOR(EXTRACT(EPOCH FROM (NOW() - "createdAt")) / 86400)::int AS days,
+               ticket_number
+        FROM ticket
+        WHERE status IN ('open','in_progress','escalated')
+        ORDER BY "createdAt" ASC LIMIT 1
+      `;
+      const days = row?.days ?? null;
+      return {
+        type: "stat",
+        value: days,
+        label: "Oldest Open",
+        unit: "days",
+        sub: row?.ticket_number ? `Ticket ${row.ticket_number}` : "No open tickets",
+      };
+    },
+  },
+};
+
+// ── tickets.reopen_rate ───────────────────────────────────────────────────────
+
+const ticketsReopenRate: MetricDefinition = {
+  id:    "tickets.reopen_rate",
+  label: "Reopen Rate",
+  description: "Of tickets resolved in the period, the percentage that were subsequently reopened.",
+  domain: "tickets",
+  unit:  "percent",
+  supportedVisualizations: ["number", "gauge"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(ctx) {
+      interface Row { resolved: bigint; reopened: bigint }
+      const [row] = await ctx.db.$queryRawUnsafe<Row[]>(
+        `SELECT COUNT(*) AS resolved,
+                COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed')) AS reopened
+         FROM ticket
+         WHERE "resolvedAt" IS NOT NULL
+           AND "resolvedAt" >= $1 AND "resolvedAt" <= $2`,
+        ctx.dateRange.since, ctx.dateRange.until,
+      );
+      const resolved = Number(row?.resolved ?? 0);
+      const reopened = Number(row?.reopened ?? 0);
+      const rate = resolved > 0 ? Math.round((reopened / resolved) * 100) : null;
+      return {
+        type: "stat", value: rate, label: "Reopen Rate", unit: "percent",
+        sub: `${reopened} of ${resolved} resolved`,
+      };
+    },
+  },
+};
+
+// ── tickets.reopened_count ────────────────────────────────────────────────────
+
+const ticketsReopenedCount: MetricDefinition = {
+  id:    "tickets.reopened_count",
+  label: "Reopened Tickets",
+  description: "Number of tickets resolved in the period that were later reopened.",
+  domain: "tickets",
+  unit:  "count",
+  supportedVisualizations: ["number"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(ctx) {
+      const [row] = await ctx.db.$queryRawUnsafe<RawCount[]>(
+        `SELECT COUNT(*) AS count FROM ticket
+         WHERE "resolvedAt" IS NOT NULL
+           AND "resolvedAt" >= $1 AND "resolvedAt" <= $2
+           AND status NOT IN ('resolved','closed')`,
+        ctx.dateRange.since, ctx.dateRange.until,
+      );
+      return { type: "stat", value: Number(row?.count ?? 0), label: "Reopened", unit: "count" };
+    },
+  },
+};
+
+// ── tickets.assigned_count ────────────────────────────────────────────────────
+
+const ticketsAssignedCount: MetricDefinition = {
+  id:    "tickets.assigned_count",
+  label: "Tickets Assigned",
+  description: "Tickets created in the period and assigned to a human agent.",
+  domain: "tickets",
+  unit:  "count",
+  supportedVisualizations: ["number"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(ctx) {
+      const [row] = await ctx.db.$queryRawUnsafe<RawCount[]>(
+        `SELECT COUNT(*) AS count FROM ticket
+         WHERE "createdAt" >= $1 AND "createdAt" <= $2
+           AND "assignedToId" IS NOT NULL
+           AND "assignedToId" <> $3
+           AND status NOT IN ('new','processing')`,
+        ctx.dateRange.since, ctx.dateRange.until, AI_AGENT_ID,
+      );
+      return { type: "stat", value: Number(row?.count ?? 0), label: "Assigned", unit: "count" };
+    },
+  },
+};
+
+// ── tickets.resolution_rate ───────────────────────────────────────────────────
+
+const ticketsResolutionRate: MetricDefinition = {
+  id:    "tickets.resolution_rate",
+  label: "Resolution Rate",
+  description: "Of tickets created in the period, the percentage that have been resolved or closed.",
+  domain: "tickets",
+  unit:  "percent",
+  supportedVisualizations: ["number", "gauge"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(ctx) {
+      interface Row { total: bigint; resolved: bigint }
+      const [row] = await ctx.db.$queryRawUnsafe<Row[]>(
+        `SELECT COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE status IN ('resolved','closed')) AS resolved
+         FROM ticket
+         WHERE "createdAt" >= $1 AND "createdAt" <= $2
+           AND status NOT IN ('new','processing')`,
+        ctx.dateRange.since, ctx.dateRange.until,
+      );
+      const total = Number(row?.total ?? 0);
+      const res   = Number(row?.resolved ?? 0);
+      const rate  = total > 0 ? Math.round((res / total) * 100) : null;
+      return {
+        type: "stat", value: rate, label: "Resolution Rate", unit: "percent",
+        sub: `${res} of ${total}`,
+      };
+    },
+  },
+};
+
+// ── tickets.escalation_rate ───────────────────────────────────────────────────
+
+const ticketsEscalationRate: MetricDefinition = {
+  id:    "tickets.escalation_rate",
+  label: "Escalation Rate",
+  description: "Of tickets created in the period, the percentage that were escalated.",
+  domain: "tickets",
+  unit:  "percent",
+  supportedVisualizations: ["number", "gauge"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(ctx) {
+      interface Row { total: bigint; escalated: bigint }
+      const [row] = await ctx.db.$queryRawUnsafe<Row[]>(
+        `SELECT COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE "isEscalated" = true OR "escalatedAt" IS NOT NULL) AS escalated
+         FROM ticket
+         WHERE "createdAt" >= $1 AND "createdAt" <= $2
+           AND status NOT IN ('new','processing')`,
+        ctx.dateRange.since, ctx.dateRange.until,
+      );
+      const total = Number(row?.total ?? 0);
+      const esc   = Number(row?.escalated ?? 0);
+      const rate  = total > 0 ? Math.round((esc / total) * 100) : null;
+      return {
+        type: "stat", value: rate, label: "Escalation Rate", unit: "percent",
+        sub: `${esc} of ${total}`,
+      };
+    },
+  },
+};
+
+// ── tickets.escalated_count ───────────────────────────────────────────────────
+
+const ticketsEscalatedCount: MetricDefinition = {
+  id:    "tickets.escalated_count",
+  label: "Escalated Tickets",
+  description: "Number of tickets escalated in the period.",
+  domain: "tickets",
+  unit:  "count",
+  supportedVisualizations: ["number"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(ctx) {
+      const [row] = await ctx.db.$queryRawUnsafe<RawCount[]>(
+        `SELECT COUNT(*) AS count FROM ticket
+         WHERE "createdAt" >= $1 AND "createdAt" <= $2
+           AND ("isEscalated" = true OR "escalatedAt" IS NOT NULL)
+           AND status NOT IN ('new','processing')`,
+        ctx.dateRange.since, ctx.dateRange.until,
+      );
+      return { type: "stat", value: Number(row?.count ?? 0), label: "Escalated", unit: "count" };
+    },
+  },
+};
+
+// ── tickets.sla_met_count ─────────────────────────────────────────────────────
+
+const ticketsSlaMetCount: MetricDefinition = {
+  id:    "tickets.sla_met_count",
+  label: "SLA Met",
+  description: "Resolved tickets that met their SLA target.",
+  domain: "tickets",
+  unit:  "count",
+  supportedVisualizations: ["number"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(ctx) {
+      const [row] = await ctx.db.$queryRawUnsafe<RawCount[]>(
+        `SELECT COUNT(*) AS count FROM ticket
+         WHERE "createdAt" >= $1 AND "createdAt" <= $2
+           AND status IN ('resolved','closed')
+           AND "resolutionDueAt" IS NOT NULL
+           AND "slaBreached" = false
+           AND ("resolvedAt" IS NULL OR "resolvedAt" <= "resolutionDueAt")`,
+        ctx.dateRange.since, ctx.dateRange.until,
+      );
+      return { type: "stat", value: Number(row?.count ?? 0), label: "SLA Met", unit: "count" };
+    },
+  },
+};
+
+// ── tickets.sla_breached_count ────────────────────────────────────────────────
+
+const ticketsSlaBreachedCount: MetricDefinition = {
+  id:    "tickets.sla_breached_count",
+  label: "SLA Breached",
+  description: "Resolved or closed tickets that breached their SLA target.",
+  domain: "tickets",
+  unit:  "count",
+  supportedVisualizations: ["number"],
+  defaultVisualization:    "number",
+
+  computeFor: {
+    async stat(ctx) {
+      const [row] = await ctx.db.$queryRawUnsafe<RawCount[]>(
+        `SELECT COUNT(*) AS count FROM ticket
+         WHERE "createdAt" >= $1 AND "createdAt" <= $2
+           AND status IN ('resolved','closed')
+           AND "resolutionDueAt" IS NOT NULL
+           AND ("slaBreached" = true OR "resolvedAt" > "resolutionDueAt")`,
+        ctx.dateRange.since, ctx.dateRange.until,
+      );
+      return { type: "stat", value: Number(row?.count ?? 0), label: "SLA Breached", unit: "count" };
+    },
+  },
+};
+
+// ── tickets.resolved_trend ────────────────────────────────────────────────────
+
+const ticketsResolvedTrend: MetricDefinition = {
+  id:    "tickets.resolved_trend",
+  label: "Resolution Trend",
+  description: "Tickets resolved per day over the selected period.",
+  domain: "tickets",
+  unit:  "count",
+  supportedVisualizations: ["line", "area", "bar"],
+  defaultVisualization:    "line",
+
+  computeFor: {
+    async time_series(ctx) {
+      interface Row { day: string; count: bigint }
+      const rows = await ctx.db.$queryRawUnsafe<Row[]>(
+        `SELECT TO_CHAR("resolvedAt",'YYYY-MM-DD') AS day, COUNT(*) AS count
+         FROM ticket
+         WHERE "resolvedAt" >= $1 AND "resolvedAt" <= $2
+           AND status IN ('resolved','closed')
+         GROUP BY day ORDER BY day`,
+        ctx.dateRange.since, ctx.dateRange.until,
+      );
+      const lookup = new Map(rows.map(r => [r.day, Number(r.count)]));
+      const points = fillDateSeries(ctx.dateRange.since, ctx.dateRange.until).map(date => ({
+        date, resolved: lookup.get(date) ?? 0,
+      }));
+      return { type: "time_series", series: [{ key: "resolved", label: "Resolved" }], points };
+    },
+  },
+};
+
+// ── tickets.sla_trend ─────────────────────────────────────────────────────────
+
+const ticketsSlaTrend: MetricDefinition = {
+  id:    "tickets.sla_trend",
+  label: "SLA Trend",
+  description: "Daily SLA compliance percentage over the selected period.",
+  domain: "tickets",
+  unit:  "percent",
+  supportedVisualizations: ["line", "area"],
+  defaultVisualization:    "line",
+
+  computeFor: {
+    async time_series(ctx) {
+      interface Row { day: string; total: bigint; breached: bigint }
+      const rows = await ctx.db.$queryRawUnsafe<Row[]>(
+        `SELECT TO_CHAR("resolvedAt",'YYYY-MM-DD') AS day,
+                COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL) AS total,
+                COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL
+                                 AND ("slaBreached" = true OR "resolvedAt" > "resolutionDueAt")) AS breached
+         FROM ticket
+         WHERE "resolvedAt" >= $1 AND "resolvedAt" <= $2
+           AND status IN ('resolved','closed')
+         GROUP BY day ORDER BY day`,
+        ctx.dateRange.since, ctx.dateRange.until,
+      );
+      const lookup = new Map(rows.map(r => {
+        const t = Number(r.total);
+        const b = Number(r.breached);
+        return [r.day, t > 0 ? Math.round(((t - b) / t) * 100) : null] as [string, number | null];
+      }));
+      const points = fillDateSeries(ctx.dateRange.since, ctx.dateRange.until).map(date => ({
+        date, slaPct: lookup.get(date) ?? null,
+      }));
+      return { type: "time_series", series: [{ key: "slaPct", label: "SLA Compliance %" }], points };
+    },
+  },
+};
+
 // ── Export ────────────────────────────────────────────────────────────────────
 
 export const TICKET_METRICS: MetricDefinition[] = [
@@ -764,4 +1158,17 @@ export const TICKET_METRICS: MetricDefinition[] = [
   ticketsByAgent,
   ticketsOverdue,
   ticketsAssignedNotReplied,
+  ticketsResolved,
+  ticketsInProgress,
+  ticketsOldestOpen,
+  ticketsReopenRate,
+  ticketsReopenedCount,
+  ticketsAssignedCount,
+  ticketsResolutionRate,
+  ticketsEscalationRate,
+  ticketsEscalatedCount,
+  ticketsSlaMetCount,
+  ticketsSlaBreachedCount,
+  ticketsResolvedTrend,
+  ticketsSlaTrend,
 ];
