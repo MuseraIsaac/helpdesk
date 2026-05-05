@@ -194,7 +194,8 @@
       "Bash(grep -rn \"tickets/\\\\${\" \"C:\\\\Users\\\\IMusera\\\\OneDrive - CopyCat Group\\\\Desktop\\\\ITSM\\\\helpdesk\\\\client\\\\src\")",
       "Bash(kill bk608pecl *)",
       "Bash(grep -n \"Show\\\\\\\\|Hide\\\\\\\\|errors.password\\\\\\\\|Submit\" \"C:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/client/src/pages/portal/PortalLoginPage.tsx\")",
-      "Bash(grep -vE \"^$\")"
+      "Bash(grep -vE \"^$\")",
+      "Read(//drives/C/Users/IMusera/.ssh/**)"
     ]
   }
 }
