@@ -199,7 +199,8 @@
       "Bash(scp -i /drives/C/Users/IMusera/.ssh/id_rsa -P 8876 'c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/release-server/daemon.mjs' 'c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/release-server/publish.sh' 'c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/release-server/register.sh' 'c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/release-server/revoke.sh' 'c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/release-server/issue-license.sh' 'c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/release-server/revoke-license.sh' root@157.180.117.21:/opt/zentra-release/)",
       "Bash(scp -i /drives/C/Users/IMusera/.ssh/id_rsa -P 8876 'c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/release-server/sync-from-github.sh' root@157.180.117.21:/opt/zentra-release/sync-from-github.sh)",
       "Bash(bash -n \"c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/scripts/enable-update-orchestrator.sh\")",
-      "Bash(bash -n \"c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/scripts/zentra-finalize-update.sh\")"
+      "Bash(bash -n \"c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/scripts/zentra-finalize-update.sh\")",
+      "Bash(grep -E '^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+$')"
     ]
   }
 }

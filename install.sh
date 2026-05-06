@@ -62,7 +62,13 @@ APP_BASE_PORT="${APP_BASE_PORT:-3000}"          # first replica's port
 
 # === REPO ─────────────────────────────────────────────────────────────────
 REPO_URL="${REPO_URL:-https://github.com/MuseraIsaac/helpdesk.git}"
-BRANCH="${BRANCH:-main}"
+# What to check out:
+#   "latest"   (default) → highest semver release tag of the form vMAJOR.MINOR.PATCH
+#   "main"               → bleeding-edge HEAD (only use for development)
+#   "v1.2.3"             → a specific tag
+#   "release-foo"        → any branch name
+# `latest` is resolved by phase_repo via `git ls-remote --tags`.
+BRANCH="${BRANCH:-latest}"
 
 # === SEED ADMIN (used on first run; harmless after) ───────────────────────
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
@@ -305,12 +311,49 @@ SQL
 }
 
 # ── 3.6 Source code ────────────────────────────────────────────────────────
+# Returns the highest semver-style release tag (vMAJOR.MINOR.PATCH, no
+# pre-release suffix) on the remote. Empty output if nothing matches.
+resolve_latest_tag() {
+  git ls-remote --tags --refs "$REPO_URL" 'v*' 2>/dev/null \
+    | awk '{print $2}' \
+    | sed 's|refs/tags/||' \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -V \
+    | tail -1
+}
+
+# Decides whether $1 is a tag (resolves locally to a tag ref) or a branch.
+# Used after the repo is cloned so we can pick the right reset target.
+is_local_tag() {
+  runuser -u "$APP_USER" -- git -C "$APP_DIR" \
+    show-ref --tags --quiet --verify "refs/tags/$1"
+}
+
 phase_repo() {
+  # Resolve BRANCH=latest to a concrete tag at the start so every downstream
+  # step (clone, checkout, update.sh template) sees the resolved value.
+  if [[ "$BRANCH" == "latest" ]]; then
+    log "Resolving BRANCH=latest from $REPO_URL"
+    local resolved
+    resolved="$(resolve_latest_tag)"
+    [[ -n "$resolved" ]] || die \
+      "No vX.Y.Z tags found in $REPO_URL — set BRANCH=main to install HEAD instead."
+    BRANCH="$resolved"
+    log "  → $BRANCH"
+  fi
+
   log "Fetching source from $REPO_URL ($BRANCH)"
   if [[ -d "$APP_DIR/.git" ]]; then
-    runuser -u "$APP_USER" -- git -C "$APP_DIR" fetch --all --prune
+    runuser -u "$APP_USER" -- git -C "$APP_DIR" fetch --all --tags --force --prune
     runuser -u "$APP_USER" -- git -C "$APP_DIR" checkout "$BRANCH"
-    runuser -u "$APP_USER" -- git -C "$APP_DIR" reset --hard "origin/$BRANCH"
+    # Tags are immutable refs — `origin/<tag>` doesn't exist. Reset to the
+    # tag itself; for branches, reset to origin/<branch> to discard local
+    # commits and follow upstream.
+    if is_local_tag "$BRANCH"; then
+      runuser -u "$APP_USER" -- git -C "$APP_DIR" reset --hard "$BRANCH"
+    else
+      runuser -u "$APP_USER" -- git -C "$APP_DIR" reset --hard "origin/$BRANCH"
+    fi
   else
     rm -rf "$APP_DIR"
     runuser -u "$APP_USER" -- git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
@@ -714,20 +757,42 @@ phase_update_script() {
   cat > "$APP_DIR/scripts/update.sh" <<EOF
 #!/usr/bin/env bash
 # Pull latest source, rebuild client, migrate DB, restart all replicas.
+#
+# Default behaviour: jump to the highest semver release tag in the repo.
+# Override by passing BRANCH=main (HEAD), BRANCH=v1.2.3, or BRANCH=some-branch.
 set -Eeo pipefail
 [[ \${EUID} -eq 0 ]] || { echo "Run as root: sudo bash \$0"; exit 1; }
 
+REPO_URL="${REPO_URL}"
+BRANCH="\${BRANCH:-latest}"
+
+# Resolve "latest" → highest semver tag.
+if [[ "\$BRANCH" == "latest" ]]; then
+  BRANCH=\$(git ls-remote --tags --refs "\$REPO_URL" 'v*' 2>/dev/null \\
+    | awk '{print \$2}' | sed 's|refs/tags/||' \\
+    | grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+\$' \\
+    | sort -V | tail -1)
+  [[ -n "\$BRANCH" ]] || { echo "No vX.Y.Z tags in \$REPO_URL — set BRANCH=main to install HEAD"; exit 1; }
+  echo "Resolved BRANCH=latest → \$BRANCH"
+fi
+
 cd "$APP_DIR"
-runuser -u $APP_USER -- git fetch --all --prune
-runuser -u $APP_USER -- git checkout "\${BRANCH:-$BRANCH}"
-runuser -u $APP_USER -- git reset --hard "origin/\${BRANCH:-$BRANCH}"
+runuser -u $APP_USER -- git fetch --all --tags --force --prune
+runuser -u $APP_USER -- git checkout "\$BRANCH"
+
+# Tag refs vs branch refs need different reset targets.
+if runuser -u $APP_USER -- git -C "$APP_DIR" show-ref --tags --quiet --verify "refs/tags/\$BRANCH"; then
+  runuser -u $APP_USER -- git reset --hard "\$BRANCH"
+else
+  runuser -u $APP_USER -- git reset --hard "origin/\$BRANCH"
+fi
 
 runuser -u $APP_USER -- bash -lc "export PATH=/usr/local/bin:\\\$PATH; cd $APP_DIR && bun install --frozen-lockfile"
 runuser -u $APP_USER -- bash -lc "export PATH=/usr/local/bin:\\\$PATH; cd $APP_DIR/server && bunx prisma generate && bunx prisma migrate deploy"
 runuser -u $APP_USER -- bash -lc "export PATH=/usr/local/bin:\\\$PATH; cd $APP_DIR/client && bunx vite build"
 
 systemctl restart '${SERVICE_PREFIX}@*'
-echo "Update complete."
+echo "Update complete (now at \$BRANCH)."
 EOF
   chmod +x "$APP_DIR/scripts/update.sh"
   chown "$APP_USER:$APP_GROUP" "$APP_DIR/scripts/update.sh"
