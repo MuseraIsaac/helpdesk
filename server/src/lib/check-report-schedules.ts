@@ -157,6 +157,7 @@ export async function registerCheckReportSchedulesWorker(boss: PgBoss): Promise<
             body:    `Please find your scheduled report attached.\n\nReport: ${schedule.report.name}\nGenerated: ${now.toUTCString()}`,
             bodyHtml: `<p>Your scheduled report <strong>${schedule.report.name}</strong> is attached.</p>`
                     + `<p>Generated: ${now.toUTCString()}</p>`,
+            purpose: "reports",
           });
 
           // Send CSV as a separate email with inline body (avoids attachment complexity)
@@ -164,6 +165,7 @@ export async function registerCheckReportSchedulesWorker(boss: PgBoss): Promise<
             to:      recipient,
             subject: `${subject} — CSV Data`,
             body:    csvBody,
+            purpose: "reports",
           });
         }
 

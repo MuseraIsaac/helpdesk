@@ -20,7 +20,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
-import { useForm, useWatch, Controller } from "react-hook-form";
+import { useForm, useWatch, Controller, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Link } from "react-router";
 import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
@@ -53,7 +53,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Trash2, RotateCcw, CalendarClock } from "lucide-react";
+import { Trash2, RotateCcw, CalendarClock, Send, Loader2, AtSign, Power, AlertCircle } from "lucide-react";
 import {
   generalSettingsSchema,
   brandingSettingsSchema,
@@ -104,6 +104,7 @@ import {
   type AuditSettings,
   type BusinessHoursSettings,
   type DemoDataSettings,
+  type OutboundEmailAccount,
 } from "core/schemas/settings.ts";
 import {
   languages,
@@ -2569,6 +2570,14 @@ export function IntegrationsSection() {
         )}
       </SettingsGroup>
 
+      {emailEnabled && (
+        <OutboundAccountsGroup control={control} register={register} />
+      )}
+
+      {emailEnabled && (
+        <OutboundRoutingGroup control={control} watch={watch} />
+      )}
+
       <SettingsGroup title="Google Sign-In">
         <div className="rounded-md border border-border/60 bg-muted/30 px-4 py-3 text-xs text-muted-foreground space-y-1.5">
           <div className="font-medium text-foreground">Setup steps</div>
@@ -2670,13 +2679,21 @@ export function IntegrationsSection() {
             <SettingsField label="Folder" description="Mailbox to watch. Gmail's primary inbox is INBOX." htmlFor="imapFolder">
               <Input id="imapFolder" placeholder="INBOX" {...register("imapFolder")} />
             </SettingsField>
-            <SettingsField label="Poll interval (seconds)" description="How often to check for new mail. Minimum 60." htmlFor="imapPollSeconds">
-              <Input id="imapPollSeconds" type="number" className="w-24" {...register("imapPollSeconds", { valueAsNumber: true })} />
+            <SettingsField label="Poll interval (seconds)" description="How often to check for new mail. Minimum 15." htmlFor="imapPollSeconds">
+              <Input id="imapPollSeconds" type="number" min={15} max={3600} className="w-24" {...register("imapPollSeconds", { valueAsNumber: true })} />
             </SettingsField>
             <SettingsField label="Mark messages as read after ingest" description="Recommended — prevents the same email from being ingested twice. Disable only for testing.">
               <Controller name="imapMarkSeen" control={control} render={({ field }) => (
                 <Switch checked={field.value} onCheckedChange={field.onChange} />
               )} />
+            </SettingsField>
+            <SettingsField label="Also ingest already-read messages" description="When on, the poller picks up messages even if they were marked as read in the mailbox by a human. Duplicates are prevented by Message-ID dedup.">
+              <Controller name="imapIngestReadMessages" control={control} render={({ field }) => (
+                <Switch checked={field.value} onCheckedChange={field.onChange} />
+              )} />
+            </SettingsField>
+            <SettingsField label="Lookback window (hours)" description="How far back to scan when ingesting read messages. Capped at 168 (7 days) to avoid backfilling old archives." htmlFor="imapLookbackHours">
+              <Input id="imapLookbackHours" type="number" min={1} max={168} className="w-24" {...register("imapLookbackHours", { valueAsNumber: true })} />
             </SettingsField>
           </>
         )}
@@ -4864,5 +4881,379 @@ function RequiredFieldsPicker({ kind, value, onChange }: RequiredFieldsPickerPro
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Additional outbound email accounts ────────────────────────────────────────
+
+type IntegrationsFormCtl = ReturnType<typeof useForm<IntegrationsSettings>>;
+
+function OutboundAccountsGroup({
+  control,
+  register,
+}: {
+  control: IntegrationsFormCtl["control"];
+  register: IntegrationsFormCtl["register"];
+}) {
+  const { fields, append, remove } = useFieldArray({ control, name: "outboundAccounts" });
+
+  function addAccount() {
+    const id = (typeof crypto !== "undefined" && "randomUUID" in crypto)
+      ? crypto.randomUUID()
+      : `acc_${Math.random().toString(36).slice(2, 10)}`;
+    const newAccount: OutboundEmailAccount = {
+      id,
+      label:          "",
+      fromEmail:      "",
+      fromName:       "",
+      provider:       "smtp",
+      sendgridApiKey: "",
+      smtpHost:       "",
+      smtpPort:       587,
+      smtpUser:       "",
+      smtpPassword:   "",
+      isActive:       true,
+    };
+    append(newAccount);
+  }
+
+  return (
+    <SettingsGroup title="Additional Outbound Email Accounts">
+      <div className="text-xs text-muted-foreground -mt-2 mb-4 leading-relaxed">
+        Define extra "From" mailboxes (e.g. <span className="font-mono text-foreground/80">noreply@…</span>, <span className="font-mono text-foreground/80">reports@…</span>) so different kinds of email can come from different senders. The provider above is the default and is used whenever a routing rule isn't set.
+      </div>
+
+      {fields.length === 0 && (
+        <div className="rounded-lg border border-dashed border-border bg-muted/20 px-6 py-10 text-center">
+          <Mail className="h-8 w-8 mx-auto mb-2 text-muted-foreground/60" />
+          <div className="text-sm font-medium text-foreground">No additional accounts yet</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            The default provider above will be used for every email.
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {fields.map((field, idx) => (
+          <OutboundAccountCard
+            key={field.id}
+            index={idx}
+            control={control}
+            register={register}
+            onRemove={() => remove(idx)}
+          />
+        ))}
+      </div>
+
+      <div className="pt-3">
+        <Button type="button" variant="outline" size="sm" onClick={addAccount}>
+          <Plus className="h-4 w-4 mr-1.5" /> Add account
+        </Button>
+      </div>
+    </SettingsGroup>
+  );
+}
+
+function OutboundAccountCard({
+  index,
+  control,
+  register,
+  onRemove,
+}: {
+  index: number;
+  control: IntegrationsFormCtl["control"];
+  register: IntegrationsFormCtl["register"];
+  onRemove: () => void;
+}) {
+  const accountId = useWatch({ control, name: `outboundAccounts.${index}.id` });
+  const provider  = useWatch({ control, name: `outboundAccounts.${index}.provider` });
+  const label     = useWatch({ control, name: `outboundAccounts.${index}.label` });
+  const fromEmail = useWatch({ control, name: `outboundAccounts.${index}.fromEmail` });
+  const isActive  = useWatch({ control, name: `outboundAccounts.${index}.isActive` });
+  const smtpHost  = useWatch({ control, name: `outboundAccounts.${index}.smtpHost` });
+  const smtpPort  = useWatch({ control, name: `outboundAccounts.${index}.smtpPort` });
+  const smtpUser  = useWatch({ control, name: `outboundAccounts.${index}.smtpUser` });
+  const smtpPassword = useWatch({ control, name: `outboundAccounts.${index}.smtpPassword` });
+
+  const testSmtp = useMutation({
+    mutationFn: async () => {
+      const REDACTED = "••••••••";
+      const { data } = await axios.post<{
+        ok: boolean; error?: string; code?: string | null; responseCode?: number | null; command?: string | null;
+      }>("/api/settings/integrations/test-smtp", {
+        accountId,
+        smtpHost,
+        smtpPort: Number(smtpPort) || 587,
+        smtpUser,
+        // Don't send the redacted placeholder — let the server fall back to
+        // the account's saved password when the user hasn't re-entered it.
+        ...(smtpPassword && smtpPassword !== REDACTED ? { smtpPassword } : {}),
+      });
+      return data;
+    },
+  });
+
+  const providerBadge = provider === "sendgrid"
+    ? { text: "SendGrid",   cls: "bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/30" }
+    : provider === "smtp"
+      ? { text: "SMTP",     cls: "bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/30" }
+      : { text: "SES",      cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30" };
+
+  return (
+    <div className={`rounded-xl border bg-card shadow-sm overflow-hidden transition-all ${isActive ? "border-border" : "border-border/50 opacity-70"}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3 px-4 py-3 bg-gradient-to-r from-muted/40 to-transparent border-b border-border/60">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <Mail className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-foreground truncate">
+                {label || <span className="italic text-muted-foreground font-normal">Untitled account</span>}
+              </span>
+              <span className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide rounded-full border px-2 py-0.5 ${providerBadge.cls}`}>
+                {providerBadge.text}
+              </span>
+              {!isActive && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground">
+                  <Power className="h-2.5 w-2.5" /> Disabled
+                </span>
+              )}
+            </div>
+            {fromEmail && (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
+                <AtSign className="h-3 w-3" />
+                <span className="font-mono truncate">{fromEmail}</span>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Controller
+            name={`outboundAccounts.${index}.isActive`}
+            control={control}
+            render={({ field }) => (
+              <Switch checked={field.value} onCheckedChange={field.onChange} aria-label="Account active" />
+            )}
+          />
+          <Button type="button" variant="ghost" size="icon" onClick={onRemove} aria-label="Remove account" className="text-muted-foreground hover:text-destructive">
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="p-4 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Label</Label>
+            <Input placeholder="No-Reply" {...register(`outboundAccounts.${index}.label`)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Provider</Label>
+            <Controller
+              name={`outboundAccounts.${index}.provider`}
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sendgrid">SendGrid</SelectItem>
+                    <SelectItem value="smtp">Custom SMTP</SelectItem>
+                    <SelectItem value="ses">Amazon SES</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">From email</Label>
+            <Input type="email" placeholder="noreply@example.com" {...register(`outboundAccounts.${index}.fromEmail`)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">From name <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Input placeholder="Acme Helpdesk" {...register(`outboundAccounts.${index}.fromName`)} />
+          </div>
+
+          {provider === "sendgrid" && (
+            <div className="md:col-span-2 space-y-1.5">
+              <Label className="text-xs font-medium">SendGrid API key</Label>
+              <Input type="password" autoComplete="off" placeholder="SG.xxxxxxxxx" {...register(`outboundAccounts.${index}.sendgridApiKey`)} />
+            </div>
+          )}
+
+          {provider === "smtp" && (
+            <>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">SMTP host</Label>
+                <Input placeholder="smtp.example.com" {...register(`outboundAccounts.${index}.smtpHost`)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">SMTP port</Label>
+                <Input type="number" {...register(`outboundAccounts.${index}.smtpPort`, { valueAsNumber: true })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">SMTP username</Label>
+                <Input autoComplete="off" {...register(`outboundAccounts.${index}.smtpUser`)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">SMTP password</Label>
+                <Input type="password" autoComplete="off" {...register(`outboundAccounts.${index}.smtpPassword`)} />
+              </div>
+            </>
+          )}
+
+          {provider === "ses" && (
+            <div className="md:col-span-2 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>Amazon SES is not yet implemented. Use SendGrid or Custom SMTP for now.</div>
+            </div>
+          )}
+        </div>
+
+        {/* Test connection — SMTP only */}
+        {provider === "smtp" && (
+          <div className="pt-1 border-t border-border/40">
+            <div className="flex items-center justify-between gap-3 pt-3">
+              <div className="text-xs text-muted-foreground">
+                Open a connection and authenticate. <span className="text-foreground/80">No email is sent.</span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={testSmtp.isPending || !smtpHost}
+                onClick={() => { testSmtp.reset(); testSmtp.mutate(); }}
+              >
+                {testSmtp.isPending
+                  ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Testing…</>
+                  : <><Send className="h-3.5 w-3.5 mr-1.5" />Test connection</>}
+              </Button>
+            </div>
+
+            {testSmtp.data?.ok && (
+              <div className="mt-2 flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>Connection succeeded.</span>
+              </div>
+            )}
+            {testSmtp.data && !testSmtp.data.ok && (
+              <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                <div className="flex items-start gap-2">
+                  <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <div className="space-y-1 min-w-0">
+                    <div className="font-medium">Connection failed</div>
+                    <div className="break-words font-mono text-[11px]">{testSmtp.data.error || "Unknown error"}</div>
+                    {(testSmtp.data.code || testSmtp.data.responseCode || testSmtp.data.command) && (
+                      <div className="text-muted-foreground text-[11px] flex flex-wrap gap-x-3">
+                        {testSmtp.data.code && <span>code: <span className="font-mono">{testSmtp.data.code}</span></span>}
+                        {testSmtp.data.responseCode != null && <span>response: <span className="font-mono">{testSmtp.data.responseCode}</span></span>}
+                        {testSmtp.data.command && <span>command: <span className="font-mono">{testSmtp.data.command}</span></span>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            {testSmtp.error && (
+              <div className="mt-2">
+                <ErrorAlert error={testSmtp.error} fallback="Failed to test SMTP connection" />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Outbound routing — pick which account each purpose uses ───────────────────
+
+function accountDisplayName(acc: OutboundEmailAccount, idx: number): string {
+  if (acc.label && acc.label.trim()) return acc.label.trim();
+  if (acc.fromEmail && acc.fromEmail.trim()) return acc.fromEmail.trim();
+  return `Account ${idx + 1}`;
+}
+
+function OutboundRoutingGroup({
+  control,
+  watch,
+}: {
+  control: IntegrationsFormCtl["control"];
+  watch: IntegrationsFormCtl["watch"];
+}) {
+  const accounts = (watch("outboundAccounts") ?? []) as OutboundEmailAccount[];
+  const activeAccounts = accounts
+    .map((a, i) => ({ acc: a, idx: i }))
+    .filter(({ acc }) => acc.isActive !== false && acc.id);
+
+  const purposes: {
+    key: "tickets" | "reports" | "notifications";
+    label: string;
+    description: string;
+    icon: React.ElementType;
+    accent: string;
+  }[] = [
+    { key: "tickets",       label: "Ticket replies",  icon: MailPlus,    accent: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+      description: "Replies to customers, auto-responses, automation reply actions." },
+    { key: "reports",       label: "Reports",         icon: Send,        accent: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+      description: "Shared and scheduled report emails." },
+    { key: "notifications", label: "Notifications",   icon: Bell,        accent: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      description: "System & no-reply emails: password reset, escalations, automations." },
+  ];
+
+  return (
+    <SettingsGroup title="Outbound Email Routing">
+      <div className="text-xs text-muted-foreground -mt-2 mb-3 leading-relaxed">
+        Choose which account delivers each kind of email. Leave on <span className="font-medium text-foreground">Default</span> to use the system provider configured at the top of this section.
+      </div>
+
+      <div className="rounded-xl border border-border bg-card overflow-hidden divide-y divide-border/60">
+        {purposes.map((p) => {
+          const Icon = p.icon;
+          return (
+            <div key={p.key} className="flex items-center gap-4 px-4 py-3.5">
+              <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${p.accent}`}>
+                <Icon className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-foreground">{p.label}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">{p.description}</div>
+              </div>
+              <Controller
+                name={`purposeAccounts.${p.key}`}
+                control={control}
+                render={({ field }) => (
+                  <Select
+                    value={field.value || "__default__"}
+                    onValueChange={(v) => field.onChange(v === "__default__" ? "" : v)}
+                  >
+                    <SelectTrigger className="w-56 shrink-0"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default__">
+                        <span className="text-muted-foreground">Default (system provider)</span>
+                      </SelectItem>
+                      {activeAccounts.map(({ acc, idx }) => (
+                        <SelectItem key={acc.id} value={acc.id}>
+                          {accountDisplayName(acc, idx)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {activeAccounts.length === 0 && (
+        <div className="mt-2 flex items-start gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>Add at least one active outbound account above to route a purpose to a non-default sender.</div>
+        </div>
+      )}
+    </SettingsGroup>
   );
 }

@@ -67,7 +67,7 @@ const exportSchema = z.object({
   filters: filtersSchema,
 });
 
-type Filters = z.infer<typeof filtersSchema>;
+export type Filters = z.infer<typeof filtersSchema>;
 
 // ── Date / window helpers ─────────────────────────────────────────────────────
 // isoDate(), isoTs(), buildPeriodLabel() are imported from export-metadata.
@@ -154,7 +154,7 @@ function sqlFilterFragment(
 // ── Section titles ────────────────────────────────────────────────────────────
 // buildCsv() is imported from export-metadata — do not redefine it here.
 
-const SECTION_TITLES: Record<string, string> = {
+export const SECTION_TITLES: Record<string, string> = {
   overview:  "Overview Report",
   tickets:   "Tickets Report",
   sla:       "SLA Report",
@@ -1101,7 +1101,7 @@ async function fetchLibrarySheets(): Promise<Sheet[]> {
 
 // ── Section dispatcher ────────────────────────────────────────────────────────
 
-async function getSheetsForSection(
+export async function getSheetsForSection(
   section: string,
   since:   Date,
   until:   Date,

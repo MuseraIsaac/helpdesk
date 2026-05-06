@@ -13,6 +13,14 @@ import { validate } from "../lib/validate";
 import { sendEmailJob } from "../lib/send-email";
 import { logSystemAudit } from "../lib/audit";
 import prisma from "../db";
+import { buildStyledWorkbook } from "../lib/excel-export";
+import { buildFilename, isoTs, type ExportMeta, type Sheet } from "../lib/export-metadata";
+import { getSheetsForSection } from "./reports-export";
+import { runQuery } from "../lib/analytics/engine";
+import { queryResultToSheet, deduplicateSheetNames } from "./analytics";
+
+/** Skip the attachment if the workbook would exceed this size (10 MB). */
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 const router = Router();
 router.use(requireAuth);
@@ -625,6 +633,97 @@ function buildEmailHtml(opts: {
 </html>`;
 }
 
+// ── XLSX builder ──────────────────────────────────────────────────────────────
+
+/**
+ * Build the .xlsx workbook for the report being shared. Returns null if
+ * something fails — callers should still send the email without attachment
+ * rather than block on a snapshot error.
+ */
+async function buildShareWorkbook(opts: {
+  section:    string;
+  reportId?:  number | null;
+  since:      Date;
+  until:      Date;
+  periodLabel:string;
+  exportedBy: string;
+}): Promise<{ buffer: Buffer; filename: string } | null> {
+  try {
+    let sheets: Sheet[];
+    let title:  string;
+
+    if (opts.section === "custom" && opts.reportId) {
+      const report = await prisma.savedReport.findUnique({
+        where: { id: opts.reportId },
+        select: { name: true, config: true },
+      });
+      if (!report) return null;
+
+      const cfg     = report.config as { dateRange?: { preset?: string; from?: string; to?: string };
+                                         widgets?: Array<{ id: string; metricId: string; title?: string;
+                                                           groupBy?: string; sort?: { field: string; direction: "asc" | "desc" };
+                                                           limit?: number; x?: number; y?: number }> };
+      const widgets = cfg.widgets ?? [];
+      if (widgets.length === 0) return null;
+
+      const sharedDR = { preset: "custom" as const, from: opts.since.toISOString(), to: opts.until.toISOString() };
+      const built: Sheet[] = [];
+
+      await Promise.all(widgets.map(async (w) => {
+        try {
+          const r = await runQuery(prisma, {
+            metricId:            w.metricId,
+            dateRange:           sharedDR,
+            groupBy:             w.groupBy,
+            sort:                w.sort,
+            limit:               w.limit ?? 50,
+            compareWithPrevious: false,
+          });
+          built.push(queryResultToSheet(r.result, w.title?.trim() || r.label));
+        } catch {
+          built.push({
+            name:    (w.title || w.metricId).slice(0, 28),
+            headers: ["Note"], keys: ["note"], types: ["string"],
+            rows:    [[`Query failed for metric: ${w.metricId}`]],
+          });
+        }
+      }));
+
+      const sortedWidgets = [...widgets].sort((a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0));
+      const ordered = sortedWidgets
+        .map(w => {
+          const label = w.title?.trim() || w.metricId;
+          return built.find(s => s.name.startsWith(label.slice(0, 20)));
+        })
+        .filter((s): s is Sheet => s !== undefined);
+
+      sheets = deduplicateSheetNames(ordered.length > 0 ? ordered : built);
+      title  = report.name;
+    } else {
+      sheets = await getSheetsForSection(opts.section, opts.since, opts.until, undefined);
+      title  = SECTION_LABELS[opts.section] ?? "Report";
+    }
+
+    if (sheets.length === 0) return null;
+
+    const exportedAt: string = isoTs();
+    const meta: ExportMeta = {
+      title,
+      section:    opts.section,
+      dateLabel:  opts.periodLabel,
+      filterDesc: "None",
+      exportedBy: opts.exportedBy,
+      exportedAt,
+    };
+
+    const buffer = await buildStyledWorkbook({ ...meta, sheets });
+    return { buffer, filename: buildFilename(title, exportedAt, "xlsx") };
+  } catch (err) {
+    console.error("[reports-share] xlsx build failed:", err);
+    return null;
+  }
+}
+
 // ── Route ─────────────────────────────────────────────────────────────────────
 
 router.post("/share-email", async (req, res) => {
@@ -667,11 +766,41 @@ router.post("/share-email", async (req, res) => {
 
   const sender = req.user!;
 
+  // Build the .xlsx attachment once and reuse for every recipient.
+  // Failures are non-fatal — the email still goes out without the file.
+  const workbook = await buildShareWorkbook({
+    section:     section,
+    reportId:    reportId ?? null,
+    since,
+    until,
+    periodLabel,
+    exportedBy:  sender.name,
+  });
+
+  let attachmentSent = false;
+  let inlineAttachments: { filename: string; mimeType: string; contentBase64: string }[] | undefined;
+  if (workbook) {
+    if (workbook.buffer.byteLength > MAX_ATTACHMENT_BYTES) {
+      console.warn(
+        `[reports-share] xlsx for section=${section} exceeds ${MAX_ATTACHMENT_BYTES} bytes ` +
+        `(${workbook.buffer.byteLength}); sending without attachment.`,
+      );
+    } else {
+      inlineAttachments = [{
+        filename:      workbook.filename,
+        mimeType:      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        contentBase64: workbook.buffer.toString("base64"),
+      }];
+      attachmentSent = true;
+    }
+  }
+
   for (const email of emails) {
     await sendEmailJob({
       to:       email,
       subject:  `${sectionLabel} Report shared by ${sender.name} — ${periodLabel}`,
-      body:     `${sender.name} shared the ${sectionLabel} report (${periodLabel}) with you.\n\nView it here: ${appUrl}${reportPath}${message ? `\n\nMessage: ${message}` : ""}`,
+      body:     `${sender.name} shared the ${sectionLabel} report (${periodLabel}) with you.\n\nView it here: ${appUrl}${reportPath}${attachmentSent ? "\n\nA copy of the report is attached as an Excel file." : ""}${message ? `\n\nMessage: ${message}` : ""}`,
+      purpose:  "reports",
       bodyHtml: buildEmailHtml({
         senderName:   sender.name,
         sectionLabel,
@@ -681,6 +810,7 @@ router.post("/share-email", async (req, res) => {
         message,
         snapshot,
       }),
+      ...(inlineAttachments && { inlineAttachments }),
     });
   }
 
@@ -695,6 +825,7 @@ router.post("/share-email", async (req, res) => {
     to:         to ?? null,
     periodLabel,
     hasMessage: Boolean(message && message.length > 0),
+    xlsxAttached: attachmentSent,
   });
 
   res.json({ ok: true, sent: emails.length });

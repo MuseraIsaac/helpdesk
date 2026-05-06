@@ -316,6 +316,7 @@ export async function processInboundEmail(input: InboundEmailInput): Promise<Inb
           subject:  rendered.subject,
           body:     rendered.bodyText,
           bodyHtml: rendered.bodyHtml,
+          purpose:  "tickets",
           ...(ticket.emailMessageId && { inReplyTo: ticket.emailMessageId, references: ticket.emailMessageId }),
         });
       } catch (err) {

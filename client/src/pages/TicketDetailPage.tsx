@@ -28,6 +28,8 @@ import { SlaBadge } from "@/components/SlaBadge";
 import { useSettings } from "@/hooks/useSettings";
 import { usePresence } from "@/hooks/usePresence";
 import { useSession } from "@/lib/auth-client";
+import { toast } from "sonner";
+import { useTicketReplyEvents, type ReplyCreatedEvent } from "@/hooks/useTicketReplyEvents";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -563,8 +565,47 @@ export default function TicketDetailPage() {
   const composing = composeMode !== null;
   const viewers = usePresence(ticketIdNum, presenceEnabled && ticketIdNum > 0, composing);
 
-  // ── Watch state ──────────────────────────────────────────────────────────
   const queryClient = useQueryClient();
+
+  // ── New-reply realtime banner ────────────────────────────────────────────
+  // Subscribe to per-ticket SSE; when another user (customer or agent) posts
+  // a reply, surface a toast with a Load action that pulls the latest replies
+  // into the conversation timeline. The agent's own outbound replies are
+  // suppressed so we don't notify them about themselves.
+  const newReplyCountRef = useRef(0);
+  const sessionUserId = session?.user?.id ?? null;
+  const handleReplyEvent = useCallback((ev: ReplyCreatedEvent) => {
+    if (ev.senderType === "agent" && ev.authorUserId === sessionUserId) return;
+
+    newReplyCountRef.current += 1;
+    const count = newReplyCountRef.current;
+    const who   = ev.authorName?.trim() || (ev.senderType === "customer" ? "Customer" : "Agent");
+    const channelLabel = ev.channel ? ` · via ${ev.channel}` : "";
+    const title = count === 1
+      ? `New reply from ${who}${channelLabel}`
+      : `${count} new replies received`;
+
+    toast(title, {
+      id:          `ticket-${ticketIdNum}-reply`,
+      description: "Click Load to pull the latest message into this view.",
+      duration:    Infinity,
+      action: {
+        label: "Load",
+        onClick: () => {
+          newReplyCountRef.current = 0;
+          void queryClient.invalidateQueries({ queryKey: ["replies", ticketIdNum] });
+          void queryClient.invalidateQueries({ queryKey: ["ticket", id] });
+          void queryClient.invalidateQueries({ queryKey: ["conversation", ticketIdNum] });
+        },
+      },
+      onDismiss:   () => { newReplyCountRef.current = 0; },
+      onAutoClose: () => { newReplyCountRef.current = 0; },
+    });
+  }, [id, ticketIdNum, queryClient, sessionUserId]);
+
+  useTicketReplyEvents(ticketIdNum, handleReplyEvent, ticketIdNum > 0);
+
+  // ── Watch state ──────────────────────────────────────────────────────────
   const { data: watchStatus, refetch: refetchWatch } = useQuery({
     queryKey: ["ticket-watch", id],
     queryFn: async () => {

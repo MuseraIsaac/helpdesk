@@ -5,6 +5,7 @@ import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
 import { ticketListQuerySchema, updateTicketSchema, createTicketSchema } from "core/schemas/tickets.ts";
 import prisma from "../db";
+import { emitTicketListEvent } from "../lib/ticket-list-events";
 import type { Prisma } from "../generated/prisma/client";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 import { computeSlaDeadlines, withSlaInfo } from "../lib/sla";
@@ -197,6 +198,18 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
   });
 
   await logAudit(ticket.id, req.user.id, "ticket.created", { via: "agent" });
+
+  // Push to agents currently viewing the Tickets list page
+  emitTicketListEvent({
+    type:         "ticket.created",
+    ticketId:     ticket.id,
+    ticketNumber: ticket.ticketNumber,
+    subject:      ticket.subject,
+    source:       ticket.source ?? "agent",
+    senderName:   ticket.senderName ?? null,
+    authorUserId: req.user.id,
+    createdAt:    ticket.createdAt.toISOString(),
+  });
 
   // Auto-create linked ITIL record based on ticket type.
   // Note: service_request tickets are NOT mirrored into a separate

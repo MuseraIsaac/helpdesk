@@ -596,7 +596,7 @@ function guessColType(key: string, unit?: string): ColType {
   return "decimal_2";
 }
 
-function queryResultToSheet(result: QueryResult, widgetTitle: string): Sheet {
+export function queryResultToSheet(result: QueryResult, widgetTitle: string): Sheet {
   const name = widgetTitle.slice(0, 31) || "Widget";
 
   switch (result.type) {
@@ -705,7 +705,7 @@ function queryResultToSheet(result: QueryResult, widgetTitle: string): Sheet {
 }
 
 /** Ensure no two sheets share the same name (Excel rejects duplicates). */
-function deduplicateSheetNames(sheets: Sheet[]): Sheet[] {
+export function deduplicateSheetNames(sheets: Sheet[]): Sheet[] {
   const seen = new Map<string, number>();
   return sheets.map(s => {
     const base  = s.name.slice(0, 28);

@@ -85,8 +85,16 @@ export function redactSensitive(
   data: Record<string, unknown>
 ): Record<string, unknown> {
   if (section === "integrations") {
+    // Mask each named outbound account's secrets so they're never echoed.
+    const accounts = Array.isArray(data.outboundAccounts) ? data.outboundAccounts : [];
+    const maskedAccounts = accounts.map((acc: Record<string, unknown>) => ({
+      ...acc,
+      smtpPassword:   acc.smtpPassword   ? "••••••••" : "",
+      sendgridApiKey: acc.sendgridApiKey ? "••••••••" : "",
+    }));
     return {
       ...data,
+      outboundAccounts: maskedAccounts,
       // Email
       sendgridApiKey:  data.sendgridApiKey  ? "••••••••" : "",
       smtpPassword:    data.smtpPassword    ? "••••••••" : "",

@@ -176,7 +176,7 @@ export async function sendEscalationNotifications(opts: {
       const bodyText = rendered?.bodyText ?? notificationBody;
       const bodyHtml = rendered?.bodyHtml;
 
-      void sendEmailJob({ to: user.email, subject, body: bodyText, bodyHtml });
+      void sendEmailJob({ to: user.email, subject, body: bodyText, bodyHtml, purpose: "notifications" });
     }
   }
 }

@@ -27,6 +27,8 @@ import {
   extractHeader,
 } from "../lib/intake-routing";
 import { fireTicketEvent } from "../lib/event-bus";
+import { emitTicketEvent } from "../lib/ticket-events";
+import { emitTicketListEvent } from "../lib/ticket-list-events";
 
 // Accept up to 20 MB total for inbound emails (attachments can be several files)
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -155,6 +157,19 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
     });
     // Fire ticket.reply_received for event_workflow rules
     fireTicketEvent("ticket.reply_received", existingTicket.id, null);
+
+    // Push to agents currently viewing the ticket
+    emitTicketEvent({
+      type:         "reply.created",
+      ticketId:     existingTicket.id,
+      replyId:      reply.id,
+      senderType:   "customer",
+      authorUserId: null,
+      authorName:   data.fromName || data.from,
+      channel:      "email",
+      createdAt:    reply.createdAt.toISOString(),
+    });
+
     res.status(200).json({ ticket: existingTicket });
     return;
   }
@@ -215,6 +230,18 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
     },
   });
 
+  // Push to agents currently viewing the Tickets list page
+  emitTicketListEvent({
+    type:         "ticket.created",
+    ticketId:     ticket.id,
+    ticketNumber: ticket.ticketNumber,
+    subject:      ticket.subject,
+    source:       "email",
+    senderName:   ticket.senderName ?? null,
+    authorUserId: null,
+    createdAt:    ticket.createdAt.toISOString(),
+  });
+
   // ── Run intake routing rules (synchronous, before jobs are enqueued) ──────
   const intakeResult = await runIntakeRouting(ticket.id, {
     emailTo:      emailTo ?? null,
@@ -269,6 +296,7 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
           subject:  rendered.subject,
           body:     rendered.bodyText,
           bodyHtml: rendered.bodyHtml,
+          purpose:  "tickets",
           ...(ticket.emailMessageId && { inReplyTo: ticket.emailMessageId, references: ticket.emailMessageId }),
         });
       } catch (err) {

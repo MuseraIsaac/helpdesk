@@ -431,6 +431,49 @@ export const mailboxSchema = z.object({
 
 export type Mailbox = z.infer<typeof mailboxSchema>;
 
+// ── Outbound email accounts ───────────────────────────────────────────────────
+//
+// In addition to the system "default" account (the legacy top-level
+// emailProvider/fromEmail/smtp* / sendgridApiKey fields), admins can configure
+// any number of named accounts. Each purpose (ticket replies, report sharing,
+// notifications) can then be routed to a specific account so e.g. reports can
+// come from a different mailbox than no-reply notifications.
+
+export const OUTBOUND_PURPOSES = ["tickets", "reports", "notifications"] as const;
+export type OutboundPurpose = (typeof OUTBOUND_PURPOSES)[number];
+
+export const outboundEmailAccountSchema = z.object({
+  /** Stable client-generated UUID, referenced by purposeAccounts. */
+  id:             z.string().min(1),
+  /** Friendly label shown in the routing dropdowns. */
+  label:          z.string().trim().min(1, "Label is required").max(80),
+  /** From address — appears as the sender on every email this account sends. */
+  fromEmail:      z.string().email("Must be a valid email address"),
+  /** Optional display name (e.g. "Acme Helpdesk"). */
+  fromName:       z.string().trim().max(80).default(""),
+  provider:       z.enum(["sendgrid", "smtp", "ses"]).default("smtp"),
+  sendgridApiKey: z.string().default(""),
+  smtpHost:       z.string().default(""),
+  smtpPort:       z.number().int().default(587),
+  smtpUser:       z.string().default(""),
+  smtpPassword:   z.string().default(""),
+  isActive:       z.boolean().default(true),
+});
+
+export type OutboundEmailAccount = z.infer<typeof outboundEmailAccountSchema>;
+
+/**
+ * Maps each outbound purpose to an account ID from `outboundAccounts`.
+ * An empty / missing value means "use the default top-level account".
+ */
+export const outboundPurposeAccountsSchema = z.object({
+  tickets:       z.string().default(""),
+  reports:       z.string().default(""),
+  notifications: z.string().default(""),
+});
+
+export type OutboundPurposeAccounts = z.infer<typeof outboundPurposeAccountsSchema>;
+
 export const VIDEO_BRIDGE_PROVIDERS = ["none", "teams", "googlemeet", "zoom", "webex"] as const;
 export type VideoBridgeProvider = (typeof VIDEO_BRIDGE_PROVIDERS)[number];
 
@@ -444,6 +487,12 @@ export const integrationsSettingsSchema = z.object({
   smtpPort:           z.number().int().default(587),
   smtpUser:           z.string().default(""),
   smtpPassword:       z.string().default(""),   // server-only
+  // ── Additional outbound email accounts ─────────────────────────────────────
+  /** Extra named accounts available for purpose-based routing. The legacy
+   *  top-level fields above act as the implicit "default" account. */
+  outboundAccounts:   z.array(outboundEmailAccountSchema).default([]),
+  /** Per-purpose routing. A blank value means "use the default account". */
+  purposeAccounts:    outboundPurposeAccountsSchema.default({ tickets: "", reports: "", notifications: "" }),
   // ── Google Sign-In (OAuth provider for user login) ─────────────────────────
   // When enabled, users can sign in with Google on the agent and portal login
   // pages. Configured via Google Cloud Console → OAuth 2.0 Client. These are
@@ -482,10 +531,18 @@ export const integrationsSettingsSchema = z.object({
   imapUseTls:         z.boolean().default(true),
   /** Folder to watch — Gmail sends new mail to "INBOX". */
   imapFolder:         z.string().default("INBOX"),
-  /** Poll interval in seconds. 60 is the floor — anything tighter is wasteful. */
-  imapPollSeconds:    z.number().int().min(60).max(3600).default(60),
+  /** Poll interval in seconds. 15 is the floor — sub-15s is wasteful and risks
+   *  overlapping connections on slow IMAP servers. */
+  imapPollSeconds:    z.number().int().min(15).max(3600).default(60),
   /** When true, mark fetched messages as Seen so the next poll skips them. */
   imapMarkSeen:       z.boolean().default(true),
+  /** When true, the poller also picks up messages already marked as Seen
+   *  (e.g. opened in Gmail by a human). Dedup by Message-ID still prevents
+   *  duplicate tickets. Use `imapLookbackHours` to bound the search window. */
+  imapIngestReadMessages: z.boolean().default(false),
+  /** How many hours back to look for messages when imapIngestReadMessages is on.
+   *  Bounded so a freshly-enabled poller cannot ingest a years-old archive. */
+  imapLookbackHours:  z.number().int().min(1).max(168).default(24),
   // ── AI / OpenAI ────────────────────────────────────────────────────────────
   openaiApiKey:       z.string().default(""),   // server-only
   openaiModel:        z.string().default("gpt-4o-mini"),

@@ -47,6 +47,9 @@ import {
   Zap, ChevronRight, LayoutList,
   Ticket as TicketIcon,
 } from "lucide-react";
+import { toast } from "sonner";
+import { useSession } from "@/lib/auth-client";
+import { useTicketListEvents, type TicketCreatedEvent } from "@/hooks/useTicketListEvents";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -385,6 +388,45 @@ export default function TicketsPage() {
     queryFn:  () => axios.get<TicketScope>("/api/me/ticket-scope").then((r) => r.data),
     staleTime: 60_000,
   });
+
+  // ── New-ticket realtime banner ──────────────────────────────────────────
+  // Subscribe to the global ticket-list SSE channel; when a new ticket is
+  // created (email, portal, or by another agent) surface a top-center toast
+  // with a Load action that refetches the visible page. Self-authored
+  // tickets are suppressed so the agent doesn't get notified about their
+  // own work.
+  const { data: session } = useSession();
+  const sessionUserId = session?.user?.id ?? null;
+  const newTicketCountRef = useRef(0);
+  const handleTicketCreated = useCallback((ev: TicketCreatedEvent) => {
+    if (ev.authorUserId && ev.authorUserId === sessionUserId) return;
+
+    newTicketCountRef.current += 1;
+    const count = newTicketCountRef.current;
+    const channel = ev.source ? ` · ${ev.source}` : "";
+    const who     = ev.senderName?.trim() || "Unknown sender";
+    const title = count === 1
+      ? `New ticket ${ev.ticketNumber} from ${who}${channel}`
+      : `${count} new tickets received`;
+
+    toast(title, {
+      id:          "tickets-list-new",
+      description: count === 1 ? ev.subject : "Click Load to refresh the list.",
+      duration:    Infinity,
+      position:    "top-center",
+      action: {
+        label: "Load",
+        onClick: () => {
+          newTicketCountRef.current = 0;
+          void qc.invalidateQueries({ queryKey: ["tickets"] });
+        },
+      },
+      onDismiss:   () => { newTicketCountRef.current = 0; },
+      onAutoClose: () => { newTicketCountRef.current = 0; },
+    });
+  }, [qc, sessionUserId]);
+
+  useTicketListEvents(handleTicketCreated);
 
   const {
     viewList, activeConfig,

@@ -184,7 +184,7 @@ export default function ShareReportEmailDialog({
           </DialogTitle>
           <DialogDescription className="text-xs">
             Send a snapshot of the <strong className="text-foreground">{sectionLabel}</strong> report
-            ({pLabel}) to one or more recipients.
+            ({pLabel}) to one or more recipients. An Excel (.xlsx) copy of the report is attached.
           </DialogDescription>
         </DialogHeader>
 

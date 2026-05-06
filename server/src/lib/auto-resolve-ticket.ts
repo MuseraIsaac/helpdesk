@@ -134,6 +134,7 @@ export async function registerAutoResolveWorker(boss: PgBoss): Promise<void> {
           to: senderEmail,
           subject: `Re: ${subject}`,
           body: response,
+          purpose: "tickets",
         });
       } catch (error) {
         Sentry.captureException(error, {

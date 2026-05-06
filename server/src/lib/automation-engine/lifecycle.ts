@@ -442,6 +442,7 @@ export async function handleMergeIntoTicket(
       to: snapshot.senderEmail,
       subject: `Your ticket has been merged — ${snapshot.subject}`,
       body: `Your support request has been merged with ticket #${target.ticketNumber} which is being actively worked. ${reason}`,
+      purpose: "tickets",
       ...(snapshot.emailMessageId
         ? { inReplyTo: snapshot.emailMessageId, references: snapshot.emailMessageId }
         : {}),

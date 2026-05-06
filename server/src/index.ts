@@ -62,6 +62,8 @@ import ticketTypesRouter from "./routes/ticket-types";
 import ticketStatusConfigsRouter from "./routes/ticket-status-configs";
 import escalationRulesRouter from "./routes/escalation-rules";
 import presenceRouter from "./routes/presence";
+import ticketEventsRouter from "./routes/ticket-events";
+import ticketListEventsRouter from "./routes/ticket-list-events";
 import cmdbRouter from "./routes/cmdb";
 import {
   incidentAssetLinksRouter,
@@ -329,6 +331,7 @@ app.use("/api/tickets/:ticketId/replies", repliesRouter);
 app.use("/api/tickets/:ticketId/notes", notesRouter);
 app.use("/api/tickets/:ticketId/attachments", attachmentsRouter);
 app.use("/api/tickets/:ticketId/presence", presenceRouter);
+app.use("/api/tickets/:ticketId/events", ticketEventsRouter);
 app.use("/api/tickets/:ticketId/followers", ticketFollowersRouter);
 app.use("/api/macros", macrosRouter);
 app.use("/api/templates", templatesRouter);
@@ -345,6 +348,7 @@ app.use("/api/portal", portalRouter);
 app.use("/api/kb", kbRouter);
 app.use("/api/csat", csatRouter);
 app.use("/api/reports", reportsRouter);
+app.use("/api/sse/tickets", ticketListEventsRouter);
 app.use("/api/sse",     sseRouter);
 app.use("/api/teams", teamsRouter);
 app.use("/api/webhooks", webhooksRouter);

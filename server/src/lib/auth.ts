@@ -71,7 +71,7 @@ function buildAuth(opts: {
           `<p style="font-size:12px;color:#666">If you didn't request this, you can safely ignore this email — your password won't change.</p>` +
           `</div>`;
 
-        await sendEmailJob({ to: user.email, subject, body: text, bodyHtml: html });
+        await sendEmailJob({ to: user.email, subject, body: text, bodyHtml: html, purpose: "notifications" });
       },
       resetPasswordTokenExpiresIn: 60 * 60, // 1 hour
     },

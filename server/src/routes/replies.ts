@@ -11,6 +11,7 @@ import { sendEmailJob } from "../lib/send-email";
 import { logAudit } from "../lib/audit";
 import { notifyMentions, extractMentionedEmails } from "../lib/mentions";
 import { fireTicketEvent } from "../lib/event-bus";
+import { emitTicketEvent } from "../lib/ticket-events";
 import { getSection } from "../lib/settings";
 
 const router = Router({ mergeParams: true });
@@ -263,6 +264,7 @@ router.post("/", requireAuth, async (req, res) => {
     to: emailTo,
     subject: emailSubject,
     body: emailBodyText,
+    purpose: "tickets",
     ...(emailCc && { cc: emailCc }),
     ...(bcc?.length && { bcc }),
     ...(emailBodyHtml && { bodyHtml: emailBodyHtml }),
@@ -274,6 +276,19 @@ router.post("/", requireAuth, async (req, res) => {
 
   // Fire ticket.reply_sent for event_workflow rules
   fireTicketEvent("ticket.reply_sent", ticketId, req.user.id);
+
+  // Push to any agents currently viewing the ticket so they see a
+  // "new reply" banner without polling.
+  emitTicketEvent({
+    type:         "reply.created",
+    ticketId,
+    replyId:      reply.id,
+    senderType:   "agent",
+    authorUserId: req.user.id,
+    authorName:   req.user.name,
+    channel:      reply.channel ?? "agent",
+    createdAt:    reply.createdAt.toISOString(),
+  });
 
   res.status(201).json(reply);
 });

@@ -127,6 +127,24 @@ router.put("/:section", requireAuth, requireAdmin, async (req, res) => {
     if (incoming.googleRefreshToken === REDACTED) delete incoming.googleRefreshToken;
     if (incoming.zoomClientSecret   === REDACTED) delete incoming.zoomClientSecret;
     if (incoming.webexBotToken      === REDACTED) delete incoming.webexBotToken;
+
+    // For each outbound email account, replace REDACTED secrets with the value
+    // currently stored for the same account id. This lets the UI re-submit the
+    // masked value without overwriting the real secret.
+    if (Array.isArray(incoming.outboundAccounts)) {
+      const stored = await getSection("integrations");
+      const storedById = new Map<string, { smtpPassword?: string; sendgridApiKey?: string }>();
+      for (const acc of stored.outboundAccounts ?? []) {
+        storedById.set(acc.id, { smtpPassword: acc.smtpPassword, sendgridApiKey: acc.sendgridApiKey });
+      }
+      incoming.outboundAccounts = (incoming.outboundAccounts as Array<Record<string, unknown>>).map((acc) => {
+        const prev = typeof acc.id === "string" ? storedById.get(acc.id) : undefined;
+        const next = { ...acc };
+        if (acc.smtpPassword   === REDACTED) next.smtpPassword   = prev?.smtpPassword   ?? "";
+        if (acc.sendgridApiKey === REDACTED) next.sendgridApiKey = prev?.sendgridApiKey ?? "";
+        return next;
+      });
+    }
   }
 
   const schema = sectionSchemas[section];
@@ -239,6 +257,10 @@ const testSmtpSchema = z.object({
   smtpPort:     z.number().int().positive().optional(),
   smtpUser:     z.string().optional(),
   smtpPassword: z.string().optional(),
+  /** Optional outbound account id. When set, missing fields fall back to that
+   *  saved account's values rather than the top-level default. Lets the UI
+   *  test a named account without re-entering its password. */
+  accountId:    z.string().optional(),
 });
 
 router.post(
@@ -252,10 +274,17 @@ router.post(
       return;
     }
     const saved = await getSection("integrations");
-    const host = parsed.data.smtpHost ?? saved.smtpHost ?? "";
-    const port = parsed.data.smtpPort ?? saved.smtpPort ?? 587;
-    const user = parsed.data.smtpUser ?? saved.smtpUser ?? "";
-    const pass = parsed.data.smtpPassword ?? saved.smtpPassword ?? "";
+
+    // If an accountId is given, prefer that account's saved values as the
+    // fallback. Otherwise fall back to the top-level default-account fields.
+    const fallback = parsed.data.accountId
+      ? saved.outboundAccounts?.find((a) => a.id === parsed.data.accountId) ?? null
+      : null;
+
+    const host = parsed.data.smtpHost     ?? fallback?.smtpHost     ?? saved.smtpHost     ?? "";
+    const port = parsed.data.smtpPort     ?? fallback?.smtpPort     ?? saved.smtpPort     ?? 587;
+    const user = parsed.data.smtpUser     ?? fallback?.smtpUser     ?? saved.smtpUser     ?? "";
+    const pass = parsed.data.smtpPassword ?? fallback?.smtpPassword ?? saved.smtpPassword ?? "";
 
     if (!host) {
       res.status(400).json({ ok: false, error: "SMTP host is required" });

@@ -64,7 +64,7 @@ export async function deliverEmail(
     const bodyText = rendered?.bodyText ?? (payload.body ?? payload.title);
     const bodyHtml = rendered?.bodyHtml;
 
-    await sendEmailJob({ to: user.email, subject, body: bodyText, bodyHtml });
+    await sendEmailJob({ to: user.email, subject, body: bodyText, bodyHtml, purpose: "notifications" });
 
     return { status: "sent" };
   } catch (err) {

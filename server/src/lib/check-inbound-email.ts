@@ -58,10 +58,32 @@ export async function registerInboundEmailWorker(boss: PgBoss): Promise<void> {
     }
   });
 
-  // Cron is hard-coded to "every minute". The admin-configurable
-  // imapPollSeconds is enforced by skipping ticks inside runInboundEmailPoll
-  // so the schedule itself never needs editing at runtime.
+  // pg-boss cron's minimum granularity is 1 minute, so we keep the every-minute
+  // schedule as a safety net (covers worker restarts and missed ticks) and
+  // additionally run a process-local 15-second ticker so admins can opt into
+  // sub-minute polling via imapPollSeconds. Both paths share lastPollStartedAt
+  // and pollInFlight, so they cannot overlap.
   await boss.schedule(QUEUE_NAME, "* * * * *");
+
+  startSubMinuteTicker();
+}
+
+/** Process-local ticker for sub-minute polling. The actual cadence is gated by
+ *  imapPollSeconds inside runInboundEmailPoll, so this just gives the gate a
+ *  chance to fire more often than once per minute. */
+const TICK_INTERVAL_MS = 15_000;
+let subMinuteTicker: ReturnType<typeof setInterval> | null = null;
+
+function startSubMinuteTicker(): void {
+  if (subMinuteTicker) return;
+  subMinuteTicker = setInterval(() => {
+    runInboundEmailPoll().catch((err) => {
+      Sentry.captureException(err, { tags: { queue: QUEUE_NAME, source: "ticker" } });
+      console.error("[check-inbound-email] ticker poll failed:", err);
+    });
+  }, TICK_INTERVAL_MS);
+  // Don't keep the event loop alive just for this ticker.
+  if (typeof subMinuteTicker.unref === "function") subMinuteTicker.unref();
 }
 
 // ── Poll-level coordination ───────────────────────────────────────────────────
@@ -133,19 +155,34 @@ async function runInboundEmailPoll(): Promise<void> {
     const folder = integrations.imapFolder || "INBOX";
     const lock = await client.getMailboxLock(folder);
     try {
-      // UIDs of unseen messages, newest-first. `search` returns numbers in
-      // ascending order, or `false` on failure (per imapflow's typings).
-      // We slice the tail so we always work the latest first — important
-      // when MAX_PER_POLL kicks in on a backlog.
-      const searchResult = await client.search({ seen: false }, { uid: true });
-      const allUnseenUids: number[] = Array.isArray(searchResult) ? searchResult : [];
-      const uidsToProcess = allUnseenUids
+      // Choose the search criteria based on settings:
+      //   - default: only unseen messages (cheap, scales to huge mailboxes).
+      //   - imapIngestReadMessages: every message received within the lookback
+      //     window, regardless of \Seen flag — so we still pick up mail that a
+      //     human happened to open in Gmail before the poller got to it. The
+      //     emailMessageId dedup in processInboundEmail guarantees no double
+      //     ticket creation.
+      // `search` returns numbers in ascending order, or `false` on failure
+      // (per imapflow's typings). We slice the tail so we always work the
+      // latest first — important when MAX_PER_POLL kicks in on a backlog.
+      const ingestRead = integrations.imapIngestReadMessages ?? false;
+      const lookbackHours = Math.min(168, Math.max(1, integrations.imapLookbackHours ?? 24));
+      const since = new Date(Date.now() - lookbackHours * 3600_000);
+
+      const searchResult = ingestRead
+        ? await client.search({ since }, { uid: true })
+        : await client.search({ seen: false }, { uid: true });
+      const allUids: number[] = Array.isArray(searchResult) ? searchResult : [];
+      const uidsToProcess = allUids
         .slice(-MAX_PER_POLL)
         .reverse();
 
       if (uidsToProcess.length === 0) return;
 
-      console.log(`[check-inbound-email] processing ${uidsToProcess.length} unseen message(s) from ${folder}`);
+      console.log(
+        `[check-inbound-email] processing ${uidsToProcess.length} message(s) from ${folder} ` +
+        `(${ingestRead ? `since ${since.toISOString()}` : "unseen"})`,
+      );
 
       for (const uid of uidsToProcess) {
         try {

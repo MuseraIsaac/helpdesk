@@ -17,6 +17,8 @@ import {
 } from "../lib/storage";
 import { scanBuffer } from "../lib/virus-scan";
 import prisma from "../db";
+import { emitTicketEvent } from "../lib/ticket-events";
+import { emitTicketListEvent } from "../lib/ticket-list-events";
 import {
   portalRegisterSchema,
   portalCreateTicketSchema,
@@ -281,6 +283,18 @@ router.post("/tickets", requireCustomer, async (req, res) => {
 
   void logAudit(ticket.id, req.user.id, "ticket.created", { via: "portal" });
 
+  // Push to agents currently viewing the Tickets list page
+  emitTicketListEvent({
+    type:         "ticket.created",
+    ticketId:     ticket.id,
+    ticketNumber: ticket.ticketNumber,
+    subject:      ticket.subject,
+    source:       "portal",
+    senderName:   ticket.senderName ?? null,
+    authorUserId: null,
+    createdAt:    ticket.createdAt.toISOString(),
+  });
+
   sendClassifyJob(ticket).catch((error) =>
     console.error(`Failed to enqueue classify job for ticket ${ticket.id}:`, error)
   );
@@ -411,6 +425,18 @@ router.post("/tickets/:id/replies", requireCustomer, async (req, res) => {
       data: { status: "open" },
     });
   }
+
+  // Push to agents currently viewing the ticket
+  emitTicketEvent({
+    type:         "reply.created",
+    ticketId:     id,
+    replyId:      reply.id,
+    senderType:   "customer",
+    authorUserId: null,
+    authorName:   req.user.name ?? null,
+    channel:      "portal",
+    createdAt:    reply.createdAt.toISOString(),
+  });
 
   res.status(201).json({ reply });
 });

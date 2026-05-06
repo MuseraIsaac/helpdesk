@@ -432,6 +432,7 @@ async function handleSendReply(action: Extract<AutomationAction, { type: "send_r
     to: snapshot.senderEmail,
     subject,
     body,
+    purpose: "tickets",
     ...(snapshot.emailMessageId
       ? { inReplyTo: snapshot.emailMessageId, references: snapshot.emailMessageId }
       : {}),
@@ -503,6 +504,7 @@ async function handleSendAutoReply(action: Extract<AutomationAction, { type: "se
     to: snapshot.senderEmail,
     subject: action.subject ?? `Re: ${snapshot.subject}`,
     body: action.body,
+    purpose: "tickets",
     ...(snapshot.emailMessageId
       ? { inReplyTo: snapshot.emailMessageId, references: snapshot.emailMessageId }
       : {}),
@@ -552,6 +554,7 @@ async function handleNotifyRequester(action: Extract<AutomationAction, { type: "
       to: snapshot.senderEmail,
       subject: action.subject ?? `Update on your ticket: ${snapshot.subject}`,
       body: action.body,
+      purpose: "tickets",
       ...(snapshot.emailMessageId
         ? { inReplyTo: snapshot.emailMessageId, references: snapshot.emailMessageId }
         : {}),
