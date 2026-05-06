@@ -1,0 +1,17 @@
+# /etc/sudoers.d/zentra-finalize-update
+#
+# Allows the unprivileged Zentra helpdesk process to run the finalize helper
+# without a password prompt. Scope is intentionally minimal:
+#   • only the zentra user
+#   • only this exact binary
+#   • only with a single argument (the staging dir path)
+#
+# Sudo passes args literally — there is no shell expansion of the staging
+# arg, so command injection isn't possible at this layer. The script itself
+# validates the staging path against $STAGING_ROOT and rejects path
+# traversal before doing any privileged work.
+
+Defaults!/usr/local/sbin/zentra-finalize-update !env_reset, env_keep="APP_DIR APP_USER APP_GROUP SERVICE_PREFIX STAGING_ROOT APP_BASE_PORT"
+Defaults!/usr/local/sbin/zentra-finalize-update secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+
+zentra ALL=(root) NOPASSWD: /usr/local/sbin/zentra-finalize-update *

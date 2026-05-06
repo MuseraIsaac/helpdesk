@@ -64,9 +64,13 @@ const STATE_LABEL: Record<UpdateRunRecord["state"], string> = {
   maintenance_on:   "Enabling maintenance",
   fetch:            "Downloading",
   verify:           "Verifying",
+  extract:          "Extracting artifact",
+  install_deps:     "Installing dependencies",
   migrate:          "Running migrations",
   data_tasks:       "Running data tasks",
-  restart_required: "Restart required",
+  build:            "Building frontend",
+  finalize:         "Finalizing & restarting",
+  restart_required: "Awaiting manual restart",
   done:             "Done",
   failed:           "Failed",
   cancelled:        "Cancelled",
@@ -74,7 +78,12 @@ const STATE_LABEL: Record<UpdateRunRecord["state"], string> = {
   rolled_back:      "Rolled back",
 };
 
-const RUN_STEPS = ["preflight", "backup", "maintenance_on", "fetch", "verify", "migrate", "data_tasks", "restart_required"] as const;
+const RUN_STEPS = [
+  "preflight", "backup", "maintenance_on",
+  "fetch", "verify", "extract",
+  "install_deps", "migrate", "data_tasks", "build",
+  "finalize",
+] as const;
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
@@ -546,7 +555,7 @@ function CancelButton({ runId, state }: { runId: number; state: string }) {
     mutationFn: () => axios.post(`/api/updates/runs/${runId}/cancel`),
     onSuccess:  () => { queryClient.invalidateQueries({ queryKey: ["updates", "runs", "live"] }); },
   });
-  const cancellable = ["queued", "preflight", "backup", "maintenance_on", "fetch", "verify"].includes(state);
+  const cancellable = ["queued", "preflight", "backup", "maintenance_on", "fetch", "verify", "extract", "install_deps"].includes(state);
   if (!cancellable) return null;
   return (
     <Button variant="outline" size="sm" onClick={() => cancelMutation.mutate()} disabled={cancelMutation.isPending} className="gap-1.5">

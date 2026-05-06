@@ -338,7 +338,10 @@ router.post("/runs/:id/cancel", async (req, res) => {
   if (!run) { res.status(404).json({ error: "Run not found" }); return; }
 
   // Only safe to cancel before destructive steps (migrate / data_tasks).
-  const cancellable = ["queued", "preflight", "backup", "maintenance_on", "fetch", "verify"];
+  // extract + install_deps are still safe — they only write to a staging dir
+  // nothing live depends on. After migrate, the schema has changed and
+  // cancelling becomes a rollback (separate flow).
+  const cancellable = ["queued", "preflight", "backup", "maintenance_on", "fetch", "verify", "extract", "install_deps"];
   if (!cancellable.includes(run.state)) {
     res.status(409).json({ error: `Cannot cancel run in state ${run.state}` });
     return;

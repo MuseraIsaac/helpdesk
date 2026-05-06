@@ -224,6 +224,11 @@ phase_user() {
     useradd --system --gid "$APP_GROUP" --home-dir "$APP_HOME" \
             --create-home --shell /bin/bash "$APP_USER"
   install -d -m 0755 -o "$APP_USER" -g "$APP_GROUP" "$APP_HOME" "$APP_DIR"
+  # Update-orchestrator working dirs — owned by the app user so the running
+  # process can write to them. The systemd unit's ReadWritePaths must include
+  # them too (we add that below).
+  install -d -m 0750 -o "$APP_USER" -g "$APP_GROUP" \
+    "$APP_HOME/staging" "$APP_HOME/artifacts" "$APP_HOME/backups/updates"
 }
 
 # ── 3.4 Bun runtime ────────────────────────────────────────────────────────
@@ -345,6 +350,16 @@ SENDGRID_FROM_EMAIL="$SENDGRID_FROM_EMAIL"
 WEBHOOK_SECRET="$WEBHOOK_SECRET"
 SENTRY_DSN="$SENTRY_DSN"
 SENTRY_ENVIRONMENT="$SENTRY_ENVIRONMENT"
+
+# Update orchestrator — surfaces precise commands in the "restart required"
+# step of the in-tool update flow so the admin can copy-paste rather than
+# guess paths. Also tells the orchestrator where to find this install's bun.
+UPDATE_APP_DIR="$APP_DIR"
+UPDATE_BUN_BIN="/usr/local/bin/bun"
+UPDATE_SERVICE_PREFIX="$SERVICE_PREFIX"
+UPDATE_BACKUP_DIR="$APP_HOME/backups/updates"
+UPDATE_STAGING_DIR="$APP_HOME/staging"
+UPDATE_ARTIFACT_DIR="$APP_HOME/artifacts"
 EOF
   chown "$APP_USER:$APP_GROUP" "$env_file"
   chmod 600 "$env_file"
@@ -431,7 +446,9 @@ LimitNOFILE=65536
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=$APP_DIR
+# ReadWritePaths must include the orchestrator's working dirs so it can
+# extract artifacts, run bun install, build, and write backups.
+ReadWritePaths=$APP_DIR $APP_HOME/staging $APP_HOME/artifacts $APP_HOME/backups
 PrivateTmp=true
 
 [Install]
@@ -646,6 +663,40 @@ EOF
   systemctl start zentra-cert-watchdog.service || true
 }
 
+# ── 3.13.5 Privileged finalize helper for the in-tool update orchestrator ──
+# Lets the (unprivileged) helpdesk process complete an update end-to-end
+# from the UI without anyone SSHing in. See:
+#   scripts/zentra-finalize-update.sh
+#   scripts/zentra-finalize-update.sudoers
+phase_finalize_helper() {
+  local helper_src="$APP_DIR/scripts/zentra-finalize-update.sh"
+  local helper_dst="/usr/local/sbin/zentra-finalize-update"
+  local sudoers_src="$APP_DIR/scripts/zentra-finalize-update.sudoers"
+  local sudoers_dst="/etc/sudoers.d/zentra-finalize-update"
+
+  if [[ ! -f "$helper_src" ]]; then
+    warn "Skipping finalize helper: $helper_src not found in this checkout"
+    return 0
+  fi
+
+  log "Installing privileged finalize helper at $helper_dst"
+  install -o root -g root -m 0755 "$helper_src" "$helper_dst"
+
+  log "Installing sudoers rule at $sudoers_dst"
+  # Use visudo -cf to validate before installing so a bad file can't lock us out.
+  if visudo -cf "$sudoers_src" >/dev/null 2>&1; then
+    install -o root -g root -m 0440 "$sudoers_src" "$sudoers_dst"
+  else
+    die "Refusing to install $sudoers_dst — visudo rejected $sudoers_src"
+  fi
+
+  # Touch the log file with the right perms so the helper's append works
+  # even before its first run.
+  install -o root -g root -m 0644 /dev/null /var/log/zentra-finalize.log
+
+  ok "Finalize helper ready (sudo zentra runs $helper_dst with NOPASSWD)"
+}
+
 # ── 3.14 Update helper script ──────────────────────────────────────────────
 phase_update_script() {
   log "Installing update helper at $APP_DIR/scripts/update.sh"
@@ -729,6 +780,7 @@ main() {
   phase_firewall
   phase_health
   phase_cert_watchdog
+  phase_finalize_helper
   phase_update_script
   phase_summary
 }

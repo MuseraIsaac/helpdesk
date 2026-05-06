@@ -12,15 +12,30 @@
  *     → maintenance_on   (set advanced.maintenanceMode = true)
  *     → fetch            (download artifact tarball + signature)
  *     → verify           (hash + signature check)
- *     → migrate          (prisma migrate deploy — runs in-process)
- *     → data_tasks       (versioned post-migration scripts under data-tasks/<version>/)
- *     → restart_required (the orchestrator can't restart itself; surfaces a CTA)
+ *     → extract          (untar the artifact into a versioned staging dir)
+ *     → install_deps     (`bun install --frozen-lockfile` in the staged tree
+ *                         so it can actually run — node_modules isn't shipped
+ *                         in the artifact, just like install.sh's update.sh)
+ *     → migrate          (prisma migrate deploy against the STAGED schema)
+ *     → data_tasks       (post-migration scripts loaded from the STAGED tree)
+ *     → build            (`bunx vite build` so the SPA assets in client/dist
+ *                         match the new server. Without this the frontend
+ *                         stays at the old version after the binary swap.)
+ *     → restart_required (operator points their service supervisor at the
+ *                         staging dir and restarts; we can't swap the binary
+ *                         from inside the running process safely)
  *     → done             (after the next clean boot picks up the new binary)
+ *
+ * Path layout
+ * ───────────
+ *   $UPDATE_ARTIFACT_DIR/<version>.tar.gz   ← downloaded, sha-verified
+ *   $UPDATE_STAGING_DIR/<version>/          ← extracted, ready to run from
+ *   $UPDATE_BACKUP_DIR/pre-<v>-<ts>.dump    ← pg_dump output for rollback
  *
  * Apply triggers are routed via pg-boss so the run survives a server restart
  * and can be observed from any Express worker via the same DB row.
  */
-import { execFile } from "child_process";
+import { execFile, spawn } from "child_process";
 import path        from "path";
 import fs          from "fs/promises";
 import crypto      from "crypto";
@@ -35,6 +50,8 @@ import {
   type ReleaseManifest,
   type UpdateRunState,
 } from "core/schemas/updates.ts";
+
+const FINALIZE_HELPER = process.env.UPDATE_FINALIZE_HELPER || "/usr/local/sbin/zentra-finalize-update";
 
 const QUEUE_NAME = "apply-update";
 
@@ -182,32 +199,271 @@ async function fetchArtifact(runId: number, manifest: ReleaseManifest): Promise<
   return { artifactPath: target, sha256: actual };
 }
 
+// ── Extract ──────────────────────────────────────────────────────────────────
+
+/**
+ * Untar the verified artifact into a versioned staging directory and return
+ * its path. The staged tree is what `migrate` and `data_tasks` operate on —
+ * NOT the running install's source — so the new release's migrations and
+ * post-migration scripts are the ones that execute.
+ *
+ * Idempotent: if the staging dir already exists (a previous run died or was
+ * retried), it's wiped and re-extracted. We don't trust partial extracts.
+ */
+async function extractArtifact(runId: number, artifactPath: string, manifest: ReleaseManifest): Promise<string> {
+  const stagingRoot = process.env.UPDATE_STAGING_DIR
+    || path.resolve(process.cwd(), "../updates/staging");
+  await fs.mkdir(stagingRoot, { recursive: true });
+  const target = path.join(stagingRoot, manifest.version);
+
+  // Wipe any prior partial extract so retries are clean.
+  await fs.rm(target, { recursive: true, force: true });
+  await fs.mkdir(target, { recursive: true });
+
+  await logEvent(runId, "info", "extract", `Extracting artifact into ${target}`);
+  await execAsync("tar", ["-xzf", artifactPath, "-C", target]);
+
+  // Sanity check: the artifact must contain the prisma schema we're about to
+  // migrate against. If it doesn't, the tarball is malformed and we abort.
+  const schemaPath = path.join(target, "server", "prisma", "schema.prisma");
+  try {
+    await fs.access(schemaPath);
+  } catch {
+    throw new Error(`Extracted tree at ${target} is missing server/prisma/schema.prisma — refusing to migrate`);
+  }
+  await logEvent(runId, "info", "extract", `Staged tree ready at ${target}`);
+  return target;
+}
+
+// ── Install dependencies ─────────────────────────────────────────────────────
+
+/**
+ * Run `bun install --frozen-lockfile` inside the staged tree so it has its own
+ * node_modules. The artifact tarball deliberately excludes node_modules (per
+ * release-server/publish.sh and sync-from-github.sh), so without this step
+ * the staged tree wouldn't be runnable.
+ *
+ * Why we do it here instead of post-restart:
+ *   • Failures are visible in the orchestrator log instead of a crashed
+ *     replica nobody is watching.
+ *   • The maintenance window absorbs the (potentially slow) network fetch
+ *     instead of customer-facing downtime stretching into the restart.
+ *
+ * Skippable by setting UPDATE_SKIP_INSTALL_DEPS=true for installs that ship
+ * pre-built artifacts (e.g. Docker images that bake node_modules in).
+ */
+async function installDeps(runId: number, stagingDir: string): Promise<void> {
+  if (process.env.UPDATE_SKIP_INSTALL_DEPS === "true") {
+    await logEvent(runId, "info", "install_deps", "Skipped (UPDATE_SKIP_INSTALL_DEPS=true)");
+    return;
+  }
+  const bun = process.env.UPDATE_BUN_BIN || "bun";
+  await logEvent(runId, "info", "install_deps", `Running ${bun} install --frozen-lockfile`);
+  const { stdout, stderr } = await execAsync(bun, ["install", "--frozen-lockfile"], {
+    cwd: stagingDir,
+  });
+  await logEvent(runId, "info", "install_deps", "bun install output", {
+    stdout: stdout.slice(-2000), stderr: stderr.slice(-2000),
+  });
+}
+
+// ── Build ────────────────────────────────────────────────────────────────────
+
+/**
+ * Run `bunx vite build` in the staged client tree so the SPA bundle the
+ * customer's reverse proxy serves (`client/dist/`) matches the new server.
+ *
+ * Without this step, after the binary swap the customer would have new
+ * server APIs but stale frontend code — usually visible as JSON parse errors
+ * in the browser console because the old SPA expects the old payload shape.
+ *
+ * Skippable when the artifact already includes a built dist/ (some release
+ * pipelines bake the build into the tarball — set UPDATE_SKIP_BUILD=true).
+ */
+async function buildClient(runId: number, stagingDir: string): Promise<void> {
+  if (process.env.UPDATE_SKIP_BUILD === "true") {
+    await logEvent(runId, "info", "build", "Skipped (UPDATE_SKIP_BUILD=true)");
+    return;
+  }
+  const bun       = process.env.UPDATE_BUN_BIN || "bun";
+  const clientDir = path.join(stagingDir, "client");
+  // If the staged tree has no client/ directory, this is a server-only build —
+  // skip without raising. (Operator-only releases sometimes ship just the API.)
+  try {
+    await fs.access(clientDir);
+  } catch {
+    await logEvent(runId, "info", "build", "No client/ directory in artifact — skipping build");
+    return;
+  }
+  await logEvent(runId, "info", "build", `Building SPA in ${clientDir}`);
+  const { stdout, stderr } = await execAsync(bun, ["x", "vite", "build"], { cwd: clientDir });
+  await logEvent(runId, "info", "build", "vite build output", {
+    stdout: stdout.slice(-2000), stderr: stderr.slice(-2000),
+  });
+}
+
+// ── Finalize ─────────────────────────────────────────────────────────────────
+
+/**
+ * Detach and run the privileged finalize helper. We pre-flight that:
+ *   1. The helper exists at $FINALIZE_HELPER (default /usr/local/sbin/...)
+ *   2. We can sudo it without a password (via the sudoers drop-in)
+ *
+ * If both checks pass, we spawn it fully detached and return — the helper's
+ * `systemctl restart` will SIGTERM us shortly after. The new replica boots
+ * onto the new code, and `reconcileInFlightUpdates()` (in lib/release.ts)
+ * marks this run `done` and clears maintenance mode.
+ *
+ * If either check fails, we fall back to the legacy `restart_required`
+ * state with copy-paste instructions for the operator. The customer's UI
+ * will display them; the run remains non-terminal until a manual restart
+ * boots the new code, at which point boot reconciliation finishes the run.
+ */
+async function runFinalize(runId: number, stagingDir: string, manifest: ReleaseManifest) {
+  const appDir        = process.env.UPDATE_APP_DIR        || "/opt/zentra/app";
+  const servicePrefix = process.env.UPDATE_SERVICE_PREFIX || "zentra-api";
+
+  // Helper must exist on disk.
+  const helperOk = await fs.access(FINALIZE_HELPER).then(() => true).catch(() => false);
+
+  // sudo -n -l checks "can I run this exact command without a password?"
+  // Returns 0 if yes, non-zero otherwise. We keep stdout/stderr quiet so
+  // the failure case stays clean in logs.
+  let sudoOk = false;
+  if (helperOk) {
+    try {
+      await execAsync("sudo", ["-n", "-l", FINALIZE_HELPER]);
+      sudoOk = true;
+    } catch { sudoOk = false; }
+  }
+
+  if (helperOk && sudoOk) {
+    await logEvent(runId, "info", "finalize",
+      `Auto-finalize: spawning ${FINALIZE_HELPER} ${stagingDir} (we will be restarted shortly)`);
+
+    // Detach so the helper survives our SIGTERM. stdio: "ignore" drops file
+    // descriptors so the parent can fully release; unref() lets the parent
+    // exit (or be killed) without waiting on the child.
+    const child = spawn("sudo", ["-n", FINALIZE_HELPER, stagingDir], {
+      detached: true,
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        APP_DIR:        appDir,
+        SERVICE_PREFIX: servicePrefix,
+      },
+    });
+    child.unref();
+
+    // Give the helper a head start so its rsync isn't racing the systemctl
+    // command's SIGTERM against our heartbeat. The actual restart happens
+    // ~1-2s after rsync completes.
+    await new Promise(r => setTimeout(r, 500));
+    return;
+  }
+
+  // ── Fallback: legacy manual flow ──────────────────────────────────────────
+  await transition(runId, "restart_required", "restart_required");
+  const why = !helperOk
+    ? `Privileged helper ${FINALIZE_HELPER} is not installed.`
+    : `Privileged helper exists but sudo NOPASSWD is not configured.`;
+  await logEvent(runId, "warn", "restart_required",
+    [
+      `Auto-finalize unavailable: ${why}`,
+      ``,
+      `To enable one-click updates, run on this host (once):`,
+      `  sudo bash scripts/enable-update-orchestrator.sh --restart`,
+      ``,
+      `For now, finish this update manually:`,
+      `  sudo rsync -a --delete --exclude=/server/.env --exclude=/uploads ${stagingDir}/ ${appDir}/`,
+      `  sudo chown -R ${process.env.UPDATE_APP_USER || "zentra"}:${process.env.UPDATE_APP_USER || "zentra"} ${appDir}`,
+      `  sudo systemctl restart '${servicePrefix}@*'`,
+      ``,
+      `On the next clean boot of ${manifest.version}, this update will be marked done.`,
+    ].join("\n"),
+    { stagingDir, appDir, servicePrefix, helperOk, sudoOk });
+}
+
 // ── Migrate + data tasks ─────────────────────────────────────────────────────
 
-async function runMigrations(runId: number) {
-  await logEvent(runId, "info", "migrate", "Running prisma migrate deploy");
-  // Prisma is bundled in node_modules; we run it via bunx so the working
-  // directory's prisma binary is used. This is the production-safe command
-  // (no schema-drift detection, no prompts).
-  const { stdout, stderr } = await execAsync("bunx", ["prisma", "migrate", "deploy"], {
-    cwd: path.resolve(process.cwd(), "server"),
-  });
+/**
+ * Run `prisma migrate deploy` against the STAGED schema (not the currently
+ * running install's). This is the fix that makes "Apply update" actually
+ * apply the new release's migrations — running it from process.cwd() would
+ * just re-deploy migrations already in production.
+ *
+ * We invoke prisma via the running install's `bunx` because (a) the staged
+ * tree has no node_modules — we don't ship them in the artifact — and
+ * (b) prisma's `migrate deploy` doesn't depend on schema-syntax features
+ * specific to the new release: it just reads SQL from the migrations dir
+ * adjacent to the schema file, applies them via the database connection
+ * string, and stops. So an older prisma binary against newer migration
+ * SQL works as long as no prisma-specific declarative features changed.
+ */
+async function runMigrations(runId: number, stagingDir: string) {
+  const schemaPath = path.join(stagingDir, "server", "prisma", "schema.prisma");
+  await logEvent(runId, "info", "migrate", `Running prisma migrate deploy --schema ${schemaPath}`);
+  const { stdout, stderr } = await execAsync(
+    "bunx",
+    ["prisma", "migrate", "deploy", "--schema", schemaPath],
+    { cwd: path.resolve(process.cwd(), "server") },
+  );
   await logEvent(runId, "info", "migrate", "prisma output", { stdout, stderr });
 }
 
-async function runDataTasks(runId: number, manifest: ReleaseManifest) {
+/**
+ * Load each named data task FROM THE STAGED TREE and invoke its `run`
+ * function. Tasks ship inside the new release (at `server/src/data-tasks/
+ * <version>/<name>.ts`) so the upgrade flow is self-contained.
+ *
+ * Authoring contract for a data task
+ * ──────────────────────────────────
+ *   export async function run(ctx: {
+ *     runId: number;
+ *     manifest: ReleaseManifest;
+ *     prisma: PrismaClient;
+ *     log: (level: "info"|"warn"|"error", msg: string, data?: object) => Promise<void>;
+ *   }): Promise<void>
+ *
+ * Tasks should:
+ *   • use only the injected `prisma` client (NOT a relative `../db` import,
+ *     which would fail to resolve from the staged tree)
+ *   • be idempotent (safe to retry if the orchestrator dies mid-task)
+ *   • throw on failure — the orchestrator catches and marks the run failed
+ */
+async function runDataTasks(runId: number, manifest: ReleaseManifest, stagingDir: string) {
   if (manifest.dataTasks.length === 0) {
     await logEvent(runId, "info", "data_tasks", "No data tasks for this release");
     return;
   }
+  // Lazy import to avoid circulars at module load.
+  const { pathToFileURL } = await import("node:url");
+
   for (const taskName of manifest.dataTasks) {
-    await logEvent(runId, "info", "data_tasks", `Running data task: ${taskName}`);
+    const taskPath = path.join(stagingDir, "server", "src", "data-tasks", manifest.version, `${taskName}.ts`);
+    await logEvent(runId, "info", "data_tasks", `Running ${taskName} from ${taskPath}`);
     try {
-      const mod = await import(`../data-tasks/${manifest.version}/${taskName}.ts`);
-      if (typeof mod.run !== "function") {
-        throw new Error(`Data task ${taskName} has no exported run() function`);
-      }
-      await mod.run({ runId, manifest });
+      await fs.access(taskPath);
+    } catch {
+      throw new Error(`Data task ${taskName} not found at ${taskPath}`);
+    }
+    let mod: { run?: (ctx: object) => Promise<void> };
+    try {
+      mod = await import(pathToFileURL(taskPath).href);
+    } catch (err) {
+      throw new Error(`Failed to load data task ${taskName}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (typeof mod.run !== "function") {
+      throw new Error(`Data task ${taskName} has no exported run() function`);
+    }
+    try {
+      await mod.run({
+        runId,
+        manifest,
+        prisma,
+        log: (level: "info"|"warn"|"error", msg: string, data?: Record<string, unknown>) =>
+          logEvent(runId, level, "data_tasks", `[${taskName}] ${msg}`, data),
+      });
       await logEvent(runId, "info", "data_tasks", `Completed: ${taskName}`);
     } catch (err) {
       throw new Error(`Data task ${taskName} failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -278,20 +534,43 @@ async function runOrchestrator(runId: number) {
     // (verify already done as part of fetchArtifact; this is a placeholder
     // for future signature checks against a separate keypair).
 
+    await transition(runId, "extract", "extract");
+    const stagingDir = await extractArtifact(runId, artifactPath, manifest);
+
+    await transition(runId, "install_deps", "install_deps");
+    await installDeps(runId, stagingDir);
+
     await transition(runId, "migrate", "migrate");
-    await runMigrations(runId);
+    await runMigrations(runId, stagingDir);
 
     await transition(runId, "data_tasks", "data_tasks");
-    await runDataTasks(runId, manifest);
+    await runDataTasks(runId, manifest, stagingDir);
 
-    // We can't restart ourselves cleanly — the binary swap happens via the
-    // operator's process supervisor (systemd, Docker restart policy, etc.).
-    // The Updates UI surfaces a "Restart server to finalize" CTA at this
-    // point; the next boot will pick up the new release.json and record an
-    // upgrade row in app_version automatically.
-    await transition(runId, "restart_required", "restart_required");
-    await logEvent(runId, "info", "restart_required",
-      "Update applied. Restart the server (systemctl restart zentra-helpdesk) to finalize.");
+    await transition(runId, "build", "build");
+    await buildClient(runId, stagingDir);
+
+    // Finalize: swap the staged tree into the live $APP_DIR and restart the
+    // replicas. This is the step that takes the customer from "new code is
+    // ready" to "new code is running" — without any SSH session.
+    //
+    // We can't do this from the unprivileged helpdesk process directly:
+    // - rsyncing into $APP_DIR requires write access we don't have
+    // - `systemctl restart` of a system unit needs root
+    //
+    // The privileged helper at $FINALIZE_HELPER (installed by install.sh /
+    // enable-update-orchestrator.sh, with a sudoers NOPASSWD entry) does
+    // both. We invoke it as a fully detached child so it survives our own
+    // imminent SIGTERM when the restart kicks in.
+    //
+    // After the restart, the new replica's boot logic in lib/release.ts
+    // will reconcile this update_run row to `done` and clear maintenance
+    // mode automatically.
+    await transition(runId, "finalize", "finalize");
+    await runFinalize(runId, stagingDir, manifest);
+    // We almost certainly never reach here — the helper restarts us mid-call.
+    // If we do (e.g. helper isn't installed), runFinalize has transitioned
+    // the run into `restart_required` with operator instructions.
+    return;
 
     // Note: maintenance_off intentionally NOT toggled here — the operator
     // turns it off after restarting and verifying. That keeps the gate in

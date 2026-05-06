@@ -153,6 +153,85 @@ export async function getInstalledVersion() {
   });
 }
 
+/**
+ * Reconcile any update_run rows the orchestrator was driving when its
+ * process got SIGTERM'd by the auto-finalize restart.
+ *
+ * The principle: this boot's bundled version is authoritative. If we're
+ * running the version a non-terminal run was driving towards, finalize
+ * succeeded — mark `done` + clear maintenance. If we're running anything
+ * else (still on the old version, or some unrelated version), the run
+ * died incomplete — mark `failed` with a clear message and clear
+ * maintenance so the install isn't stuck behind the gate.
+ *
+ * Called from boot, after recordBootVersion(). Failures here are non-fatal
+ * — boot continues regardless.
+ */
+export async function reconcileInFlightUpdates(): Promise<void> {
+  try {
+    const bundled = await loadBundledManifest();
+    const inFlight = await prisma.updateRun.findMany({
+      where: { state: { notIn: ["done", "failed", "cancelled", "rolled_back"] } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (inFlight.length === 0) return;
+
+    // Lazy-import so this lib stays free of circular deps with settings.
+    const { setSection } = await import("./settings");
+    const { invalidateMaintenanceCache } = await import("../middleware/maintenance-mode");
+    let droppedMaintenance = false;
+
+    for (const run of inFlight) {
+      if (run.toVersion === bundled.version) {
+        await prisma.updateRun.update({
+          where: { id: run.id },
+          data: { state: "done", finishedAt: new Date() },
+        });
+        await prisma.updateRunEvent.create({
+          data: {
+            runId: run.id, level: "info", step: "done",
+            message: `Boot reconciliation: running ${bundled.version} as expected — update finished cleanly.`,
+          },
+        });
+        console.log(`[release] Reconciled in-flight update #${run.id} as done (running ${bundled.version})`);
+      } else {
+        await prisma.updateRun.update({
+          where: { id: run.id },
+          data: {
+            state:        "failed",
+            errorMessage: `Orchestrator stopped in state '${run.state}' before completion. ` +
+                          `Boot detected version ${bundled.version}, expected ${run.toVersion}.`,
+            errorStep:    run.state,
+            finishedAt:   new Date(),
+          },
+        });
+        await prisma.updateRunEvent.create({
+          data: {
+            runId: run.id, level: "error", step: "boot-reconcile",
+            message: `Boot reconciliation: running ${bundled.version}, not the target ${run.toVersion} — marking failed.`,
+          },
+        });
+        console.warn(`[release] Reconciled in-flight update #${run.id} as failed (expected ${run.toVersion}, got ${bundled.version})`);
+      }
+      droppedMaintenance = true;
+    }
+
+    if (droppedMaintenance) {
+      // We're up. Drop maintenance mode so customer-facing API resumes.
+      try {
+        await setSection("advanced", { maintenanceMode: false });
+        invalidateMaintenanceCache();
+        console.log("[release] Cleared maintenance mode after update reconciliation");
+      } catch (err) {
+        console.error("[release] Failed to clear maintenance mode:", err);
+      }
+    }
+  } catch (err) {
+    console.error("[release] reconcileInFlightUpdates failed:", err);
+    Sentry.captureException(err, { tags: { context: "update-reconcile" } });
+  }
+}
+
 // ── semver helpers ───────────────────────────────────────────────────────────
 
 /**

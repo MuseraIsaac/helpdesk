@@ -89,7 +89,7 @@ import auditLogRouter from "./routes/audit-log";
 import rolesRouter    from "./routes/roles";
 import updatesRouter  from "./routes/updates";
 import { startQueue, stopQueue } from "./lib/queue";
-import { recordBootVersion } from "./lib/release";
+import { recordBootVersion, reconcileInFlightUpdates } from "./lib/release";
 import { ensureChannelProvisioned } from "./lib/update-channel";
 import { maintenanceMode } from "./middleware/maintenance-mode";
 import { loadRoles } from "./lib/role-cache";
@@ -407,6 +407,12 @@ async function boot() {
   // Record this binary's version against the install history. Non-fatal —
   // failures log internally and don't block boot. See lib/release.ts.
   await recordBootVersion();
+
+  // If we just rebooted because of an auto-finalize, mark the in-flight
+  // update_run as done and drop maintenance mode automatically. The customer
+  // sees the update flip from "Finalizing…" to "Done" without ever needing
+  // to log into the server.
+  await reconcileInFlightUpdates();
 
   // Mint installId/secret on first boot so the release-server allowlist has
   // something to register. Subsequent boots are no-ops.
