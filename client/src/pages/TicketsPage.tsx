@@ -60,7 +60,7 @@ export interface TicketFilters {
   severity?:           TicketSeverity | TicketSeverity[];
   impact?:             TicketImpact | TicketImpact[];
   urgency?:            TicketUrgency | TicketUrgency[];
-  source?:             "email" | "portal" | "agent" | ("email" | "portal" | "agent")[];
+  source?:             string | string[];
   search?:             string;
   escalated?:          boolean;
   assignedToMe?:       boolean;
@@ -129,7 +129,7 @@ export function parseFiltersFromParams(params: URLSearchParams): TicketFilters {
   const sev = parseMulti<TicketSeverity>(params.get("severity"));   if (sev)     f.severity = sev;
   const imp = parseMulti<TicketImpact>(params.get("impact"));       if (imp)     f.impact   = imp;
   const urg = parseMulti<TicketUrgency>(params.get("urgency"));     if (urg)     f.urgency  = urg;
-  const src = parseMulti<"email"|"portal"|"agent">(params.get("source")); if (src) f.source = src;
+  const src = parseMulti<string>(params.get("source")); if (src) f.source = src;
   const assignees = parseMulti<string>(params.get("assignedToId")); if (assignees) f.assignedToId = assignees;
   if (params.has("search"))       f.search       = params.get("search")!;
   if (params.get("escalated")    === "true") f.escalated    = true;

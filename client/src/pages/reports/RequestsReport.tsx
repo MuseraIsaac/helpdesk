@@ -15,6 +15,7 @@ import KpiCard from "@/components/reports/KpiCard";
 import ChartCard from "@/components/reports/ChartCard";
 import ReportLoading from "@/components/reports/ReportLoading";
 import { fetchRequestReport } from "@/lib/reports/api";
+import { useReportBag } from "@/lib/reports/useReportFilters";
 import { fmtDuration, fmtPct, complianceClass } from "@/lib/reports/utils";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -41,9 +42,11 @@ export default function RequestsReport() {
   const [searchParams] = useSearchParams();
   const period = searchParams.get("period") ?? "30";
 
+  const bag = useReportBag("requestStatus", "priority", "catalogItemId", "teamId", "assigneeId");
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ["reports", "requests", period],
-    queryFn: () => fetchRequestReport(period),
+    queryKey: ["reports", "requests", period, bag],
+    queryFn: () => fetchRequestReport(period, bag),
   });
 
   if (isLoading) return <ReportLoading kpiCount={4} chartCount={2} />;

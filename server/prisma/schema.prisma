@@ -1283,6 +1283,93 @@ model SystemSetting {
 }
 
 /**
+ * AppVersion — append-only history of every release this install has booted.
+ *
+ * Row 1 is created the first time the server starts after this model exists,
+ * stamped with the version from the bundled `release.json`. Every subsequent
+ * boot whose bundled version differs appends a new row with `kind = "upgrade"`
+ * (or "downgrade"). The most-recent row is the "currently installed" version.
+ *
+ * Manifest is the full release.json blob captured at install time so that
+ * even if the file rotates on disk, the historical record stays intact.
+ */
+model AppVersion {
+  id          Int      @id @default(autoincrement())
+  /// Semantic version string at the time of this transition, e.g. "1.4.0".
+  version     String   @db.VarChar(40)
+  /// "install" (first boot) | "upgrade" | "downgrade" | "reinstall" (same version reapplied).
+  kind        String   @db.VarChar(20)
+  /// The previous version this release replaced — null for the very first row.
+  fromVersion String?  @db.VarChar(40)
+  /// Snapshot of the release.json that produced this transition.
+  manifest    Json
+  /// User who triggered the transition. Null = automatic (first boot, server start picked it up).
+  appliedById String?
+  appliedAt   DateTime @default(now())
+
+  @@index([appliedAt])
+  @@map("app_version")
+}
+
+/**
+ * UpdateRun — one row per "apply update" attempt. Drives the orchestrator
+ * state machine and is the source of truth for progress shown in the UI.
+ *
+ * State transitions (see lib/update-orchestrator.ts):
+ *   queued → preflight → backup → maintenance_on
+ *          → fetch     → migrate → restart_required
+ *          → done       (admin restarts the server which finalizes)
+ *   any   → failed     (errorMessage / errorStep populated; rollback offered)
+ *   any   → cancelled  (admin clicked cancel before a non-reversible step)
+ *
+ * Idempotent restarts: if the orchestrator process dies mid-run, the row's
+ * state lets the worker resume or mark the run failed on next boot.
+ */
+model UpdateRun {
+  id              Int       @id @default(autoincrement())
+  fromVersion     String    @db.VarChar(40)
+  toVersion       String    @db.VarChar(40)
+  manifest        Json
+  state           String    @default("queued") @db.VarChar(40)
+  currentStep     String?   @db.VarChar(60)
+  errorMessage    String?
+  errorStep       String?   @db.VarChar(60)
+  backupPath      String?
+  triggeredById   String?
+  createdAt       DateTime  @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  rolledBackAt    DateTime?
+  rollbackOfId    Int?
+  /// Self-relation: a rollback run points back at the run it reverted.
+  rollbackOf      UpdateRun?  @relation("UpdateRunRollback", fields: [rollbackOfId], references: [id], onDelete: SetNull)
+  rollbackChild   UpdateRun[] @relation("UpdateRunRollback")
+  events          UpdateRunEvent[]
+
+  @@index([state])
+  @@index([createdAt])
+  @@map("update_run")
+}
+
+/**
+ * Append-only progress log per UpdateRun. The SSE endpoint streams these
+ * rows to the UI as they're written so admins see live progress.
+ */
+model UpdateRunEvent {
+  id        Int       @id @default(autoincrement())
+  runId     Int
+  run       UpdateRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  level     String    @db.VarChar(10)
+  step      String?   @db.VarChar(60)
+  message   String
+  data      Json?
+  createdAt DateTime  @default(now())
+
+  @@index([runId, createdAt])
+  @@map("update_run_event")
+}
+
+/**
  * DashboardConfig — stores named dashboard configurations for users.
  *
  * Design:

@@ -22,6 +22,7 @@ import { ticketPriorities, priorityLabel } from "core/constants/ticket-priority.
 import { ticketSeverities, severityLabel } from "core/constants/ticket-severity.ts";
 import { ticketImpacts, impactLabel } from "core/constants/ticket-impact.ts";
 import { ticketUrgencies, urgencyLabel } from "core/constants/ticket-urgency.ts";
+import { INTAKE_CHANNELS, CHANNEL_LABEL, CHANNEL_ICON } from "core/constants/channel.ts";
 import SearchableSelect from "@/components/SearchableSelect";
 import EscalateDialog from "@/components/EscalateDialog";
 
@@ -398,6 +399,7 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
   const mergedCustomTypeId  = val<number | null>("customTicketTypeId", ticket.customTicketTypeId ?? null);
   const mergedCustomStatusId = val<number | null>("customStatusId", ticket.customStatusId ?? null);
   const mergedStatus        = val<string>("status", ticket.status);
+  const mergedSource        = val<string | null>("source", ticket.source ?? null);
 
   const selectedTeam = teamsData?.find((t) => t.id === mergedTeamId) ?? null;
   const availableAgents: Agent[] = selectedTeam
@@ -503,6 +505,14 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
   const categoryOptions = [
     { value: "none", label: "None" },
     ...ticketCategories.map((c) => ({ value: c, label: categoryLabel[c] })),
+  ];
+
+  const sourceOptions = [
+    { value: "none", label: "Not set" },
+    ...INTAKE_CHANNELS.map((c) => ({
+      value: c,
+      label: `${CHANNEL_ICON[c]} ${CHANNEL_LABEL[c]}`,
+    })),
   ];
 
   const typeValue =
@@ -759,6 +769,14 @@ export default function UpdateTicket({ ticket }: { ticket: Ticket }) {
             value={typeValue}
             onChange={handleTypeChange}
             options={typeOptions}
+            disabled={updateMutation.isPending}
+          />
+        </FieldRow>
+        <FieldRow label="Source">
+          <SearchableSelect
+            value={mergedSource ?? "none"}
+            onChange={(v) => queueUpdate({ source: v === "none" ? null : v })}
+            options={sourceOptions}
             disabled={updateMutation.isPending}
           />
         </FieldRow>

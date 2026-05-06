@@ -14,6 +14,7 @@ import { registerPurgeAuditLogWorker } from "./purge-audit-log";
 import { registerTimeSupervisorWorker } from "./check-time-supervisor";
 import { registerInboundEmailWorker } from "./check-inbound-email";
 import { registerAssetRenewalsWorker } from "./check-asset-renewals";
+import { registerApplyUpdateWorker } from "./update-orchestrator";
 
 // pg-boss runs its own pg pool (separate from Prisma's). Same connection
 // hardening applies — TCP keepalive + idle recycling + a connection cap so
@@ -78,6 +79,7 @@ export async function startQueue(): Promise<void> {
   await registerTimeSupervisorWorker(boss);
   await registerInboundEmailWorker(boss);
   await registerAssetRenewalsWorker(boss);
+  await registerApplyUpdateWorker();
 
   console.log("Job queue started");
 }

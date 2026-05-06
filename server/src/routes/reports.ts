@@ -36,6 +36,132 @@ function createdAtFilter(from: Date | null, to: Date | null) {
   };
 }
 
+// ── Ticket-domain dimension filters ───────────────────────────────────────────
+//
+// Stage 2 of the analytics filter rollout. Reads the filter URL params written
+// by the client `<ReportFiltersBar />` and returns:
+//   • a Prisma `where` partial — for ORM queries
+//   • a SQL fragment + params builder — for raw SQL queries
+//
+// Filter columns supported:
+//   priority    → ticket.priority
+//   category    → ticket.category
+//   status      → ticket.status
+//   teamId      → ticket.queueId   (schema name; user-facing label is "team")
+//   assigneeId  → ticket.assignedToId
+//
+// All routes that aggregate over the `ticket` table should call this so the
+// displayed cards reshape to match the filter strip.
+
+interface TicketFilters {
+  priority?:           string;
+  category?:           string;
+  // status / ticketType are exclusive with their custom-id variants — exactly
+  // one of (system enum, custom config FK) is set per filter at a time.
+  status?:             string;
+  customStatusId?:     number;
+  ticketType?:         string;
+  customTicketTypeId?: number;
+  teamId?:             number;
+  assigneeId?:         string;
+  source?:             string;
+  organizationId?:     number;
+}
+
+/**
+ * Decode a status / ticket-type filter value.
+ *
+ * The `<ReportFiltersBar />` merges system enum statuses with admin-defined
+ * `TicketStatusConfig` rows in a single dropdown. Custom rows are encoded as
+ * `custom_<id>` so the URL can carry either kind unambiguously. This helper
+ * returns the canonical pair so callers can store the right column.
+ */
+function decodeMaybeCustom(raw: string): { custom: number | null; system: string | null } {
+  if (raw.startsWith("custom_")) {
+    const n = Number(raw.slice(7));
+    return Number.isFinite(n) && n > 0 ? { custom: n, system: null } : { custom: null, system: null };
+  }
+  return { custom: null, system: raw };
+}
+
+function parseTicketFilters(query: Record<string, unknown>): TicketFilters {
+  const out: TicketFilters = {};
+  if (typeof query.priority   === "string" && query.priority)   out.priority   = query.priority;
+  if (typeof query.category   === "string" && query.category)   out.category   = query.category;
+  if (typeof query.assigneeId === "string" && query.assigneeId) out.assigneeId = query.assigneeId;
+  if (typeof query.source     === "string" && query.source)     out.source     = query.source;
+
+  if (typeof query.status === "string" && query.status) {
+    const d = decodeMaybeCustom(query.status);
+    if (d.custom !== null) out.customStatusId = d.custom;
+    else if (d.system)     out.status         = d.system;
+  }
+  if (typeof query.ticketType === "string" && query.ticketType) {
+    const d = decodeMaybeCustom(query.ticketType);
+    if (d.custom !== null) out.customTicketTypeId = d.custom;
+    else if (d.system)     out.ticketType         = d.system;
+  }
+  if (query.teamId !== undefined && query.teamId !== "") {
+    const n = Number(query.teamId);
+    if (Number.isFinite(n) && n > 0) out.teamId = n;
+  }
+  if (query.organizationId !== undefined && query.organizationId !== "") {
+    const n = Number(query.organizationId);
+    if (Number.isFinite(n) && n > 0) out.organizationId = n;
+  }
+  return out;
+}
+
+/** Prisma `where` partial mirroring the active ticket filters. */
+function ticketFilterWhere(f: TicketFilters): Record<string, unknown> {
+  const where: Record<string, unknown> = {};
+  if (f.priority)           where.priority           = f.priority;
+  if (f.category)           where.category           = f.category;
+  if (f.status)             where.status             = f.status;
+  if (f.customStatusId)     where.customStatusId     = f.customStatusId;
+  if (f.teamId)             where.queueId            = f.teamId;
+  if (f.assigneeId)         where.assignedToId       = f.assigneeId;
+  if (f.ticketType)         where.ticketType         = f.ticketType;
+  if (f.customTicketTypeId) where.customTicketTypeId = f.customTicketTypeId;
+  if (f.source)             where.source             = f.source;
+  if (f.organizationId)     where.organizationId     = f.organizationId;
+  return where;
+}
+
+/**
+ * Build a `AND col = $N` SQL fragment + params array from the active filters.
+ *
+ * `alias`        — table alias to qualify columns (e.g. "t" for `t.priority`).
+ * `paramOffset`  — number of $-params already used; positions are computed as
+ *                  paramOffset + (n + 1).
+ *
+ * Returns "" when no filters are set so callers can append unconditionally.
+ */
+function ticketFilterSql(
+  f: TicketFilters,
+  alias = "",
+  paramOffset = 0,
+): { frag: string; params: unknown[] } {
+  const parts: string[] = [];
+  const params: unknown[] = [];
+  const q = (col: string) => alias ? `${alias}.${col}` : col;
+
+  if (f.priority)           { params.push(f.priority);           parts.push(`${q('priority')}::text = $${paramOffset + params.length}`); }
+  if (f.category)           { params.push(f.category);           parts.push(`${q('category')}::text = $${paramOffset + params.length}`); }
+  if (f.status)             { params.push(f.status);             parts.push(`${q('status')}::text = $${paramOffset + params.length}`); }
+  if (f.customStatusId)     { params.push(f.customStatusId);     parts.push(`${q('"customStatusId"')} = $${paramOffset + params.length}`); }
+  if (f.ticketType)         { params.push(f.ticketType);         parts.push(`${q('"ticketType"')}::text = $${paramOffset + params.length}`); }
+  if (f.customTicketTypeId) { params.push(f.customTicketTypeId); parts.push(`${q('"customTicketTypeId"')} = $${paramOffset + params.length}`); }
+  if (f.source)             { params.push(f.source);             parts.push(`${q('source')} = $${paramOffset + params.length}`); }
+  if (f.teamId)             { params.push(f.teamId);             parts.push(`${q('"queueId"')} = $${paramOffset + params.length}`); }
+  if (f.assigneeId)         { params.push(f.assigneeId);         parts.push(`${q('"assignedToId"')} = $${paramOffset + params.length}`); }
+  if (f.organizationId)     { params.push(f.organizationId);     parts.push(`${q('"organization_id"')} = $${paramOffset + params.length}`); }
+  return {
+    frag: parts.length > 0 ? " AND " + parts.join(" AND ") : "",
+    params,
+  };
+}
+
 /**
  * Resolves a `{ since, until }` window from the request query.
  * Prefers explicit `from`/`to`; falls back to `period` (integer days).
@@ -126,6 +252,8 @@ router.get("/overview", async (req, res) => {
   // Anchor fromDate to start-of-day so "YYYY-MM-DD" strings include the full day.
   if (fromDate) fromDate.setUTCHours(0, 0, 0, 0);
 
+  const filters = parseTicketFilters(req.query as Record<string, unknown>);
+
   // Build WHERE clause dynamically to avoid NULL timestamptz casting issues
   let where = `WHERE TRUE`;
   const params: unknown[] = [AI_AGENT_ID];
@@ -138,6 +266,10 @@ router.get("/overview", async (req, res) => {
     params.push(toDate);
     where += ` AND "createdAt" <= $${params.length}`;
   }
+
+  const tf = ticketFilterSql(filters, "t", params.length);
+  where += tf.frag;
+  params.push(...tf.params);
 
   // First-response time is normally stamped to ticket.firstRespondedAt the
   // moment an agent posts the first reply (see routes/replies.ts). For
@@ -243,13 +375,16 @@ router.get("/volume", async (req, res) => {
     until.setHours(23, 59, 59, 999);
   }
 
+  const filters = parseTicketFilters(req.query as Record<string, unknown>);
+  const tf = ticketFilterSql(filters, "t", 2);
+
   // Compute daily counts in SQL (via generate_series) so we don't load every
   // ticket row over the wire just to bucket timestamps client-side.
-  const rows = await prisma.$queryRaw<{ date: string; tickets: bigint }[]>`
-    WITH days AS (
+  const rows = await prisma.$queryRawUnsafe<{ date: string; tickets: bigint }[]>(
+    `WITH days AS (
       SELECT generate_series(
-        ${since}::timestamp,
-        ${until}::timestamp,
+        $1::timestamp,
+        $2::timestamp,
         '1 day'::interval
       )::date AS day
     )
@@ -259,11 +394,12 @@ router.get("/volume", async (req, res) => {
     FROM days d
     LEFT JOIN ticket t
       ON t."createdAt"::date = d.day
-     AND t."createdAt" >= ${since}
-     AND t."createdAt" <= ${until}
+     AND t."createdAt" >= $1
+     AND t."createdAt" <= $2${tf.frag}
     GROUP BY d.day
-    ORDER BY d.day
-  `;
+    ORDER BY d.day`,
+    since, until, ...tf.params,
+  );
 
   res.json({
     data: rows.map(r => ({ date: r.date, tickets: Number(r.tickets) })),
@@ -280,8 +416,14 @@ router.get("/volume", async (req, res) => {
 router.get("/breakdowns", async (req, res) => {
   const { fromDate, toDate } = parseDateRange(req.query.from, req.query.to);
   const dateWhere = createdAtFilter(fromDate, toDate);
+  const filters = parseTicketFilters(req.query as Record<string, unknown>);
+  const filterWhere = ticketFilterWhere(filters);
   const notExcluded: ExcludedStatus[] = [...EXCLUDED_STATUSES];
-  const baseWhere = { status: { notIn: notExcluded }, ...dateWhere };
+  // Status filter takes precedence over the default "exclude system statuses" rule
+  // so a user filtering by status='resolved' sees only resolved tickets.
+  const baseWhere = filters.status
+    ? { ...dateWhere, ...filterWhere }
+    : { status: { notIn: notExcluded }, ...dateWhere, ...filterWhere };
 
   // Category and priority: two groupBy calls each (total + open) merged in JS
   const [categoryTotal, categoryOpen, priorityTotal, priorityOpen] = await Promise.all([
@@ -293,7 +435,7 @@ router.get("/breakdowns", async (req, res) => {
     }),
     prisma.ticket.groupBy({
       by: ["category"],
-      where: { status: "open", ...dateWhere },
+      where: { ...dateWhere, ...filterWhere, status: "open" },
       _count: { id: true },
     }),
     prisma.ticket.groupBy({
@@ -304,7 +446,7 @@ router.get("/breakdowns", async (req, res) => {
     }),
     prisma.ticket.groupBy({
       by: ["priority"],
-      where: { status: "open", ...dateWhere },
+      where: { ...dateWhere, ...filterWhere, status: "open" },
       _count: { id: true },
     }),
   ]);
@@ -327,7 +469,9 @@ router.get("/breakdowns", async (req, res) => {
   }));
 
   // Assignees: needs JOIN so use raw SQL
-  let assigneeWhere = `WHERE t.status NOT IN ('new','processing') AND t."assignedToId" IS NOT NULL`;
+  let assigneeWhere = filters.status
+    ? `WHERE t."assignedToId" IS NOT NULL`
+    : `WHERE t.status NOT IN ('new','processing') AND t."assignedToId" IS NOT NULL`;
   const assigneeParams: unknown[] = [];
   if (fromDate) {
     assigneeParams.push(fromDate);
@@ -337,6 +481,9 @@ router.get("/breakdowns", async (req, res) => {
     assigneeParams.push(toDate);
     assigneeWhere += ` AND t."createdAt" <= $${assigneeParams.length}`;
   }
+  const tfA = ticketFilterSql(filters, "t", assigneeParams.length);
+  assigneeWhere += tfA.frag;
+  assigneeParams.push(...tfA.params);
 
   interface AssigneeRow {
     agentId: string;
@@ -388,8 +535,12 @@ interface AgingRow {
   sort: number;
 }
 
-router.get("/aging", async (_req, res) => {
-  const rows = await prisma.$queryRaw<AgingRow[]>`
+router.get("/aging", async (req, res) => {
+  // Aging is intrinsically about open tickets — apply non-status filters only.
+  const filters = parseTicketFilters(req.query as Record<string, unknown>);
+  const tf = ticketFilterSql({ ...filters, status: undefined }, "", 0);
+
+  const rows = await prisma.$queryRawUnsafe<AgingRow[]>(`
     SELECT
       CASE
         WHEN "createdAt" >= NOW() - INTERVAL '1 day'  THEN '< 24h'
@@ -405,10 +556,10 @@ router.get("/aging", async (_req, res) => {
         ELSE 4
       END                                           AS sort
     FROM ticket
-    WHERE status = 'open'
+    WHERE status = 'open'${tf.frag}
     GROUP BY bucket, sort
     ORDER BY sort
-  `;
+  `, ...tf.params);
 
   res.json({
     aging: rows.map((r) => ({
@@ -428,6 +579,7 @@ router.get("/aging", async (_req, res) => {
 
 router.get("/sla-by-dimension", async (req, res) => {
   const { fromDate, toDate } = parseDateRange(req.query.from, req.query.to);
+  const filters = parseTicketFilters(req.query as Record<string, unknown>);
 
   /** Build a (WHERE fragment, params[]) pair; alias prefixes the date column. */
   function dateParts(alias?: string) {
@@ -436,6 +588,12 @@ router.get("/sla-by-dimension", async (req, res) => {
     let where = "";
     if (fromDate) { params.push(fromDate); where += ` AND ${col} >= $${params.length}`; }
     if (toDate)   { params.push(toDate);   where += ` AND ${col} <= $${params.length}`; }
+    // Append ticket filters (skip the dim being grouped if one matches — a
+    // priority filter while grouping by priority just collapses to one bar,
+    // which is the right behaviour).
+    const tf = ticketFilterSql(filters, alias ?? "", params.length);
+    where  += tf.frag;
+    params.push(...tf.params);
     return { where, params };
   }
 
@@ -518,6 +676,38 @@ router.get("/sla-by-dimension", async (req, res) => {
 router.get("/incidents", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
+  // ── Incident-domain filters ─────────────────────────────────────────────
+  const q = req.query as Record<string, unknown>;
+  const incFilters = {
+    priority:  typeof q.incidentPriority === "string" ? q.incidentPriority : undefined,
+    status:    typeof q.incidentStatus   === "string" ? q.incidentStatus   : undefined,
+    isMajor:   q.isMajor === "true",
+    teamId:    typeof q.teamId     === "string" && q.teamId     ? Number(q.teamId)     : undefined,
+    assigneeId:typeof q.assigneeId === "string" && q.assigneeId ? q.assigneeId : undefined,
+  };
+
+  function buildSql(alias = "", offset = 0): { frag: string; params: unknown[] } {
+    const parts: string[] = [];
+    const params: unknown[] = [];
+    const c = (col: string) => alias ? `${alias}.${col}` : col;
+    if (incFilters.priority)   { params.push(incFilters.priority);   parts.push(`${c('priority')}::text = $${offset + params.length}`); }
+    if (incFilters.status)     { params.push(incFilters.status);     parts.push(`${c('status')}::text = $${offset + params.length}`); }
+    if (incFilters.isMajor)    {                                       parts.push(`${c('"is_major"')} = true`); }
+    if (incFilters.teamId)     { params.push(incFilters.teamId);     parts.push(`${c('"team_id"')} = $${offset + params.length}`); }
+    if (incFilters.assigneeId) { params.push(incFilters.assigneeId); parts.push(`${c('"assigned_to_id"')} = $${offset + params.length}`); }
+    return { frag: parts.length ? " AND " + parts.join(" AND ") : "", params };
+  }
+
+  function buildWhere(): Record<string, unknown> {
+    const w: Record<string, unknown> = { createdAt: { gte: since, lte: until } };
+    if (incFilters.priority)   w.priority   = incFilters.priority;
+    if (incFilters.status)     w.status     = incFilters.status;
+    if (incFilters.isMajor)    w.isMajor    = true;
+    if (incFilters.teamId)     w.teamId     = incFilters.teamId;
+    if (incFilters.assigneeId) w.assignedToId = incFilters.assigneeId;
+    return w;
+  }
+
   interface IncidentStatsRow {
     total: bigint;
     majorCount: bigint;
@@ -526,10 +716,13 @@ router.get("/incidents", async (req, res) => {
     mttr: number | null;
   }
 
+  const f1 = buildSql("", 2);
+  const f2 = buildSql("i", 2);
+
   // Single-pass aggregate for the scalar KPIs + daily volume — all four queries
   // run in parallel and the daily volume is computed entirely in SQL.
   const [statsRows, byStatusRaw, byPriorityRaw, volumeRows] = await Promise.all([
-    prisma.$queryRaw<IncidentStatsRow[]>`
+    prisma.$queryRawUnsafe<IncidentStatsRow[]>(`
       SELECT
         COUNT(*)                                                              AS total,
         COUNT(*) FILTER (WHERE "is_major" = true)                           AS "majorCount",
@@ -539,15 +732,15 @@ router.get("/incidents", async (req, res) => {
         ROUND(AVG(EXTRACT(EPOCH FROM ("resolved_at"    - "createdAt")))
               FILTER (WHERE "resolved_at" IS NOT NULL
                         AND status IN ('resolved','closed')))::int           AS mttr
-      FROM incident WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
-    `,
-    prisma.incident.groupBy({ by: ["status"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
-    prisma.incident.groupBy({ by: ["priority"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
-    prisma.$queryRaw<{ date: string; count: bigint }[]>`
+      FROM incident WHERE "createdAt" >= $1 AND "createdAt" <= $2${f1.frag}
+    `, since, until, ...f1.params),
+    prisma.incident.groupBy({ by: ["status"],   where: buildWhere(), _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
+    prisma.incident.groupBy({ by: ["priority"], where: buildWhere(), _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
+    prisma.$queryRawUnsafe<{ date: string; count: bigint }[]>(`
       WITH days AS (
         SELECT generate_series(
-          ${since}::timestamp,
-          ${until}::timestamp,
+          $1::timestamp,
+          $2::timestamp,
           '1 day'::interval
         )::date AS day
       )
@@ -557,11 +750,11 @@ router.get("/incidents", async (req, res) => {
       FROM days d
       LEFT JOIN incident i
         ON i."createdAt"::date = d.day
-       AND i."createdAt" >= ${since}
-       AND i."createdAt" <= ${until}
+       AND i."createdAt" >= $1
+       AND i."createdAt" <= $2${f2.frag}
       GROUP BY d.day
       ORDER BY d.day
-    `,
+    `, since, until, ...f2.params),
   ]);
 
   const volume = volumeRows.map(r => ({ date: r.date, count: Number(r.count) }));
@@ -589,6 +782,31 @@ router.get("/incidents", async (req, res) => {
 router.get("/requests", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
+  // ── Service-request-domain filters ──────────────────────────────────────
+  const q = req.query as Record<string, unknown>;
+  const rf = {
+    status:        typeof q.requestStatus === "string" && q.requestStatus ? q.requestStatus : undefined,
+    priority:      typeof q.priority      === "string" && q.priority      ? q.priority      : undefined,
+    assigneeId:    typeof q.assigneeId    === "string" && q.assigneeId    ? q.assigneeId    : undefined,
+    teamId:        typeof q.teamId === "string" && q.teamId ? Number(q.teamId) : undefined,
+    catalogItemId: typeof q.catalogItemId === "string" && q.catalogItemId ? Number(q.catalogItemId) : undefined,
+  };
+
+  // Filters apply only to columns that the unified_requests CTE projects
+  // (status, priority, assigned_to_id). Team and catalog-item filters are
+  // accepted in the URL for the request page but ignored here until the CTE
+  // is extended to expose those columns.
+  void rf.teamId;        // intentionally unused — CTE doesn't project team_id
+  void rf.catalogItemId; // intentionally unused — CTE doesn't project catalog_item_id
+  function rSql(offset = 2): { frag: string; params: unknown[] } {
+    const parts: string[] = [];
+    const params: unknown[] = [];
+    if (rf.status)        { params.push(rf.status);        parts.push(`status         = $${offset + params.length}`); }
+    if (rf.priority)      { params.push(rf.priority);      parts.push(`priority       = $${offset + params.length}`); }
+    if (rf.assigneeId)    { params.push(rf.assigneeId);    parts.push(`assigned_to_id = $${offset + params.length}`); }
+    return { frag: parts.length ? " AND " + parts.join(" AND ") : "", params };
+  }
+
   // Aggregates BOTH standalone service_request rows AND ticket rows
   // typed as 'service_request' via the unified_requests CTE. See
   // lib/analytics/request-source.ts for the schema projection.
@@ -603,6 +821,8 @@ router.get("/requests", async (req, res) => {
   interface ByStatusRow  { status: string; count: bigint }
   interface TopItemRow   { name: string; count: bigint; avgSeconds: number | null }
 
+  const f1 = rSql(2);
+
   const [statsRows, byStatusRaw, topItemsRaw] = await Promise.all([
     prisma.$queryRawUnsafe<RequestStatsRow[]>(
       `WITH ${REQUEST_UNION_CTE}
@@ -616,16 +836,16 @@ router.get("/requests", async (req, res) => {
               FILTER (WHERE resolved_at IS NOT NULL AND resolved_at >= created_at))::int
                                                                            AS "avgFulfillmentSeconds"
        FROM unified_requests
-       WHERE created_at >= $1 AND created_at <= $2`,
-      since, until,
+       WHERE created_at >= $1 AND created_at <= $2${f1.frag}`,
+      since, until, ...f1.params,
     ),
     prisma.$queryRawUnsafe<ByStatusRow[]>(
       `WITH ${REQUEST_UNION_CTE}
        SELECT COALESCE(status,'unknown') AS status, COUNT(*) AS count
        FROM unified_requests
-       WHERE created_at >= $1 AND created_at <= $2
+       WHERE created_at >= $1 AND created_at <= $2${f1.frag}
        GROUP BY status ORDER BY count DESC`,
-      since, until,
+      since, until, ...f1.params,
     ),
     prisma.$queryRawUnsafe<TopItemRow[]>(
       `WITH ${REQUEST_UNION_CTE}
@@ -634,9 +854,9 @@ router.get("/requests", async (req, res) => {
               ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)))
                    FILTER (WHERE resolved_at IS NOT NULL AND resolved_at >= created_at))::int AS "avgSeconds"
        FROM unified_requests
-       WHERE created_at >= $1 AND created_at <= $2
+       WHERE created_at >= $1 AND created_at <= $2${f1.frag}
        GROUP BY catalog_item ORDER BY count DESC LIMIT 8`,
-      since, until,
+      since, until, ...f1.params,
     ),
   ]);
 
@@ -666,11 +886,39 @@ router.get("/requests", async (req, res) => {
 router.get("/problems", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
+  // ── Problem-domain filters ──────────────────────────────────────────────
+  const q = req.query as Record<string, unknown>;
+  const pf = {
+    status:       typeof q.problemStatus === "string" && q.problemStatus ? q.problemStatus : undefined,
+    priority:     typeof q.priority      === "string" && q.priority      ? q.priority      : undefined,
+    isKnownError: q.isKnownError === "true",
+    assigneeId:   typeof q.assigneeId    === "string" && q.assigneeId    ? q.assigneeId    : undefined,
+  };
+
+  function pSql(alias = "", offset = 2): { frag: string; params: unknown[] } {
+    const parts: string[] = [];
+    const params: unknown[] = [];
+    const c = (col: string) => alias ? `${alias}.${col}` : col;
+    if (pf.status)       { params.push(pf.status);       parts.push(`${c('status')}::text     = $${offset + params.length}`); }
+    if (pf.priority)     { params.push(pf.priority);     parts.push(`${c('priority')}::text   = $${offset + params.length}`); }
+    if (pf.isKnownError) {                                 parts.push(`${c('"is_known_error"')} = true`); }
+    if (pf.assigneeId)   { params.push(pf.assigneeId);   parts.push(`${c('"assigned_to_id"')} = $${offset + params.length}`); }
+    return { frag: parts.length ? " AND " + parts.join(" AND ") : "", params };
+  }
+  const pWhere: Record<string, unknown> = { createdAt: { gte: since, lte: until } };
+  if (pf.status)       pWhere.status       = pf.status;
+  if (pf.priority)     pWhere.priority     = pf.priority;
+  if (pf.isKnownError) pWhere.isKnownError = true;
+  if (pf.assigneeId)   pWhere.assignedToId = pf.assigneeId;
+
   interface ProblemStatsRow { total: bigint; knownErrors: bigint; avgResolutionDays: number | null; }
   interface RecurrenceRow { problemId: number; linkedCount: bigint; }
 
+  const f1 = pSql("", 2);
+  const f2 = pSql("p", 2);
+
   const [statsRows, byStatusRaw, recurrenceRaw] = await Promise.all([
-    prisma.$queryRaw<ProblemStatsRow[]>`
+    prisma.$queryRawUnsafe<ProblemStatsRow[]>(`
       SELECT
         COUNT(*)                                                           AS total,
         COUNT(*) FILTER (WHERE "is_known_error" = true)                   AS "knownErrors",
@@ -678,16 +926,16 @@ router.get("/problems", async (req, res) => {
           COALESCE("resolved_at","closed_at") - "createdAt"
         )) / 86400.0) FILTER (WHERE COALESCE("resolved_at","closed_at") IS NOT NULL), 1)
                                                                            AS "avgResolutionDays"
-      FROM problem WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
-    `,
-    prisma.problem.groupBy({ by: ["status"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
-    prisma.$queryRaw<RecurrenceRow[]>`
+      FROM problem WHERE "createdAt" >= $1 AND "createdAt" <= $2${f1.frag}
+    `, since, until, ...f1.params),
+    prisma.problem.groupBy({ by: ["status"], where: pWhere, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
+    prisma.$queryRawUnsafe<RecurrenceRow[]>(`
       SELECT pil."problem_id" AS "problemId", COUNT(*) AS "linkedCount"
       FROM problem_incident_link pil
       JOIN problem p ON p.id = pil."problem_id"
-      WHERE p."createdAt" >= ${since} AND p."createdAt" <= ${until}
+      WHERE p."createdAt" >= $1 AND p."createdAt" <= $2${f2.frag}
       GROUP BY pil."problem_id"
-    `,
+    `, since, until, ...f2.params),
   ]);
 
   const row = statsRows[0];
@@ -715,18 +963,39 @@ router.get("/problems", async (req, res) => {
 router.get("/approvals", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
+  // ── Approval-domain filters ─────────────────────────────────────────────
+  const q = req.query as Record<string, unknown>;
+  const af = {
+    status:       typeof q.approvalStatus === "string" && q.approvalStatus ? q.approvalStatus : undefined,
+    subjectType:  typeof q.subjectType    === "string" && q.subjectType    ? q.subjectType    : undefined,
+  };
+
+  function aSql(alias = "", offset = 2): { frag: string; params: unknown[] } {
+    const parts: string[] = [];
+    const params: unknown[] = [];
+    const c = (col: string) => alias ? `${alias}.${col}` : col;
+    if (af.status)      { params.push(af.status);      parts.push(`${c('status')}::text  = $${offset + params.length}`); }
+    if (af.subjectType) { params.push(af.subjectType); parts.push(`${c('"subject_type"')} = $${offset + params.length}`); }
+    return { frag: parts.length ? " AND " + parts.join(" AND ") : "", params };
+  }
+  const aWhere: Record<string, unknown> = { createdAt: { gte: since, lte: until } };
+  if (af.status)      aWhere.status      = af.status;
+  if (af.subjectType) aWhere.subjectType = af.subjectType;
+
   interface ApprovalStatsRow { total: bigint; avgTurnaroundSeconds: number | null; }
 
+  const f1 = aSql("", 2);
+
   const [statsRows, byStatusRaw, oldestPendingRaw] = await Promise.all([
-    prisma.$queryRaw<ApprovalStatsRow[]>`
+    prisma.$queryRawUnsafe<ApprovalStatsRow[]>(`
       SELECT
         COUNT(*) AS total,
         ROUND(AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")))
               FILTER (WHERE "resolvedAt" IS NOT NULL AND status IN ('approved','rejected')))::int
               AS "avgTurnaroundSeconds"
-      FROM approval_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
-    `,
-    prisma.approvalRequest.groupBy({ by: ["status"], where: { createdAt: { gte: since, lte: until } }, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
+      FROM approval_request WHERE "createdAt" >= $1 AND "createdAt" <= $2${f1.frag}
+    `, since, until, ...f1.params),
+    prisma.approvalRequest.groupBy({ by: ["status"], where: aWhere, _count: { id: true }, orderBy: { _count: { id: "desc" } } }),
     prisma.approvalRequest.findMany({
       where: { status: "pending" },
       orderBy: { createdAt: "asc" },
@@ -763,21 +1032,28 @@ router.get("/approvals", async (req, res) => {
 router.get("/csat-trend", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
+  // CSAT supports a rating filter (1-5 stars).
+  const q = req.query as Record<string, unknown>;
+  const ratingRaw = typeof q.csatRating === "string" && q.csatRating ? Number(q.csatRating) : null;
+  const rating = ratingRaw && Number.isFinite(ratingRaw) && ratingRaw >= 1 && ratingRaw <= 5 ? ratingRaw : null;
+  const ratingFrag  = rating !== null ? ` AND rating = $3` : "";
+  const ratingParams = rating !== null ? [rating] : [];
+
   interface TrendRow { day: string; avgRating: number | null; count: bigint; }
 
   // Cast the rounded NUMERIC to FLOAT8 so the JSON response is a real
   // number, not a Decimal/string. Without this, recharts couldn't plot
   // the trend line (it received `"4.67"` as a string) and a few client-
   // side reduce() math paths drifted into string concatenation.
-  const rows = await prisma.$queryRaw<TrendRow[]>`
+  const rows = await prisma.$queryRawUnsafe<TrendRow[]>(`
     SELECT
       TO_CHAR("submittedAt", 'YYYY-MM-DD')        AS day,
       ROUND(AVG(rating)::numeric, 2)::float8       AS "avgRating",
       COUNT(*)                                     AS count
     FROM csat_rating
-    WHERE "submittedAt" >= ${since} AND "submittedAt" <= ${until}
+    WHERE "submittedAt" >= $1 AND "submittedAt" <= $2${ratingFrag}
     GROUP BY day ORDER BY day
-  `;
+  `, since, until, ...ratingParams);
 
   // Coerce avgRating to number defensively in case the adapter still
   // surfaces it as a string-Decimal under some configurations.
@@ -802,17 +1078,20 @@ router.get("/csat-trend", async (req, res) => {
 
 router.get("/channel-breakdown", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+  const filters = parseTicketFilters(req.query as Record<string, unknown>);
+  const tf = ticketFilterSql(filters, "", 2);
+  const statusGuard = filters.status ? "" : "AND status NOT IN ('new', 'processing')";
 
   interface SourceRow { source: string | null; count: bigint; }
 
-  const rows = await prisma.$queryRaw<SourceRow[]>`
+  const rows = await prisma.$queryRawUnsafe<SourceRow[]>(`
     SELECT COALESCE(source, 'unknown') AS source, COUNT(*) AS count
     FROM ticket
-    WHERE status NOT IN ('new', 'processing')
-      AND "createdAt" >= ${since} AND "createdAt" <= ${until}
+    WHERE TRUE ${statusGuard}
+      AND "createdAt" >= $1 AND "createdAt" <= $2${tf.frag}
     GROUP BY source
     ORDER BY count DESC
-  `;
+  `, since, until, ...tf.params);
 
   const SOURCE_LABELS: Record<string, string> = {
     email:   "Email",
@@ -839,10 +1118,13 @@ router.get("/channel-breakdown", async (req, res) => {
 
 router.get("/resolution-distribution", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+  const filters = parseTicketFilters(req.query as Record<string, unknown>);
+  // Status filter is meaningless here — we always want resolved/closed.
+  const tf = ticketFilterSql({ ...filters, status: undefined }, "", 2);
 
   interface BucketRow { bucket: string; count: bigint; sort: bigint; }
 
-  const rows = await prisma.$queryRaw<BucketRow[]>`
+  const rows = await prisma.$queryRawUnsafe<BucketRow[]>(`
     SELECT
       CASE
         WHEN EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) < 3600   THEN '< 1 hour'
@@ -866,10 +1148,10 @@ router.get("/resolution-distribution", async (req, res) => {
     FROM ticket
     WHERE "resolvedAt" IS NOT NULL
       AND status IN ('resolved', 'closed')
-      AND "createdAt" >= ${since} AND "createdAt" <= ${until}
+      AND "createdAt" >= $1 AND "createdAt" <= $2${tf.frag}
     GROUP BY bucket, sort
     ORDER BY sort
-  `;
+  `, since, until, ...tf.params);
 
   res.json({
     buckets: rows.map(r => ({
@@ -889,6 +1171,11 @@ router.get("/resolution-distribution", async (req, res) => {
 
 router.get("/agent-leaderboard", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+  const filters = parseTicketFilters(req.query as Record<string, unknown>);
+  const tf = ticketFilterSql(filters, "t", 2);
+  const statusGuard = filters.status
+    ? ""  // user explicitly chose a status — don't double-filter
+    : `AND t.status NOT IN ('new', 'processing')`;
 
   interface LeaderRow {
     agentId:              string;
@@ -911,13 +1198,13 @@ router.get("/agent-leaderboard", async (req, res) => {
       COUNT(*) FILTER (WHERE t."slaBreached" = true)                                AS "slaBreached"
     FROM ticket t
     JOIN "user" u ON u.id = t."assignedToId"
-    WHERE t.status NOT IN ('new', 'processing')
-      AND t."assignedToId" IS NOT NULL
-      AND t."createdAt" >= $1 AND t."createdAt" <= $2
+    WHERE t."assignedToId" IS NOT NULL
+      ${statusGuard}
+      AND t."createdAt" >= $1 AND t."createdAt" <= $2${tf.frag}
     GROUP BY t."assignedToId", u.name
     ORDER BY resolved DESC, "agentName" ASC
     LIMIT 10
-  `, since, until);
+  `, since, until, ...tf.params);
 
   res.json({
     agents: rows.map(r => {
@@ -945,28 +1232,33 @@ router.get("/agent-leaderboard", async (req, res) => {
 
 router.get("/backlog-trend", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+  const filters = parseTicketFilters(req.query as Record<string, unknown>);
+  // Filters apply to both halves of the UNION — opened and closed events
+  // should be drawn from the same filtered ticket population.
+  const tf = ticketFilterSql(filters, "", 2);
+  const statusGuard = filters.status ? "" : "AND status NOT IN ('new','processing')";
 
   interface BacklogRow { date: string; opened: bigint; closed: bigint; }
 
-  const rows = await prisma.$queryRaw<BacklogRow[]>`
+  const rows = await prisma.$queryRawUnsafe<BacklogRow[]>(`
     WITH days AS (
       SELECT generate_series(
-        ${since}::timestamp,
-        ${until}::timestamp,
+        $1::timestamp,
+        $2::timestamp,
         '1 day'::interval
       )::date AS day
     ),
     events AS (
       SELECT "createdAt"::date  AS day, 1 AS opened, 0 AS closed
       FROM ticket
-      WHERE status NOT IN ('new','processing')
-        AND "createdAt" >= ${since} AND "createdAt" <= ${until}
+      WHERE TRUE ${statusGuard}
+        AND "createdAt" >= $1 AND "createdAt" <= $2${tf.frag}
       UNION ALL
       SELECT "resolvedAt"::date AS day, 0 AS opened, 1 AS closed
       FROM ticket
       WHERE "resolvedAt" IS NOT NULL
-        AND status IN ('resolved','closed')
-        AND "resolvedAt" >= ${since} AND "resolvedAt" <= ${until}
+        ${filters.status ? "" : "AND status IN ('resolved','closed')"}
+        AND "resolvedAt" >= $1 AND "resolvedAt" <= $2${tf.frag}
     )
     SELECT
       TO_CHAR(d.day, 'YYYY-MM-DD') AS date,
@@ -976,7 +1268,7 @@ router.get("/backlog-trend", async (req, res) => {
     LEFT JOIN events e ON e.day = d.day
     GROUP BY d.day
     ORDER BY d.day
-  `;
+  `, since, until, ...tf.params);
 
   res.json({
     data: rows.map(r => ({
@@ -997,10 +1289,15 @@ router.get("/backlog-trend", async (req, res) => {
 
 router.get("/fcr", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
+  const filters = parseTicketFilters(req.query as Record<string, unknown>);
+  // FCR is intrinsically about resolved/closed tickets — keep that constraint
+  // even when the user has set an explicit status filter; the metric loses
+  // meaning otherwise.
+  const tf = ticketFilterSql({ ...filters, status: undefined }, "t", 2);
 
   interface FcrRow { total: bigint; firstContact: bigint; }
 
-  const rows = await prisma.$queryRaw<FcrRow[]>`
+  const rows = await prisma.$queryRawUnsafe<FcrRow[]>(`
     WITH customer_replies AS (
       SELECT "ticketId",
         COUNT(*) FILTER (WHERE "senderType" = 'customer') AS customer_reply_count
@@ -1013,8 +1310,8 @@ router.get("/fcr", async (req, res) => {
     FROM ticket t
     LEFT JOIN customer_replies cr ON cr."ticketId" = t.id
     WHERE t.status IN ('resolved', 'closed')
-      AND t."createdAt" >= ${since} AND t."createdAt" <= ${until}
-  `;
+      AND t."createdAt" >= $1 AND t."createdAt" <= $2${tf.frag}
+  `, since, until, ...tf.params);
 
   const row = rows[0];
   const total        = Number(row?.total ?? 0);
@@ -1035,7 +1332,12 @@ router.get("/fcr", async (req, res) => {
 // The 10 longest-waiting open tickets — no date filter, always a live snapshot.
 // Useful for spotting tickets that have been overlooked.
 
-router.get("/top-open-tickets", async (_req, res) => {
+router.get("/top-open-tickets", async (req, res) => {
+  // Filters apply but status is hard-coded to 'open' since the panel is
+  // by definition about open tickets — ignore any user-supplied status.
+  const filters = parseTicketFilters(req.query as Record<string, unknown>);
+  const tf = ticketFilterSql({ ...filters, status: undefined }, "t", 0);
+
   interface OpenTicketRow {
     id:               number;
     ticketNumber:     string;
@@ -1047,7 +1349,7 @@ router.get("/top-open-tickets", async (_req, res) => {
     assigneeName:     string;
   }
 
-  const rows = await prisma.$queryRaw<OpenTicketRow[]>`
+  const rows = await prisma.$queryRawUnsafe<OpenTicketRow[]>(`
     SELECT
       t.id,
       t.ticket_number                         AS "ticketNumber",
@@ -1059,10 +1361,10 @@ router.get("/top-open-tickets", async (_req, res) => {
       COALESCE(u.name, 'Unassigned')          AS "assigneeName"
     FROM ticket t
     LEFT JOIN "user" u ON u.id = t."assignedToId"
-    WHERE t.status = 'open'
+    WHERE t.status = 'open'${tf.frag}
     ORDER BY t."createdAt" ASC
     LIMIT 10
-  `;
+  `, ...tf.params);
 
   const now = Date.now();
   res.json({
@@ -1090,6 +1392,26 @@ router.get("/top-open-tickets", async (_req, res) => {
 router.get("/changes", async (req, res) => {
   const { since, until } = resolveDateWindow(req.query as Record<string, unknown>);
 
+  // ── Change-domain filters ───────────────────────────────────────────────
+  const q = req.query as Record<string, unknown>;
+  const cf = {
+    changeType:  typeof q.changeType  === "string" && q.changeType  ? q.changeType  : undefined,
+    risk:        typeof q.changeRisk  === "string" && q.changeRisk  ? q.changeRisk  : undefined,
+    state:       typeof q.changeState === "string" && q.changeState ? q.changeState : undefined,
+    assigneeId:  typeof q.assigneeId  === "string" && q.assigneeId  ? q.assigneeId  : undefined,
+  };
+
+  function buildSql(alias = "", offset = 2): { frag: string; params: unknown[] } {
+    const parts: string[] = [];
+    const params: unknown[] = [];
+    const c = (col: string) => alias ? `${alias}.${col}` : col;
+    if (cf.changeType) { params.push(cf.changeType); parts.push(`${c('change_type')}::text = $${offset + params.length}`); }
+    if (cf.risk)       { params.push(cf.risk);       parts.push(`${c('risk')}::text       = $${offset + params.length}`); }
+    if (cf.state)      { params.push(cf.state);      parts.push(`${c('state')}::text      = $${offset + params.length}`); }
+    if (cf.assigneeId) { params.push(cf.assigneeId); parts.push(`${c('"assigned_to_id"')} = $${offset + params.length}`); }
+    return { frag: parts.length ? " AND " + parts.join(" AND ") : "", params };
+  }
+
   interface ChangeStatsRow {
     total:          bigint;
     failed:         bigint;
@@ -1097,8 +1419,11 @@ router.get("/changes", async (req, res) => {
     avgApprovalSec: number | null;
   }
 
+  const f1 = buildSql("c", 2);
+  const f2 = buildSql("",  2);
+
   const [statsRows, byStateRaw, byTypeRaw, byRiskRaw, changeDates] = await Promise.all([
-    prisma.$queryRaw<ChangeStatsRow[]>`
+    prisma.$queryRawUnsafe<ChangeStatsRow[]>(`
       SELECT
         COUNT(*)                                                              AS total,
         COUNT(*) FILTER (WHERE c.state = 'failed')                          AS failed,
@@ -1108,27 +1433,27 @@ router.get("/changes", async (req, res) => {
       FROM change_request c
       LEFT JOIN approval_request ar
         ON ar.subject_type = 'change_request' AND ar.subject_id = c.id::text
-      WHERE c."createdAt" >= ${since} AND c."createdAt" <= ${until}
-    `,
-    prisma.$queryRaw<{ state: string; count: bigint }[]>`
+      WHERE c."createdAt" >= $1 AND c."createdAt" <= $2${f1.frag}
+    `, since, until, ...f1.params),
+    prisma.$queryRawUnsafe<{ state: string; count: bigint }[]>(`
       SELECT COALESCE(state::text,'unknown') AS state, COUNT(*) AS count
-      FROM change_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+      FROM change_request WHERE "createdAt" >= $1 AND "createdAt" <= $2${f2.frag}
       GROUP BY state ORDER BY count DESC
-    `,
-    prisma.$queryRaw<{ change_type: string; count: bigint }[]>`
+    `, since, until, ...f2.params),
+    prisma.$queryRawUnsafe<{ change_type: string; count: bigint }[]>(`
       SELECT COALESCE(change_type::text,'unknown') AS change_type, COUNT(*) AS count
-      FROM change_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+      FROM change_request WHERE "createdAt" >= $1 AND "createdAt" <= $2${f2.frag}
       GROUP BY change_type ORDER BY count DESC
-    `,
-    prisma.$queryRaw<{ risk: string; count: bigint }[]>`
+    `, since, until, ...f2.params),
+    prisma.$queryRawUnsafe<{ risk: string; count: bigint }[]>(`
       SELECT COALESCE(risk::text,'unset') AS risk, COUNT(*) AS count
-      FROM change_request WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
+      FROM change_request WHERE "createdAt" >= $1 AND "createdAt" <= $2${f2.frag}
       GROUP BY risk ORDER BY count DESC
-    `,
-    prisma.$queryRaw<{ createdAt: Date }[]>`
+    `, since, until, ...f2.params),
+    prisma.$queryRawUnsafe<{ createdAt: Date }[]>(`
       SELECT "createdAt" FROM change_request
-      WHERE "createdAt" >= ${since} AND "createdAt" <= ${until}
-    `,
+      WHERE "createdAt" >= $1 AND "createdAt" <= $2${f2.frag}
+    `, since, until, ...f2.params),
   ]);
 
   const row   = statsRows[0];

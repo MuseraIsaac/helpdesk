@@ -15,6 +15,7 @@ import { ticketPriorities, priorityLabel } from "core/constants/ticket-priority.
 import { ticketSeverities, severityLabel } from "core/constants/ticket-severity.ts";
 import { ticketImpacts, impactLabel } from "core/constants/ticket-impact.ts";
 import { ticketUrgencies, urgencyLabel } from "core/constants/ticket-urgency.ts";
+import { INTAKE_CHANNELS, CHANNEL_LABEL, CHANNEL_ICON } from "core/constants/channel.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -908,6 +909,30 @@ export default function NewTicketPage() {
                         className="h-10 text-sm font-medium"
                       />
                       {errors.subject && <ErrorMessage message={errors.subject.message} />}
+                    </div>
+                  )}
+
+                  {/* Source / Channel */}
+                  {cfg.visible("source") && (
+                    <div className="space-y-1.5">
+                      <FieldLabel required={cfg.required("source")}>
+                        {cfg.label("source")}
+                      </FieldLabel>
+                      <Controller
+                        name="source"
+                        control={control}
+                        render={({ field }) => (
+                          <SearchableSelect
+                            value={field.value ?? "agent"}
+                            onChange={(v) => field.onChange(v)}
+                            placeholder={cfg.placeholder("source") || "Select channel"}
+                            options={INTAKE_CHANNELS.map((c) => ({
+                              value: c,
+                              label: `${CHANNEL_ICON[c]} ${CHANNEL_LABEL[c]}`,
+                            }))}
+                          />
+                        )}
+                      />
                     </div>
                   )}
 

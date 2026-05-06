@@ -19,6 +19,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ShareReportEmailDialog from "@/components/reports/ShareReportEmailDialog";
+import ReportFiltersBar, { SECTION_FILTERS } from "@/components/reports/ReportFiltersBar";
 import { usePrintReport } from "@/hooks/usePrintReport";
 import { cn } from "@/lib/utils";
 
@@ -85,6 +86,21 @@ export default function ReportsLayout() {
     ? `period=custom&from=${customFrom}&to=${customTo}`
     : `period=${period}`;
 
+  /**
+   * Build the QS for tab navigation: keep period + any filters the *target*
+   * tab supports. Drops filters the next section doesn't recognise so the URL
+   * doesn't accumulate stale params as the user pivots between sections.
+   */
+  function buildNavQs(targetSection: string): string {
+    const supported = new Set(SECTION_FILTERS[targetSection] ?? []);
+    const params = new URLSearchParams(periodQs);
+    for (const filterId of supported) {
+      const value = searchParams.get(filterId);
+      if (value) params.set(filterId, value);
+    }
+    return params.toString();
+  }
+
   const activeNav     = NAV_ITEMS.find(n => pathname === `/reports/${n.section}`);
   const activeSection = activeNav?.section ?? "overview";
 
@@ -106,19 +122,22 @@ export default function ReportsLayout() {
     return map[period] ?? `Last ${period} days`;
   }
 
-  /** Collect active dimension filters from the current URL search params */
+  /**
+   * Collect active dimension filters from the current URL search params.
+   *
+   * Only forwards the keys the export endpoint currently understands. Other
+   * section-specific filters (incidentPriority, changeRisk, etc.) are
+   * preserved in the URL so deep-links keep them, but stay client-side only
+   * until Stage 2 lifts them into the server schema.
+   */
   function buildActiveFilters() {
+    const supportedByExport = ["priority", "category", "teamId", "assigneeId", "status"] as const;
     const f: Record<string, string | number> = {};
-    const priority   = searchParams.get("priority");
-    const category   = searchParams.get("category");
-    const teamId     = searchParams.get("teamId");
-    const assigneeId = searchParams.get("assigneeId");
-    const status     = searchParams.get("status");
-    if (priority)   f.priority   = priority;
-    if (category)   f.category   = category;
-    if (teamId)     f.teamId     = Number(teamId);
-    if (assigneeId) f.assigneeId = assigneeId;
-    if (status)     f.status     = status;
+    for (const key of supportedByExport) {
+      const v = searchParams.get(key);
+      if (!v) continue;
+      f[key] = key === "teamId" ? Number(v) : v;
+    }
     return Object.keys(f).length > 0 ? f : undefined;
   }
 
@@ -299,7 +318,7 @@ export default function ReportsLayout() {
               return (
                 <Link
                   key={section}
-                  to={`/reports/${section}?${periodQs}`}
+                  to={`/reports/${section}?${buildNavQs(section)}`}
                   className={cn(
                     "inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-medium whitespace-nowrap",
                     "border-b-2 transition-all duration-150",
@@ -316,6 +335,9 @@ export default function ReportsLayout() {
           </nav>
 
         </div>
+
+        {/* ── Per-section filter bar ─────────────────────────────────────── */}
+        <ReportFiltersBar section={activeSection} />
       </div>
 
       {/* ── Content ───────────────────────────────────────────────────────── */}

@@ -12,6 +12,7 @@ import KpiCard from "@/components/reports/KpiCard";
 import ChartCard from "@/components/reports/ChartCard";
 import ReportLoading from "@/components/reports/ReportLoading";
 import { fetchProblemReport } from "@/lib/reports/api";
+import { useReportBag } from "@/lib/reports/useReportFilters";
 
 const STATUS_LABELS: Record<string, string> = {
   open:          "Open",
@@ -25,9 +26,11 @@ export default function ProblemsReport() {
   const [searchParams] = useSearchParams();
   const period = searchParams.get("period") ?? "30";
 
+  const bag = useReportBag("problemStatus", "priority", "isKnownError", "assigneeId");
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ["reports", "problems", period],
-    queryFn: () => fetchProblemReport(period),
+    queryKey: ["reports", "problems", period, bag],
+    queryFn: () => fetchProblemReport(period, bag),
   });
 
   if (isLoading) return <ReportLoading kpiCount={4} chartCount={1} />;

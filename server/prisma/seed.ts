@@ -135,9 +135,10 @@ async function main() {
             { id: "w_sdo_t2",  metricId: "tickets.backlog",               visualization: "area",           limit: 50, compareWithPrevious: false, x: 0, y: 7,  w: 8, h: 3 },
             { id: "w_sdo_d2",  metricId: "tickets.status_distribution",   visualization: "donut",          limit: 10, compareWithPrevious: false, x: 8, y: 7,  w: 4, h: 3 },
             // Breakdowns
-            { id: "w_sdo_b1",  metricId: "tickets.aging",                 visualization: "histogram",      limit: 10, compareWithPrevious: false, x: 0, y: 10, w: 4, h: 4 },
-            { id: "w_sdo_b2",  metricId: "tickets.by_team",               visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 4, y: 10, w: 4, h: 4 },
-            { id: "w_sdo_b3",  metricId: "tickets.by_agent",              visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 8, y: 10, w: 4, h: 4 },
+            { id: "w_sdo_b1",  metricId: "tickets.aging",                 visualization: "histogram",      limit: 10, compareWithPrevious: false, x: 0, y: 10, w: 3, h: 4 },
+            { id: "w_sdo_b2",  metricId: "tickets.by_team",               visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 3, y: 10, w: 3, h: 4 },
+            { id: "w_sdo_b3",  metricId: "tickets.by_agent",              visualization: "bar_horizontal", limit: 10, compareWithPrevious: false, x: 6, y: 10, w: 3, h: 4 },
+            { id: "w_sdo_b4",  metricId: "tickets.by_source",             visualization: "donut",          limit: 10, compareWithPrevious: false, x: 9, y: 10, w: 3, h: 4 },
             // Operational table
             { id: "w_sdo_tbl", metricId: "tickets.top_open",              visualization: "table",          limit: 10, compareWithPrevious: false, x: 0, y: 14, w: 12, h: 4 },
           ],

@@ -12,6 +12,7 @@ import KpiCard from "@/components/reports/KpiCard";
 import ChartCard from "@/components/reports/ChartCard";
 import ReportLoading from "@/components/reports/ReportLoading";
 import { fetchChangeReport } from "@/lib/reports/api";
+import { useReportBag } from "@/lib/reports/useReportFilters";
 import { fmtDuration, fmtPct, fmtDay, xInterval, complianceClass } from "@/lib/reports/utils";
 
 const STATE_LABELS: Record<string, string> = {
@@ -45,9 +46,11 @@ export default function ChangesReport() {
   const [searchParams] = useSearchParams();
   const period = searchParams.get("period") ?? "30";
 
+  const bag = useReportBag("changeType", "changeRisk", "changeState", "assigneeId");
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ["reports", "changes", period],
-    queryFn: () => fetchChangeReport(period),
+    queryKey: ["reports", "changes", period, bag],
+    queryFn: () => fetchChangeReport(period, bag),
   });
 
   if (isLoading) return <ReportLoading kpiCount={4} chartCount={3} />;

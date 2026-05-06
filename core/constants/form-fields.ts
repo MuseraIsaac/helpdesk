@@ -50,6 +50,7 @@ export interface FieldDef {
 const TICKET_FIELDS: FieldDef[] = [
   // Section: Ticket Details
   { key: "ticketType",      label: "Ticket Type",      placeholder: "Generic (untyped)",                         type: "select",   required: false, width: "half", section: "Ticket Details",         order: 10 },
+  { key: "source",          label: "Source / Channel", placeholder: "Select channel",                            type: "select",   required: false, width: "half", section: "Ticket Details",         order: 15, description: "How this ticket arrived (Email, Portal, Voice, etc.). Defaults to Agent when not set." },
   { key: "subject",         label: "Subject",           placeholder: "Brief summary of the issue",               type: "text",     required: true,  width: "full", section: "Ticket Details",         order: 20 },
   { key: "affectedSystem",  label: "Affected System",   placeholder: "e.g. Payment gateway, Login service",      type: "text",     required: false, width: "full", section: "Ticket Details",         order: 30, description: "Only shown when Ticket Type is Incident." },
   // Section: Requester

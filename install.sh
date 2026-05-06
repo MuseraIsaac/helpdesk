@@ -582,7 +582,71 @@ phase_health() {
   log "$healthy/$REPLICAS replicas healthy"
 }
 
-# ── 3.13 Update helper script ──────────────────────────────────────────────
+# ── 3.13 TLS cert renewal watchdog ─────────────────────────────────────────
+# Caddy auto-renews via its internal maintenance loop (runs every 10 min,
+# triggers ~30 days before expiry). This watchdog is a belt-and-suspenders
+# daily check: if the live cert ever drops below the warning thresholds we
+# log to journald and (at <7 days) bounce Caddy to nudge a fresh renewal.
+phase_cert_watchdog() {
+  log "Installing TLS cert renewal watchdog"
+  install -d /opt/zentra/scripts
+  cat > /opt/zentra/scripts/cert-watchdog.sh <<'EOF'
+#!/usr/bin/env bash
+# zentra cert watchdog — runs daily via systemd timer.
+# Logs cert health to journald; restarts Caddy if cert is < 7 days from expiry.
+set -Eeo pipefail
+DOMAIN="${1:?usage: $0 <domain>}"
+NOW=$(date +%s)
+EXPIRY=$(echo | openssl s_client -servername "$DOMAIN" -connect 127.0.0.1:443 2>/dev/null \
+  | openssl x509 -noout -enddate 2>/dev/null | sed 's/notAfter=//')
+if [[ -z "$EXPIRY" ]]; then
+  logger -t zentra-cert -p user.err "FAIL: could not read cert for $DOMAIN"
+  exit 1
+fi
+EXPIRY_TS=$(date -d "$EXPIRY" +%s)
+DAYS_LEFT=$(( (EXPIRY_TS - NOW) / 86400 ))
+if   (( DAYS_LEFT <  7 )); then
+  logger -t zentra-cert -p user.crit "CRIT: $DOMAIN cert expires in ${DAYS_LEFT}d — restarting Caddy to force renewal"
+  systemctl restart caddy
+elif (( DAYS_LEFT < 14 )); then
+  logger -t zentra-cert -p user.warning "WARN: $DOMAIN cert expires in ${DAYS_LEFT}d (Caddy should auto-renew at ~30d)"
+else
+  logger -t zentra-cert -p user.info  "OK: $DOMAIN cert valid for ${DAYS_LEFT}d"
+fi
+EOF
+  chmod +x /opt/zentra/scripts/cert-watchdog.sh
+
+  cat > /etc/systemd/system/zentra-cert-watchdog.service <<EOF
+[Unit]
+Description=Zentra TLS cert health check
+After=caddy.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/zentra/scripts/cert-watchdog.sh $DOMAIN
+EOF
+
+  cat > /etc/systemd/system/zentra-cert-watchdog.timer <<'EOF'
+[Unit]
+Description=Run Zentra TLS cert watchdog daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+Unit=zentra-cert-watchdog.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now zentra-cert-watchdog.timer
+  # Run once immediately so we get a baseline log line on every install/upgrade.
+  systemctl start zentra-cert-watchdog.service || true
+}
+
+# ── 3.14 Update helper script ──────────────────────────────────────────────
 phase_update_script() {
   log "Installing update helper at $APP_DIR/scripts/update.sh"
   install -d -o "$APP_USER" -g "$APP_GROUP" "$APP_DIR/scripts"
@@ -636,6 +700,8 @@ phase_summary() {
 ║    Caddy logs : journalctl -u caddy -f
 ║    Restart    : sudo systemctl restart '${SERVICE_PREFIX}@*'
 ║    Update     : sudo bash $APP_DIR/scripts/update.sh
+║    Cert check : sudo systemctl start zentra-cert-watchdog.service
+║    Cert log   : journalctl -t zentra-cert -n 30
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 If https://$DOMAIN doesn't load within ~60 seconds, Caddy is still negotiating
@@ -662,6 +728,7 @@ main() {
   phase_caddy
   phase_firewall
   phase_health
+  phase_cert_watchdog
   phase_update_script
   phase_summary
 }

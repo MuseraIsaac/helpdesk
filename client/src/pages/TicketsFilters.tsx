@@ -14,6 +14,7 @@ import { ticketTypes, ticketTypeLabel } from "core/constants/ticket-type.ts";
 import { categoryLabel } from "core/constants/ticket-category.ts";
 import { ticketPriorities, priorityLabel } from "core/constants/ticket-priority.ts";
 import { ticketSeverities, severityShortLabel } from "core/constants/ticket-severity.ts";
+import { INTAKE_CHANNELS, CHANNEL_LABEL, CHANNEL_ICON } from "core/constants/channel.ts";
 import type { TicketFilters } from "./TicketsPage";
 
 interface Team {
@@ -212,6 +213,28 @@ export default function TicketsFilters({ filters, onChange }: TicketsFiltersProp
           <SelectItem value="general_question">{categoryLabel.general_question}</SelectItem>
           <SelectItem value="technical_question">{categoryLabel.technical_question}</SelectItem>
           <SelectItem value="refund_request">{categoryLabel.refund_request}</SelectItem>
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={singleVal(filters.source)}
+        onValueChange={(value) =>
+          onChange({ ...filters, source: value === ALL ? undefined : value })
+        }
+      >
+        <SelectTrigger className="w-[160px]">
+          <SelectValue placeholder="All channels" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>All channels</SelectItem>
+          {INTAKE_CHANNELS.map((c) => (
+            <SelectItem key={c} value={c}>
+              <span className="flex items-center gap-1.5">
+                <span>{CHANNEL_ICON[c]}</span>
+                {CHANNEL_LABEL[c]}
+              </span>
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
 

@@ -13,6 +13,7 @@ import KpiCard from "@/components/reports/KpiCard";
 import ChartCard from "@/components/reports/ChartCard";
 import ReportLoading from "@/components/reports/ReportLoading";
 import { fetchApprovalReport } from "@/lib/reports/api";
+import { useReportBag } from "@/lib/reports/useReportFilters";
 import { fmtDuration } from "@/lib/reports/utils";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -35,9 +36,11 @@ export default function ApprovalsReport() {
   const [searchParams] = useSearchParams();
   const period = searchParams.get("period") ?? "30";
 
+  const bag = useReportBag("approvalStatus", "subjectType");
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ["reports", "approvals", period],
-    queryFn: () => fetchApprovalReport(period),
+    queryKey: ["reports", "approvals", period, bag],
+    queryFn: () => fetchApprovalReport(period, bag),
   });
 
   if (isLoading) return <ReportLoading kpiCount={4} chartCount={1} />;

@@ -75,6 +75,7 @@ import { agentTicketStatuses, statusLabel } from "core/constants/ticket-status.t
 import { ticketCategories, categoryLabel } from "core/constants/ticket-category.ts";
 import { ticketImpacts, impactLabel } from "core/constants/ticket-impact.ts";
 import { ticketUrgencies, urgencyLabel } from "core/constants/ticket-urgency.ts";
+import { INTAKE_CHANNELS, CHANNEL_LABEL } from "core/constants/channel.ts";
 import { incidentPriorities, incidentPriorityLabel } from "core/constants/incident-priority.ts";
 import { incidentStatuses, incidentStatusLabel } from "core/constants/incident-status.ts";
 
@@ -134,7 +135,7 @@ const STATIC_FIELD_GROUPS: FieldGroup[] = [
       { value: "urgency",        label: "Urgency",           options: ticketUrgencies.map((v) => ({ value: v, label: urgencyLabel[v] })) },
       { value: "category",       label: "Category",          options: ticketCategories.map((v) => ({ value: v, label: categoryLabel[v] })) },
       { value: "ticketType",     label: "Ticket Type",       options: ticketTypes.map((v) => ({ value: v, label: ticketTypeLabel[v] })) },
-      { value: "source",         label: "Source / Channel",  options: [{ value: "email", label: "Email" }, { value: "portal", label: "Portal" }, { value: "agent", label: "Agent (manual)" }] },
+      { value: "source",         label: "Source / Channel",  options: INTAKE_CHANNELS.map((c) => ({ value: c, label: CHANNEL_LABEL[c] })) },
       { value: "affectedSystem", label: "Affected System",   options: [], isText: true },
     ],
   },

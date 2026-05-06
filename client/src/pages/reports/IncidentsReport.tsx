@@ -11,6 +11,7 @@ import KpiCard from "@/components/reports/KpiCard";
 import ChartCard from "@/components/reports/ChartCard";
 import ReportLoading from "@/components/reports/ReportLoading";
 import { fetchIncidentReport } from "@/lib/reports/api";
+import { useReportBag } from "@/lib/reports/useReportFilters";
 import { fmtDuration, fmtPct, xInterval, fmtDay, complianceClass } from "@/lib/reports/utils";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -25,9 +26,11 @@ export default function IncidentsReport() {
   const [searchParams] = useSearchParams();
   const period = searchParams.get("period") ?? "30";
 
+  const bag = useReportBag("incidentPriority", "incidentStatus", "isMajor", "teamId", "assigneeId");
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ["reports", "incidents", period],
-    queryFn: () => fetchIncidentReport(period),
+    queryKey: ["reports", "incidents", period, bag],
+    queryFn: () => fetchIncidentReport(period, bag),
   });
 
   if (isLoading) return <ReportLoading kpiCount={5} chartCount={2} />;

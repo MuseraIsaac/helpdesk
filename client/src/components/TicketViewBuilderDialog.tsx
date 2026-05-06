@@ -39,6 +39,7 @@ import { ticketPriorities, priorityLabel }       from "core/constants/ticket-pri
 import { ticketSeverities, severityShortLabel }  from "core/constants/ticket-severity.ts";
 import { ticketImpacts, impactLabel }            from "core/constants/ticket-impact.ts";
 import { ticketUrgencies, urgencyLabel }         from "core/constants/ticket-urgency.ts";
+import { INTAKE_CHANNELS, CHANNEL_LABEL }        from "core/constants/channel.ts";
 import {
   COLUMN_IDS, COLUMN_META,
   SYSTEM_DEFAULT_VIEW_CONFIG,
@@ -179,11 +180,7 @@ function MultiSelectFilter<T, K extends string | number>({
   );
 }
 
-const SOURCE_LABELS: Record<string, string> = {
-  email:  "Email",
-  portal: "Customer Portal",
-  agent:  "Agent (manual)",
-};
+const SOURCE_LABELS: Record<string, string> = CHANNEL_LABEL;
 
 interface Props {
   open:         boolean;
@@ -657,7 +654,7 @@ export default function TicketViewBuilderDialog({ open, onOpenChange, viewToEdit
                   <Label className="text-xs font-medium text-muted-foreground">Source / Channel</Label>
                   <MultiSelectFilter
                     label="Source"
-                    options={Object.keys(SOURCE_LABELS) as ("email" | "portal" | "agent")[]}
+                    options={INTAKE_CHANNELS as unknown as string[]}
                     value={filters.source ?? []}
                     onChange={(v) => setFilter("source", v.length ? v : undefined)}
                     renderLabel={(s) => SOURCE_LABELS[s] ?? s}

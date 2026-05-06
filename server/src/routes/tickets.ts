@@ -186,7 +186,7 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
       customTicketTypeId: data.customTicketTypeId ?? null,
       organizationId: data.organizationId ?? null,
       status: "open",
-      source: "agent",
+      source: data.source ?? "agent",
       firstResponseDueAt: slaDeadlines.firstResponseDueAt,
       resolutionDueAt: slaDeadlines.resolutionDueAt,
     },
@@ -760,6 +760,7 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
     ...("severity" in data && { severity: data.severity }),
     ...("impact" in data && { impact: data.impact }),
     ...("urgency" in data && { urgency: data.urgency }),
+    ...("source" in data && { source: data.source ?? null }),
     ...("teamId" in data && { teamId: data.teamId ?? null }),
     ...("customTicketTypeId" in data && { customTicketTypeId: data.customTicketTypeId ?? null }),
     ...("customStatusId" in data && {

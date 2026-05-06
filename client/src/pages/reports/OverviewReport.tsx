@@ -20,7 +20,8 @@ import KpiCard from "@/components/reports/KpiCard";
 import type { KpiTrend } from "@/components/reports/KpiCard";
 import ChartCard from "@/components/reports/ChartCard";
 import ReportLoading from "@/components/reports/ReportLoading";
-import { fetchOverview, fetchAging, fetchTopOpenTickets, fetchBreakdowns } from "@/lib/reports/api";
+import { fetchOverview, fetchAging, fetchTopOpenTickets, fetchBreakdowns, filterKey } from "@/lib/reports/api";
+import { useReportFilters } from "@/lib/reports/useReportFilters";
 import { fmtDuration, fmtPct, complianceClass, periodToRange, rangeQS } from "@/lib/reports/utils";
 import type { ReportOverview } from "@/lib/reports/types";
 import { cn } from "@/lib/utils";
@@ -183,36 +184,38 @@ export default function OverviewReport() {
 
   const [compare, setCompare] = useState(false);
   const navigate = useNavigate();
+  const filters = useReportFilters();
+  const fk = filterKey(filters);
 
   const { data: overview, isLoading: loadingOv, error: ovErr } = useQuery({
-    queryKey: ["reports", "overview", rangeKey],
-    queryFn: () => fetchOverview(qs),
+    queryKey: ["reports", "overview", rangeKey, ...fk],
+    queryFn: () => fetchOverview(qs, filters),
     enabled: customReady,
   });
 
   const { data: aging, isLoading: loadingAging } = useQuery({
-    queryKey: ["reports", "aging"],
-    queryFn: fetchAging,
+    queryKey: ["reports", "aging", ...fk],
+    queryFn: () => fetchAging(filters),
     staleTime: 60_000,
   });
 
   const { data: topTickets, isLoading: loadingTop } = useQuery({
-    queryKey: ["reports", "top-open-tickets"],
-    queryFn: fetchTopOpenTickets,
+    queryKey: ["reports", "top-open-tickets", ...fk],
+    queryFn: () => fetchTopOpenTickets(filters),
     staleTime: 60_000,
   });
 
   const { data: breakdowns, isLoading: loadingBreakdowns } = useQuery({
-    queryKey: ["reports", "breakdowns", rangeKey],
-    queryFn: () => fetchBreakdowns(qs),
+    queryKey: ["reports", "breakdowns", rangeKey, ...fk],
+    queryFn: () => fetchBreakdowns(qs, filters),
     enabled: customReady,
     staleTime: 60_000,
   });
 
   const prevQs = buildPrevQS(period, customFrom, customTo);
   const { data: prevOverview } = useQuery<ReportOverview>({
-    queryKey: ["reports", "overview", "prev", rangeKey],
-    queryFn: () => fetchOverview(prevQs),
+    queryKey: ["reports", "overview", "prev", rangeKey, ...fk],
+    queryFn: () => fetchOverview(prevQs, filters),
     enabled: compare && customReady,
     staleTime: 120_000,
   });

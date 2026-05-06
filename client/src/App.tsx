@@ -121,6 +121,7 @@ const InsightsReport            = lazy(() => import("./pages/reports/InsightsRep
 const DemoDataPage              = lazy(() => import("./pages/DemoDataPage"));
 const TrashPage                 = lazy(() => import("./pages/TrashPage"));
 const AuditLogPage              = lazy(() => import("./pages/AuditLogPage"));
+const UpdatesPage               = lazy(() => import("./pages/UpdatesPage"));
 const DutyPlanPage              = lazy(() => import("./pages/DutyPlanPage"));
 const DutyPlanTeamPage          = lazy(() => import("./pages/DutyPlanTeamPage"));
 const DutyPlanDetailPage        = lazy(() => import("./pages/DutyPlanDetailPage"));
@@ -250,6 +251,7 @@ function App() {
             <Route path="/admin/ticket-types" element={<TicketTypesPage />} />
             <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
             <Route path="/admin/audit-log" element={<AuditLogPage />} />
+            <Route path="/admin/updates"   element={<UpdatesPage />} />
             <Route path="/admin/roles" element={<RolesPage />} />
             {/* Automation Platform */}
             <Route path="/automations" element={<AutomationPlatformPage />} />

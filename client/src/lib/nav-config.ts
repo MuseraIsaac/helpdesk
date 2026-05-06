@@ -42,6 +42,7 @@ import {
   Trash2,
   CalendarDays,
   ScrollText,
+  Package,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { can, type Permission } from "core/constants/permission.ts";
@@ -349,6 +350,12 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Audit Log",
         icon: ScrollText,
       },
+      {
+        id: "updates",
+        to: "/admin/updates",
+        label: "Updates",
+        icon: Package,
+      },
     ],
   },
 
@@ -431,6 +438,7 @@ export function resolveModuleBreadcrumb(pathname: string, role: string): string 
   if (pathname.startsWith("/organizations")) return "Contacts  ·  Organizations";
   if (pathname.startsWith("/notifications")) return "Account  ·  Notifications";
   if (pathname.startsWith("/admin/trash"))   return "Administration  ·  Trash";
+  if (pathname.startsWith("/admin/updates")) return "Administration  ·  Updates";
   if (pathname.startsWith("/demo-data"))     return "Developer  ·  Demo Data";
   return "ITSM Platform";
 }

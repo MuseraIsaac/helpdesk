@@ -87,7 +87,11 @@ import demoDataRouter from "./routes/demo-data";
 import trashRouter    from "./routes/trash";
 import auditLogRouter from "./routes/audit-log";
 import rolesRouter    from "./routes/roles";
+import updatesRouter  from "./routes/updates";
 import { startQueue, stopQueue } from "./lib/queue";
+import { recordBootVersion } from "./lib/release";
+import { ensureChannelProvisioned } from "./lib/update-channel";
+import { maintenanceMode } from "./middleware/maintenance-mode";
 import { loadRoles } from "./lib/role-cache";
 import { bootstrapMaterializedViews } from "./lib/materialized-views";
 import { getSection } from "./lib/settings";
@@ -235,6 +239,11 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// Maintenance-mode gate: when an update is mid-flight, returns 503 to all
+// non-admin /api/* traffic. Allowlists auth, /api/updates, /api/sse and
+// /api/me so admins can monitor and toggle the flag.
+app.use(maintenanceMode);
+
 app.use("/api/me", meRouter);
 app.use("/api/dashboards", dashboardsRouter);
 app.use("/api/ticket-views", ticketViewsRouter);
@@ -306,6 +315,7 @@ app.use("/api/demo-data", demoDataRouter);
 app.use("/api/trash",     trashRouter);
 app.use("/api/audit-log", auditLogRouter);
 app.use("/api/roles",     rolesRouter);
+app.use("/api/updates",   updatesRouter);
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/reports", reportsShareRouter);
 app.use("/api/reports", reportsExportRouter);
@@ -393,6 +403,19 @@ if (!process.env.WEBHOOK_SECRET) {
 async function boot() {
   await startQueue();
   await bootstrapMaterializedViews();
+
+  // Record this binary's version against the install history. Non-fatal —
+  // failures log internally and don't block boot. See lib/release.ts.
+  await recordBootVersion();
+
+  // Mint installId/secret on first boot so the release-server allowlist has
+  // something to register. Subsequent boots are no-ops.
+  try {
+    await ensureChannelProvisioned();
+  } catch (err) {
+    console.error("[update-channel] Provisioning failed:", err);
+    Sentry.captureException(err);
+  }
 
   // Load editable role definitions into the in-memory permission cache so
   // `can()` / requirePermission() reflect the DB on the very first request.

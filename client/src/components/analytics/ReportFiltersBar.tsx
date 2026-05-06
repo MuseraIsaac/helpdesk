@@ -73,10 +73,15 @@ const DIMENSIONS: Dimension[] = [
   {
     id: "source", field: "source", label: "Channel", icon: Inbox, kind: "static",
     options: [
-      { value: "email",  label: "Email" },
-      { value: "portal", label: "Portal" },
-      { value: "agent",  label: "Agent (manual)" },
-      { value: "api",    label: "API" },
+      { value: "email",       label: "Email" },
+      { value: "portal",      label: "Portal" },
+      { value: "agent",       label: "Agent (manual)" },
+      { value: "api",         label: "API" },
+      { value: "chat",        label: "Live Chat" },
+      { value: "whatsapp",    label: "WhatsApp" },
+      { value: "slack_teams", label: "Slack / Teams" },
+      { value: "voice",       label: "Voice" },
+      { value: "social",      label: "Social Media" },
     ],
   },
 ];

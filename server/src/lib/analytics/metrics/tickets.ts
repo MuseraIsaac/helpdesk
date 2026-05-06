@@ -695,6 +695,48 @@ const ticketsByAgent: MetricDefinition = {
   },
 };
 
+// ── tickets.by_source ─────────────────────────────────────────────────────────
+
+const ticketsBySource: MetricDefinition = {
+  id:    "tickets.by_source",
+  label: "Tickets by Channel",
+  description: "Breakdown of tickets by intake channel (email, portal, voice, etc.) for the selected period.",
+  domain: "tickets",
+  supportedVisualizations: ["donut", "bar", "bar_horizontal"],
+  defaultVisualization:    "donut",
+
+  computeFor: {
+    async grouped_count(ctx) {
+      const { clause, params } = ticketDateWhere(ctx);
+      interface Row { key: string | null; count: bigint }
+      const rows = await ctx.db.$queryRawUnsafe<Row[]>(
+        `SELECT COALESCE(source,'unknown') AS key, COUNT(*) AS count
+         FROM ticket ${clause}
+         GROUP BY source ORDER BY count DESC`,
+        ctx.dateRange.since, ctx.dateRange.until, ...params,
+      );
+      const SOURCE_LABELS: Record<string, string> = {
+        email:       "Email",
+        portal:      "Portal",
+        api:         "API",
+        agent:       "Agent",
+        chat:        "Live Chat",
+        whatsapp:    "WhatsApp",
+        slack_teams: "Slack / Teams",
+        voice:       "Voice",
+        social:      "Social Media",
+        unknown:     "Unknown",
+      };
+      const items = rows.map(r => ({
+        key:   r.key ?? "unknown",
+        label: SOURCE_LABELS[r.key ?? "unknown"] ?? r.key ?? "Unknown",
+        value: Number(r.count),
+      }));
+      return { type: "grouped_count", items, total: items.reduce((s, i) => s + i.value, 0) };
+    },
+  },
+};
+
 // ── tickets.overdue ───────────────────────────────────────────────────────────
 
 const ticketsOverdue: MetricDefinition = {
@@ -1156,6 +1198,7 @@ export const TICKET_METRICS: MetricDefinition[] = [
   ticketsPriorityDistribution,
   ticketsByTeam,
   ticketsByAgent,
+  ticketsBySource,
   ticketsOverdue,
   ticketsAssignedNotReplied,
   ticketsResolved,

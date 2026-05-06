@@ -16,7 +16,9 @@ import {
   fetchSlaByDimension,
   fetchAgentLeaderboard,
   fetchOperationalHealth,
+  filterKey,
 } from "@/lib/reports/api";
+import { useReportFilters } from "@/lib/reports/useReportFilters";
 import { fmtDuration, fmtPct, complianceClass } from "@/lib/reports/utils";
 import { cn } from "@/lib/utils";
 import type { SlaDimItem } from "@/lib/reports/types";
@@ -81,9 +83,12 @@ export default function SlaReport() {
   const role = session?.user?.role ?? "";
   const canViewAdvanced = can(role, "reports.advanced_view");
 
+  const filters = useReportFilters();
+  const fk = filterKey(filters);
+
   const { data: slaData, isLoading: loadingSla, error: slaErr } = useQuery({
-    queryKey: ["reports", "sla", period],
-    queryFn: () => fetchSlaByDimension(period),
+    queryKey: ["reports", "sla", period, ...fk],
+    queryFn: () => fetchSlaByDimension(period, filters),
   });
 
   const { data: health, isLoading: loadingHealth } = useQuery({
@@ -94,8 +99,8 @@ export default function SlaReport() {
   });
 
   const { data: agents, isLoading: loadingLeader } = useQuery({
-    queryKey: ["reports", "leaderboard", period],
-    queryFn: () => fetchAgentLeaderboard(period),
+    queryKey: ["reports", "leaderboard", period, ...fk],
+    queryFn: () => fetchAgentLeaderboard(period, filters),
     enabled: canViewAdvanced,
   });
 

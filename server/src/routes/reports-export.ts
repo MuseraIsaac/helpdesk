@@ -45,11 +45,17 @@ router.use(requireAuth);
 // ── Schema ────────────────────────────────────────────────────────────────────
 
 const filtersSchema = z.object({
-  priority:   z.string().optional(),
-  category:   z.string().optional(),
-  teamId:     z.coerce.number().int().positive().optional(),
-  assigneeId: z.string().optional(),
-  status:     z.string().optional(),
+  priority:       z.string().optional(),
+  category:       z.string().optional(),
+  teamId:         z.coerce.number().int().positive().optional(),
+  assigneeId:     z.string().optional(),
+  // status / ticketType accept either the system enum value or a `custom_<id>`
+  // pointer to a TicketStatusConfig / TicketTypeConfig row added by an admin.
+  // Both forms are decoded by `splitCustomFilter()` before applying.
+  status:         z.string().optional(),
+  ticketType:     z.string().optional(),
+  source:         z.string().optional(),
+  organizationId: z.coerce.number().int().positive().optional(),
 }).optional();
 
 const exportSchema = z.object({
@@ -85,14 +91,40 @@ function pct(numerator: number, denominator: number): number | null {
 
 // ── Prisma filter builders ────────────────────────────────────────────────────
 
+/**
+ * Decode a `status` / `ticketType` raw value into either a system enum or a
+ * custom config FK. The client encodes admin-added rows as `custom_<id>` so
+ * the URL/JSON payload can carry both kinds in one field.
+ */
+function splitCustomFilter(raw: string | undefined): {
+  system: string | undefined;
+  customId: number | undefined;
+} {
+  if (!raw) return { system: undefined, customId: undefined };
+  if (raw.startsWith("custom_")) {
+    const n = Number(raw.slice(7));
+    return Number.isFinite(n) && n > 0
+      ? { system: undefined, customId: n }
+      : { system: undefined, customId: undefined };
+  }
+  return { system: raw, customId: undefined };
+}
+
 function applyTicketFilters(f?: Filters): object {
   if (!f) return {};
+  const status     = splitCustomFilter(f.status);
+  const ticketType = splitCustomFilter(f.ticketType);
   return {
-    ...(f.priority   ? { priority:    f.priority             } : {}),
-    ...(f.category   ? { category:    f.category             } : {}),
-    ...(f.teamId     ? { queueId:     f.teamId               } : {}),
-    ...(f.assigneeId ? { assignedToId: f.assigneeId          } : {}),
-    ...(f.status     ? { status:      f.status               } : {}),
+    ...(f.priority             ? { priority:           f.priority         } : {}),
+    ...(f.category             ? { category:           f.category         } : {}),
+    ...(f.teamId               ? { queueId:            f.teamId           } : {}),
+    ...(f.assigneeId           ? { assignedToId:      f.assigneeId        } : {}),
+    ...(status.system          ? { status:            status.system       } : {}),
+    ...(status.customId        ? { customStatusId:    status.customId     } : {}),
+    ...(ticketType.system      ? { ticketType:        ticketType.system   } : {}),
+    ...(ticketType.customId    ? { customTicketTypeId: ticketType.customId } : {}),
+    ...(f.source               ? { source:            f.source            } : {}),
+    ...(f.organizationId       ? { organizationId:    f.organizationId    } : {}),
   };
 }
 
@@ -104,11 +136,18 @@ function sqlFilterFragment(
 ): { frag: string; params: unknown[] } {
   const parts: string[] = [];
   const params: unknown[] = [];
-  if (f?.priority)   { params.push(f.priority);   parts.push(`${alias}.priority::text = $${paramOffset + params.length}`); }
-  if (f?.category)   { params.push(f.category);   parts.push(`${alias}.category::text = $${paramOffset + params.length}`); }
-  if (f?.teamId)     { params.push(f.teamId);     parts.push(`${alias}."queueId" = $${paramOffset + params.length}`); }
-  if (f?.assigneeId) { params.push(f.assigneeId); parts.push(`${alias}."assignedToId" = $${paramOffset + params.length}`); }
-  if (f?.status)     { params.push(f.status);     parts.push(`${alias}.status::text = $${paramOffset + params.length}`); }
+  const status     = splitCustomFilter(f?.status);
+  const ticketType = splitCustomFilter(f?.ticketType);
+  if (f?.priority)        { params.push(f.priority);        parts.push(`${alias}.priority::text = $${paramOffset + params.length}`); }
+  if (f?.category)        { params.push(f.category);        parts.push(`${alias}.category::text = $${paramOffset + params.length}`); }
+  if (f?.teamId)          { params.push(f.teamId);          parts.push(`${alias}."queueId" = $${paramOffset + params.length}`); }
+  if (f?.assigneeId)      { params.push(f.assigneeId);      parts.push(`${alias}."assignedToId" = $${paramOffset + params.length}`); }
+  if (status.system)      { params.push(status.system);     parts.push(`${alias}.status::text = $${paramOffset + params.length}`); }
+  if (status.customId)    { params.push(status.customId);   parts.push(`${alias}."customStatusId" = $${paramOffset + params.length}`); }
+  if (ticketType.system)  { params.push(ticketType.system); parts.push(`${alias}."ticketType"::text = $${paramOffset + params.length}`); }
+  if (ticketType.customId){ params.push(ticketType.customId); parts.push(`${alias}."customTicketTypeId" = $${paramOffset + params.length}`); }
+  if (f?.source)          { params.push(f.source);          parts.push(`${alias}.source = $${paramOffset + params.length}`); }
+  if (f?.organizationId)  { params.push(f.organizationId);  parts.push(`${alias}."organization_id" = $${paramOffset + params.length}`); }
   return { frag: parts.length > 0 ? " AND " + parts.join(" AND ") : "", params };
 }
 

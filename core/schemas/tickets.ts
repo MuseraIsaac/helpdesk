@@ -6,6 +6,7 @@ import { ticketSeverities } from "../constants/ticket-severity";
 import { ticketImpacts } from "../constants/ticket-impact";
 import { ticketUrgencies } from "../constants/ticket-urgency";
 import { ticketTypes } from "../constants/ticket-type";
+import { INTAKE_CHANNELS } from "../constants/channel";
 
 export const inboundEmailSchema = z.object({
   from: z.email("Invalid email address"),
@@ -39,6 +40,8 @@ export const createTicketSchema = z.object({
   customFields: z.record(z.string(), z.unknown()).optional().default({}),
   customTicketTypeId: z.number().int().positive().nullable().optional(),
   organizationId: z.number().int().positive().nullable().optional(),
+  /** Intake channel — defaults to "agent" server-side when omitted. */
+  source: z.enum(INTAKE_CHANNELS as unknown as [string, ...string[]]).nullable().optional(),
 });
 
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
@@ -79,6 +82,8 @@ export const updateTicketSchema = z.object({
   customStatusId: z.number().int().positive().nullable().optional(),
   /** null = clear custom ticket type; positive int = apply custom ticket type ID */
   customTicketTypeId: z.number().int().positive().nullable().optional(),
+  /** Intake channel — agents can correct it after creation. */
+  source: z.enum(INTAKE_CHANNELS as unknown as [string, ...string[]]).nullable().optional(),
 });
 
 // Predefined views that translate to compound where-clauses on the backend.
@@ -177,8 +182,8 @@ export const ticketListQuerySchema = z.object({
   impact: csvEnum(ticketImpacts),
   /** Filter by urgency level */
   urgency: csvEnum(ticketUrgencies),
-  /** Filter by intake channel */
-  source: csvEnum(["email", "portal", "agent"] as const),
+  /** Filter by intake channel — accepts any IntakeChannel */
+  source: csvEnum(INTAKE_CHANNELS as unknown as readonly [string, ...string[]]),
   /** Multi-value: filter by specific assigned agents (user IDs) */
   assignedToId: csvStrings,
   /** true = only tickets with no agent assigned */

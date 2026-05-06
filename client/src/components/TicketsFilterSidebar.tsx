@@ -21,7 +21,9 @@ import {
   UserX, UserCheck, ShieldAlert, RotateCcw, Check, Tag, Flag,
   Activity, Mail, Globe, Headphones, Users, Settings2,
   Layers, Briefcase,
+  Plug, MessageSquare, Smartphone, Hash, Phone, Megaphone,
 } from "lucide-react";
+import { INTAKE_CHANNELS } from "core/constants/channel.ts";
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
@@ -83,10 +85,18 @@ const SEVERITY_COLORS: Record<TicketSeverity, string> = {
   sev1: "bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/30",
 };
 
-const SOURCE_META: Record<"email" | "portal" | "agent", { label: string; icon: React.ElementType; color: string }> = {
-  email:  { label: "Email",  icon: Mail,       color: "bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/30"           },
-  portal: { label: "Portal", icon: Globe,      color: "bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/30" },
-  agent:  { label: "Agent",  icon: Headphones, color: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30" },
+type SourceKey = typeof INTAKE_CHANNELS[number];
+
+const SOURCE_META: Record<SourceKey, { label: string; icon: React.ElementType; color: string }> = {
+  email:       { label: "Email",       icon: Mail,           color: "bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/30"             },
+  portal:      { label: "Portal",      icon: Globe,          color: "bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/30" },
+  api:         { label: "API",         icon: Plug,           color: "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/30"     },
+  agent:       { label: "Agent",       icon: Headphones,     color: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30" },
+  chat:        { label: "Live Chat",   icon: MessageSquare,  color: "bg-green-500/10 text-green-700 dark:text-green-300 border-green-500/30"     },
+  whatsapp:    { label: "WhatsApp",    icon: Smartphone,     color: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30" },
+  slack_teams: { label: "Slack/Teams", icon: Hash,           color: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/30" },
+  voice:       { label: "Voice",       icon: Phone,          color: "bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-500/30" },
+  social:      { label: "Social",      icon: Megaphone,      color: "bg-pink-500/10 text-pink-700 dark:text-pink-300 border-pink-500/30"         },
 };
 
 // ── Active filter pill ───────────────────────────────────────────────────────
@@ -361,7 +371,7 @@ export default function TicketsFilterSidebar({ filters, onChange, onClear, onSav
     onChange({ ...filters, severity: singleOrArray(toggleInArray(severityArr, s)) });
   const toggleCategory = (c: TicketCategory) =>
     onChange({ ...filters, category: singleOrArray(toggleInArray(categoryArr, c)) });
-  const toggleSource = (s: "email" | "portal" | "agent") =>
+  const toggleSource = (s: SourceKey) =>
     onChange({ ...filters, source: singleOrArray(toggleInArray(sourceArr, s)) as TicketFilters["source"] });
 
   // Render names for the active team-filter list (mixes numeric ids and the "none" sentinel)
@@ -538,7 +548,7 @@ export default function TicketsFilterSidebar({ filters, onChange, onClear, onSav
                 )}
                 {sourceArr.length > 0 && (
                   <ActivePill icon={Mail} label="Source"
-                    value={sourceArr.map((s) => SOURCE_META[s].label).join(", ")}
+                    value={sourceArr.map((s) => SOURCE_META[s as SourceKey]?.label ?? s).join(", ")}
                     onRemove={() => onChange({ ...filters, source: undefined })} />
                 )}
                 {teamFilterLabels.length > 0 && (
@@ -647,7 +657,7 @@ export default function TicketsFilterSidebar({ filters, onChange, onClear, onSav
           <div className="px-4 py-3 border-b">
             <SectionHeader icon={Mail} title="Source" count={sourceArr.length} />
             <div className="grid grid-cols-3 gap-1.5">
-              {(Object.keys(SOURCE_META) as ("email" | "portal" | "agent")[]).map((src) => {
+              {(Object.keys(SOURCE_META) as SourceKey[]).map((src) => {
                 const meta = SOURCE_META[src];
                 const isOn = sourceArr.includes(src);
                 const Icon = meta.icon;

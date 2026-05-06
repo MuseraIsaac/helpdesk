@@ -4,9 +4,63 @@
  * Each function corresponds to one server route and returns the data payload
  * directly (unwrapping the Axios response envelope). Callers can pass the
  * function reference directly to TanStack Query's `queryFn`.
+ *
+ * Ticket-domain dimension filters
+ * ───────────────────────────────
+ * Most ticket-aggregation endpoints accept the same dimension filters
+ * (priority, category, status, teamId, assigneeId). Callers pass a
+ * `ReportFilters` object; helpers below append it to the query string.
+ * Filter values must also appear in the React Query cache key so the
+ * cache invalidates when the user changes a filter.
  */
 import axios from "axios";
 import { periodToRange, rangeQS } from "./utils";
+
+// ── Ticket-domain dimension filters ──────────────────────────────────────────
+
+export interface ReportFilters {
+  priority?:       string;
+  category?:       string;
+  status?:         string;
+  teamId?:         string | number;
+  assigneeId?:     string;
+  ticketType?:     string;
+  source?:         string;
+  organizationId?: string | number;
+}
+
+/** Append non-empty filter values to an existing query string fragment. */
+export function appendFiltersToQs(qs: string, filters?: ReportFilters): string {
+  if (!filters) return qs;
+  const p = new URLSearchParams(qs);
+  if (filters.priority)       p.set("priority",       filters.priority);
+  if (filters.category)       p.set("category",       filters.category);
+  if (filters.status)         p.set("status",         filters.status);
+  if (filters.teamId)         p.set("teamId",         String(filters.teamId));
+  if (filters.assigneeId)     p.set("assigneeId",     filters.assigneeId);
+  if (filters.ticketType)     p.set("ticketType",     filters.ticketType);
+  if (filters.source)         p.set("source",         filters.source);
+  if (filters.organizationId) p.set("organizationId", String(filters.organizationId));
+  return p.toString();
+}
+
+/**
+ * Stable cache-key fragment derived from filters. Returned as an array so it
+ * can spread into a queryKey: `["reports", "volume", period, ...filterKey(f)]`.
+ */
+export function filterKey(f?: ReportFilters): unknown[] {
+  if (!f) return [];
+  return [
+    f.priority       ?? "",
+    f.category       ?? "",
+    f.status         ?? "",
+    f.teamId         ?? "",
+    f.assigneeId     ?? "",
+    f.ticketType     ?? "",
+    f.source         ?? "",
+    f.organizationId ?? "",
+  ];
+}
 import type {
   PeriodOption,
   ReportOverview,
@@ -41,63 +95,84 @@ import type {
 // ── Overview ──────────────────────────────────────────────────────────────────
 
 /** Accept either a period string ("30") or a pre-built QS fragment ("from=X&to=Y"). */
-export async function fetchOverview(periodOrQs: PeriodOption | string): Promise<ReportOverview> {
-  const qs = periodOrQs.includes("=")
-    ? periodOrQs
-    : rangeQS(periodToRange(periodOrQs));
+export async function fetchOverview(
+  periodOrQs: PeriodOption | string,
+  filters?: ReportFilters,
+): Promise<ReportOverview> {
+  const baseQs = periodOrQs.includes("=") ? periodOrQs : rangeQS(periodToRange(periodOrQs));
+  const qs = appendFiltersToQs(baseQs, filters);
   const { data } = await axios.get<ReportOverview>(`/api/reports/overview?${qs}`);
   return data;
 }
 
-export async function fetchBreakdownsQs(qs: string): Promise<BreakdownReport> {
-  const { data } = await axios.get<BreakdownReport>(`/api/reports/breakdowns?${qs}`);
+export async function fetchBreakdownsQs(qs: string, filters?: ReportFilters): Promise<BreakdownReport> {
+  const { data } = await axios.get<BreakdownReport>(
+    `/api/reports/breakdowns?${appendFiltersToQs(qs, filters)}`,
+  );
   return data;
 }
 
-export async function fetchAging(): Promise<AgingBucket[]> {
-  const { data } = await axios.get<{ aging: AgingBucket[] }>("/api/reports/aging");
+export async function fetchAging(filters?: ReportFilters): Promise<AgingBucket[]> {
+  const qs = appendFiltersToQs("", filters);
+  const url = qs ? `/api/reports/aging?${qs}` : "/api/reports/aging";
+  const { data } = await axios.get<{ aging: AgingBucket[] }>(url);
   return data.aging;
 }
 
-export async function fetchTopOpenTickets(): Promise<TopOpenTicket[]> {
-  const { data } = await axios.get<{ tickets: TopOpenTicket[] }>("/api/reports/top-open-tickets");
+export async function fetchTopOpenTickets(filters?: ReportFilters): Promise<TopOpenTicket[]> {
+  const qs = appendFiltersToQs("", filters);
+  const url = qs ? `/api/reports/top-open-tickets?${qs}` : "/api/reports/top-open-tickets";
+  const { data } = await axios.get<{ tickets: TopOpenTicket[] }>(url);
   return data.tickets;
 }
 
 // ── Tickets ───────────────────────────────────────────────────────────────────
 
-export async function fetchVolume(period: PeriodOption | string): Promise<VolumePoint[]> {
-  const qs = rangeQS(periodToRange(period));
+export async function fetchVolume(
+  period: PeriodOption | string,
+  filters?: ReportFilters,
+): Promise<VolumePoint[]> {
+  const qs = appendFiltersToQs(rangeQS(periodToRange(period)), filters);
   const { data } = await axios.get<{ data: VolumePoint[] }>(`/api/reports/volume?${qs}`);
   return data.data;
 }
 
-export async function fetchBacklogTrend(period: PeriodOption | string): Promise<BacklogPoint[]> {
-  const { data } = await axios.get<{ data: BacklogPoint[] }>(
-    `/api/reports/backlog-trend?period=${period}`,
-  );
+export async function fetchBacklogTrend(
+  period: PeriodOption | string,
+  filters?: ReportFilters,
+): Promise<BacklogPoint[]> {
+  const qs = appendFiltersToQs(`period=${period}`, filters);
+  const { data } = await axios.get<{ data: BacklogPoint[] }>(`/api/reports/backlog-trend?${qs}`);
   return data.data;
 }
 
-export async function fetchBreakdowns(periodOrQs: PeriodOption | string): Promise<BreakdownReport> {
-  const qs = periodOrQs.includes("=")
-    ? periodOrQs
-    : rangeQS(periodToRange(periodOrQs));
+export async function fetchBreakdowns(
+  periodOrQs: PeriodOption | string,
+  filters?: ReportFilters,
+): Promise<BreakdownReport> {
+  const baseQs = periodOrQs.includes("=") ? periodOrQs : rangeQS(periodToRange(periodOrQs));
+  const qs = appendFiltersToQs(baseQs, filters);
   const { data } = await axios.get<BreakdownReport>(`/api/reports/breakdowns?${qs}`);
   return data;
 }
 
 export async function fetchResolutionDistribution(
   period: PeriodOption | string,
+  filters?: ReportFilters,
 ): Promise<ResolutionBucket[]> {
+  const qs = appendFiltersToQs(`period=${period}`, filters);
   const { data } = await axios.get<{ buckets: ResolutionBucket[] }>(
-    `/api/reports/resolution-distribution?period=${period}`,
+    `/api/reports/resolution-distribution?${qs}`,
   );
   return data.buckets;
 }
 
-export async function fetchFcr(period: PeriodOption | string): Promise<FcrReport> {
-  const { data } = await axios.get<FcrReport>(`/api/reports/fcr?period=${period}`);
+export async function fetchFcr(
+  period: PeriodOption | string,
+  filters?: ReportFilters,
+): Promise<FcrReport> {
+  const qs = appendFiltersToQs(`period=${period}`, filters);
+  const { data } = await axios.get<FcrReport>(`/api/reports/fcr?${qs}`);
   return data;
 }
 
@@ -105,34 +180,59 @@ export async function fetchFcr(period: PeriodOption | string): Promise<FcrReport
 
 export async function fetchSlaByDimension(
   period: PeriodOption | string,
+  filters?: ReportFilters,
 ): Promise<SlaByDimensionReport> {
-  const qs = rangeQS(periodToRange(period));
+  const qs = appendFiltersToQs(rangeQS(periodToRange(period)), filters);
   const { data } = await axios.get<SlaByDimensionReport>(`/api/reports/sla-by-dimension?${qs}`);
   return data;
 }
 
 export async function fetchAgentLeaderboard(
   period: PeriodOption | string,
+  filters?: ReportFilters,
 ): Promise<AgentLeaderboardEntry[]> {
+  const qs = appendFiltersToQs(`period=${period}`, filters);
   const { data } = await axios.get<{ agents: AgentLeaderboardEntry[] }>(
-    `/api/reports/agent-leaderboard?period=${period}`,
+    `/api/reports/agent-leaderboard?${qs}`,
   );
   return data.agents;
 }
 
+// ── Section-specific filters (incidents/changes/problems/etc) ────────────────
+//
+// These sections take a free-form bag of filter URL params (e.g.
+// incidentPriority, changeType, csatRating). The bag mirrors the active URL
+// search params so callers can pass `Object.fromEntries(searchParams)` and
+// be done with it.
+
+function appendBag(qs: string, bag?: Record<string, string | undefined>): string {
+  if (!bag) return qs;
+  const p = new URLSearchParams(qs);
+  for (const [k, v] of Object.entries(bag)) {
+    if (v) p.set(k, v);
+  }
+  return p.toString();
+}
+
 // ── Incidents ─────────────────────────────────────────────────────────────────
 
-export async function fetchIncidentReport(period: PeriodOption | string): Promise<IncidentReport> {
-  const { data } = await axios.get<IncidentReport>(`/api/reports/incidents?period=${period}`);
+export async function fetchIncidentReport(
+  period: PeriodOption | string,
+  bag?: Record<string, string | undefined>,
+): Promise<IncidentReport> {
+  const qs = appendBag(`period=${period}`, bag);
+  const { data } = await axios.get<IncidentReport>(`/api/reports/incidents?${qs}`);
   return data;
 }
 
 // ── CSAT ──────────────────────────────────────────────────────────────────────
 
-export async function fetchCsatTrend(period: PeriodOption | string): Promise<CsatPoint[]> {
-  const { data } = await axios.get<{ data: CsatPoint[] }>(
-    `/api/reports/csat-trend?period=${period}`,
-  );
+export async function fetchCsatTrend(
+  period: PeriodOption | string,
+  bag?: Record<string, string | undefined>,
+): Promise<CsatPoint[]> {
+  const qs = appendBag(`period=${period}`, bag);
+  const { data } = await axios.get<{ data: CsatPoint[] }>(`/api/reports/csat-trend?${qs}`);
   return data.data;
 }
 
@@ -150,23 +250,39 @@ export async function fetchOperationalHealth(): Promise<OperationalHealth> {
 
 // ── Phase 2-4 ─────────────────────────────────────────────────────────────────
 
-export async function fetchRequestReport(period: PeriodOption | string): Promise<RequestReport> {
-  const { data } = await axios.get<RequestReport>(`/api/reports/requests?period=${period}`);
+export async function fetchRequestReport(
+  period: PeriodOption | string,
+  bag?: Record<string, string | undefined>,
+): Promise<RequestReport> {
+  const qs = appendBag(`period=${period}`, bag);
+  const { data } = await axios.get<RequestReport>(`/api/reports/requests?${qs}`);
   return data;
 }
 
-export async function fetchProblemReport(period: PeriodOption | string): Promise<ProblemReport> {
-  const { data } = await axios.get<ProblemReport>(`/api/reports/problems?period=${period}`);
+export async function fetchProblemReport(
+  period: PeriodOption | string,
+  bag?: Record<string, string | undefined>,
+): Promise<ProblemReport> {
+  const qs = appendBag(`period=${period}`, bag);
+  const { data } = await axios.get<ProblemReport>(`/api/reports/problems?${qs}`);
   return data;
 }
 
-export async function fetchApprovalReport(period: PeriodOption | string): Promise<ApprovalReport> {
-  const { data } = await axios.get<ApprovalReport>(`/api/reports/approvals?period=${period}`);
+export async function fetchApprovalReport(
+  period: PeriodOption | string,
+  bag?: Record<string, string | undefined>,
+): Promise<ApprovalReport> {
+  const qs = appendBag(`period=${period}`, bag);
+  const { data } = await axios.get<ApprovalReport>(`/api/reports/approvals?${qs}`);
   return data;
 }
 
-export async function fetchChangeReport(period: PeriodOption | string): Promise<ChangeReport> {
-  const { data } = await axios.get<ChangeReport>(`/api/reports/changes?period=${period}`);
+export async function fetchChangeReport(
+  period: PeriodOption | string,
+  bag?: Record<string, string | undefined>,
+): Promise<ChangeReport> {
+  const qs = appendBag(`period=${period}`, bag);
+  const { data } = await axios.get<ChangeReport>(`/api/reports/changes?${qs}`);
   return data;
 }
 

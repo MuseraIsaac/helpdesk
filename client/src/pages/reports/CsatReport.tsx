@@ -12,6 +12,7 @@ import KpiCard from "@/components/reports/KpiCard";
 import ChartCard from "@/components/reports/ChartCard";
 import ReportLoading from "@/components/reports/ReportLoading";
 import { fetchCsatTrend, fetchCsatBreakdown } from "@/lib/reports/api";
+import { useReportBag } from "@/lib/reports/useReportFilters";
 import { fmtDay, xInterval, fmtPct } from "@/lib/reports/utils";
 import { cn } from "@/lib/utils";
 import type { CsatPoint } from "@/lib/reports/types";
@@ -43,9 +44,11 @@ export default function CsatReport() {
   const [searchParams] = useSearchParams();
   const period = searchParams.get("period") ?? "30";
 
+  const bag = useReportBag("csatRating", "teamId", "assigneeId");
+
   const { data: points, isLoading: loadingTrend, error } = useQuery({
-    queryKey: ["reports", "csat", period],
-    queryFn: () => fetchCsatTrend(period),
+    queryKey: ["reports", "csat", period, bag],
+    queryFn: () => fetchCsatTrend(period, bag),
   });
 
   const { data: breakdown, isLoading: loadingBreakdown } = useQuery({

@@ -24,7 +24,9 @@ import {
   fetchBreakdowns,
   fetchResolutionDistribution,
   fetchFcr,
+  filterKey,
 } from "@/lib/reports/api";
+import { useReportFilters } from "@/lib/reports/useReportFilters";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { fmtDay, fmtPct, xInterval, periodToRange, rangeQS } from "@/lib/reports/utils";
@@ -44,6 +46,8 @@ export default function TicketsReport() {
   const period = searchParams.get("period") ?? "30";
   const navigate = useNavigate();
   const [overlay, setOverlay] = useState(false);
+  const filters = useReportFilters();
+  const fk = filterKey(filters);
 
   function drillPriority(entry: { priority?: string }) {
     if (entry.priority) navigate(`/tickets?priority=${entry.priority}`);
@@ -53,30 +57,30 @@ export default function TicketsReport() {
   }
 
   const { data: volPoints, isLoading: loadingVol } = useQuery({
-    queryKey: ["reports", "volume", period],
-    queryFn: () => fetchVolume(period),
+    queryKey: ["reports", "volume", period, ...fk],
+    queryFn: () => fetchVolume(period, filters),
   });
 
   const { data: blPoints, isLoading: loadingBacklog } = useQuery({
-    queryKey: ["reports", "backlog", period],
-    queryFn: () => fetchBacklogTrend(period),
+    queryKey: ["reports", "backlog", period, ...fk],
+    queryFn: () => fetchBacklogTrend(period, filters),
   });
 
   const {
     data: breakdown, isLoading: loadingBd, error: bdErr,
   } = useQuery({
-    queryKey: ["reports", "breakdowns", period],
-    queryFn: () => fetchBreakdowns(period),
+    queryKey: ["reports", "breakdowns", period, ...fk],
+    queryFn: () => fetchBreakdowns(period, filters),
   });
 
   const { data: resBuckets, isLoading: loadingResDist } = useQuery({
-    queryKey: ["reports", "res-dist", period],
-    queryFn: () => fetchResolutionDistribution(period),
+    queryKey: ["reports", "res-dist", period, ...fk],
+    queryFn: () => fetchResolutionDistribution(period, filters),
   });
 
   const { data: fcr, isLoading: loadingFcr } = useQuery({
-    queryKey: ["reports", "fcr", period],
-    queryFn: () => fetchFcr(period),
+    queryKey: ["reports", "fcr", period, ...fk],
+    queryFn: () => fetchFcr(period, filters),
   });
 
   const prevVolumeQS = buildPrevVolumePeriod(period);
