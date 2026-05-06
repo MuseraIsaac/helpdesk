@@ -19,44 +19,29 @@ import {
 import { Button } from "@/components/ui/button";
 import { useBranding } from "@/lib/useBranding";
 import { useSettings } from "@/hooks/useSettings";
+import { useRelease, DEFAULT_RELEASE } from "@/hooks/useRelease";
 import {
   Activity, Mail, Globe, ExternalLink, Copy, Check, X,
   ShieldCheck, MessageSquare,
 } from "lucide-react";
-
-// Build-time constants — Vite injects these at build. The `__APP_VERSION__`
-// global is configured in vite.config.ts via `define` (see vite docs); we
-// fall back to a dev label so this works in development without a build step.
-declare const __APP_VERSION__: string | undefined;
-declare const __APP_BUILD_DATE__: string | undefined;
-const APP_VERSION = (typeof __APP_VERSION__ !== "undefined" && __APP_VERSION__) || "dev";
-const APP_BUILD   = (typeof __APP_BUILD_DATE__ !== "undefined" && __APP_BUILD_DATE__) || new Date().toISOString().slice(0, 10);
 
 interface AboutDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-const FEATURES = [
-  "AI-classified inbound email tickets",
-  "Multi-channel intake (email, portal, API)",
-  "ITIL-aligned Incidents · Problems · Changes · CMDB",
-  "Real-time SLA tracking with auto-escalation",
-  "Customisable dashboards with role-based sharing",
-];
-
 export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
   const { data: branding } = useBranding();
   const { data: general }  = useSettings("general");
+  // Release manifest comes from /release.json (regenerated on every install
+  // / update). Falls back to DEFAULT_RELEASE if the fetch fails.
+  const { data: rel = DEFAULT_RELEASE } = useRelease();
   const [copied, setCopied] = useState(false);
 
-  const productName  = general?.helpdeskName  || branding?.companyName || "Zentra";
-  // Engraved subtitle and copyright — intentionally NOT pulled from any
-  // branding/general setting so they always identify the underlying ITSM
-  // product, even when an operator has rebranded the helpdesk for their
-  // own organisation.
-  const ENGRAVED_SUBTITLE  = "ITSM MANAGEMENT · AI-Powered ITSM";
-  const ENGRAVED_COPYRIGHT = "© 2026 Zentra. All rights reserved.";
+  // Branding may rebrand the displayed helpdesk name, but the engraved
+  // identity in release.json (name + subtitle + copyright) always wins for
+  // the About panel — that's what identifies the underlying ITSM product.
+  const productName  = rel.name || general?.helpdeskName  || branding?.companyName || "Zentra";
   const accentColor  = branding?.primaryColor  || "#6366f1";
   const supportEmail = branding?.serviceDeskEmail || general?.supportEmail || "";
   const websiteUrl   = branding?.companyWebsite || "";
@@ -64,7 +49,7 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
   // Reset the "Copied!" state when the dialog reopens
   useEffect(() => { if (open) setCopied(false); }, [open]);
 
-  const fullVersion = `${productName} v${APP_VERSION} · ${APP_BUILD}`;
+  const fullVersion = `${productName} ${rel.version} · ${rel.buildDate}`;
 
   async function copyVersion() {
     try {
@@ -134,7 +119,7 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
             <div className="min-w-0">
               <h2 className="text-xl font-bold tracking-tight leading-tight">{productName}</h2>
               <p className="text-xs font-medium text-muted-foreground mt-0.5">
-                {ENGRAVED_SUBTITLE}
+                {rel.subtitle}
               </p>
               <button
                 type="button"
@@ -143,9 +128,9 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
                 className="mt-2 inline-flex items-center gap-1.5 rounded-md border bg-background/60 px-2 py-0.5 text-[11px] font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
               >
                 {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-                v{APP_VERSION}
+                {rel.version}
                 <span className="text-muted-foreground/40">·</span>
-                {APP_BUILD}
+                {rel.buildDate}
               </button>
             </div>
           </div>
@@ -155,27 +140,28 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
         <div className="px-7 py-5 space-y-5 bg-card">
 
           {/* Tagline */}
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            A modern, AI-augmented service desk for IT teams who want to move
-            fast without breaking things — built around the ITIL-4 lifecycle
-            with a customer portal, real-time analytics, and a workflow engine
-            that adapts to your team's process.
-          </p>
+          {rel.tagline && (
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {rel.tagline}
+            </p>
+          )}
 
           {/* Feature highlights */}
-          <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
-              What's inside
-            </p>
-            <ul className="space-y-1">
-              {FEATURES.map((f) => (
-                <li key={f} className="flex items-start gap-2 text-xs text-foreground/85">
-                  <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: accentColor }} />
-                  <span>{f}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {rel.features.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                What's inside
+              </p>
+              <ul className="space-y-1">
+                {rel.features.map((f) => (
+                  <li key={f} className="flex items-start gap-2 text-xs text-foreground/85">
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: accentColor }} />
+                    <span>{f}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Useful links — only render rows where the operator actually
               configured a value, so this section never shows empty buttons. */}
@@ -221,7 +207,7 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
         {/* ── Footer ────────────────────────────────────────────────────── */}
         <div className="border-t border-border/60 px-7 py-3 bg-muted/20 flex items-center justify-between gap-3">
           <p className="text-[10px] text-muted-foreground/70">
-            {ENGRAVED_COPYRIGHT}
+            {rel.copyright}
           </p>
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => onOpenChange(false)}>
             Close

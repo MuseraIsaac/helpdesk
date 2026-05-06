@@ -611,14 +611,21 @@ phase_cert_watchdog() {
 #!/usr/bin/env bash
 # zentra cert watchdog — runs daily via systemd timer.
 # Logs cert health to journald; restarts Caddy if cert is < 7 days from expiry.
-set -Eeo pipefail
+#
+# This is a *health check*, not a precondition gate, so it always exits 0:
+# we don't want a transient cert-read failure (e.g. Caddy still negotiating
+# with Let's Encrypt right after install, or briefly down for restart) to
+# show up as a systemd unit failure.
+set -Eo pipefail
 DOMAIN="${1:?usage: $0 <domain>}"
 NOW=$(date +%s)
 EXPIRY=$(echo | openssl s_client -servername "$DOMAIN" -connect 127.0.0.1:443 2>/dev/null \
   | openssl x509 -noout -enddate 2>/dev/null | sed 's/notAfter=//')
 if [[ -z "$EXPIRY" ]]; then
-  logger -t zentra-cert -p user.err "FAIL: could not read cert for $DOMAIN"
-  exit 1
+  # Cert isn't readable yet — Caddy may still be obtaining one. Just log
+  # and exit cleanly; the next timer fire will pick it up.
+  logger -t zentra-cert -p user.warning "WARN: could not read cert for $DOMAIN (Caddy may still be issuing it)"
+  exit 0
 fi
 EXPIRY_TS=$(date -d "$EXPIRY" +%s)
 DAYS_LEFT=$(( (EXPIRY_TS - NOW) / 86400 ))
@@ -659,8 +666,11 @@ EOF
 
   systemctl daemon-reload
   systemctl enable --now zentra-cert-watchdog.timer
-  # Run once immediately so we get a baseline log line on every install/upgrade.
-  systemctl start zentra-cert-watchdog.service || true
+  # Intentionally NOT running the watchdog now: on a fresh install Caddy
+  # may still be negotiating the Let's Encrypt cert when this phase fires,
+  # which would print a misleading "could not read cert" warning. The timer
+  # will fire on its own schedule (daily, jittered ±1h). Run on demand with
+  #   sudo systemctl start zentra-cert-watchdog.service
 }
 
 # ── 3.13.5 Privileged finalize helper for the in-tool update orchestrator ──
