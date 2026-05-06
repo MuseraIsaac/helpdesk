@@ -260,6 +260,71 @@ export async function signedFetch<T>(opts: SignedFetchOpts): Promise<SignedFetch
   }
 }
 
+/**
+ * Same authentication + replay protection as `signedFetch`, but for endpoints
+ * that return binary data (the source tarball). The release server applies
+ * HMAC verification uniformly to every path under `/releases/*`, so the
+ * tarball download must be signed too — without this, the daemon answers
+ * 401 and the orchestrator's fetch step fails.
+ *
+ * `expectedMaxBytes` caps the download so a buggy or malicious server can't
+ * exhaust the helpdesk's disk by streaming forever; default 500 MB.
+ */
+export async function signedFetchBinary(opts: {
+  path:               string;
+  timeoutMs?:         number;
+  expectedMaxBytes?:  number;
+}): Promise<{ ok: boolean; status: number; body: Buffer | null; errorText: string | null }> {
+  const cfg = await getChannelConfig();
+  if (!cfg.baseUrl)       throw new Error("Update channel baseUrl not configured");
+  if (!cfg.installSecret) throw new Error("Update channel install secret not provisioned");
+
+  const bodyHash    = crypto.createHash("sha256").update("").digest("hex");
+  const timestampMs = Date.now();
+  const nonce       = crypto.randomBytes(16).toString("hex");
+  const sig         = buildSignature(cfg.installSecret, "GET", opts.path, timestampMs, nonce, bodyHash);
+
+  const url   = new URL(opts.path, cfg.baseUrl).toString();
+  const ctrl  = new AbortController();
+  // Tarballs can be large; allow a longer default than JSON calls.
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 5 * 60_000);
+
+  try {
+    const resp = await fetch(url, {
+      method:  "GET",
+      headers: {
+        "X-Zentra-Install-Id": cfg.installId,
+        "X-Zentra-Timestamp":  String(timestampMs),
+        "X-Zentra-Nonce":      nonce,
+        "X-Zentra-Signature":  sig,
+        "Accept":              "application/octet-stream, application/gzip, */*",
+        "User-Agent":          "Zentra-Helpdesk-Updater/1.0",
+      },
+      signal: ctrl.signal,
+    });
+
+    if (!resp.ok) {
+      const errorText = await resp.text().catch(() => "(unreadable body)");
+      return { ok: false, status: resp.status, body: null, errorText };
+    }
+
+    const arrayBuf = await resp.arrayBuffer();
+    const body     = Buffer.from(arrayBuf);
+    const limit    = opts.expectedMaxBytes ?? 500 * 1024 * 1024;
+    if (body.byteLength > limit) {
+      return { ok: false, status: resp.status, body: null,
+        errorText: `Artifact body too large (${body.byteLength} > ${limit} bytes)` };
+    }
+    return { ok: true, status: resp.status, body, errorText: null };
+  } catch (err) {
+    Sentry.captureException(err, { tags: { context: "update-channel-binary" } });
+    return { ok: false, status: 0, body: null,
+      errorText: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── Release-index helpers ────────────────────────────────────────────────────
 
 /**

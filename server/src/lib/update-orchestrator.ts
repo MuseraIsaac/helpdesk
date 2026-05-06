@@ -44,7 +44,7 @@ import { boss }    from "./queue";
 import Sentry      from "./sentry";
 import { setSection } from "./settings";
 import { invalidateMaintenanceCache } from "../middleware/maintenance-mode";
-import { signedFetch } from "./update-channel";
+import { signedFetch, signedFetchBinary } from "./update-channel";
 import { loadBundledManifest } from "./release";
 import {
   type ReleaseManifest,
@@ -135,17 +135,40 @@ async function backup(runId: number, version: string): Promise<string> {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) throw new Error("DATABASE_URL not set — cannot back up");
 
+  // Prisma's DATABASE_URL carries non-libpq query params (notably ?schema=public,
+  // also ?connection_limit=, ?pgbouncer=, ?pool_timeout=). pg_dump rejects
+  // those with "invalid URI query parameter". Build a libpq-clean URL by
+  // dropping the query string entirely — the connection details we need are
+  // all in the URL path / userinfo.
+  const dumpUrl = pgLibpqUrl(dbUrl);
+
   // pg_dump in custom-format (-Fc) so pg_restore can replay it. If pg_dump
   // isn't on PATH (e.g. dev environments) we mark the backup as skipped but
   // still record the intended path so the operator knows where it should be.
   try {
-    await execAsync("pg_dump", ["-Fc", "-f", target, dbUrl]);
+    await execAsync("pg_dump", ["-Fc", "-f", target, dumpUrl]);
     await logEvent(runId, "info", "backup", `Backup written to ${target}`);
     return target;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await logEvent(runId, "warn", "backup", `pg_dump unavailable — skipping backup: ${msg}`);
     return "";
+  }
+}
+
+/**
+ * Strip Prisma-only query parameters from a Postgres connection string so
+ * libpq-based tools (pg_dump, pg_restore, psql) accept it. Preserves the
+ * scheme / userinfo / host / port / database; drops the entire query string.
+ */
+function pgLibpqUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    u.search = "";
+    return u.toString();
+  } catch {
+    // Fallback for legacy non-URL forms — strip anything after the first '?'.
+    return url.split("?")[0] ?? url;
   }
 }
 
@@ -166,7 +189,7 @@ interface ArtifactDescriptor {
 }
 
 async function fetchArtifact(runId: number, manifest: ReleaseManifest): Promise<{ artifactPath: string; sha256: string }> {
-  await logEvent(runId, "info", "fetch", `Fetching artifact for ${manifest.version}`);
+  await logEvent(runId, "info", "fetch", `Fetching artifact descriptor for ${manifest.version}`);
 
   // Step 1: ask the release server where the tarball lives + its digest.
   const desc = await signedFetch<ArtifactDescriptor>({
@@ -181,20 +204,28 @@ async function fetchArtifact(runId: number, manifest: ReleaseManifest): Promise<
   await fs.mkdir(dir, { recursive: true });
   const target = path.join(dir, `${manifest.version}.tar.gz`);
 
-  // Step 2: download the tarball with the signed-URL the descriptor returned.
-  const resp = await fetch(desc.data.url, {
-    headers: { "User-Agent": "Zentra-Helpdesk-Updater/1.0" },
-  });
-  if (!resp.ok) throw new Error(`Artifact download failed: HTTP ${resp.status}`);
-  const arrayBuf = await resp.arrayBuffer();
-  await fs.writeFile(target, Buffer.from(arrayBuf));
+  // Step 2: download the tarball through the SAME signed channel as the
+  // descriptor. The release-server daemon HMAC-protects every path under
+  // /releases/*, including binary downloads — an unsigned fetch returns 401.
+  // We use the predictable path here rather than trusting `desc.data.url`,
+  // so the request is bound to *this install's* signing material.
+  await logEvent(runId, "info", "fetch", `Downloading source.tar.gz (HMAC-signed)`);
+  const tarballPath = `/releases/${manifest.version}/source.tar.gz`;
+  const dl = await signedFetchBinary({ path: tarballPath });
+  if (!dl.ok || !dl.body) {
+    throw new Error(`Artifact download failed: ${dl.errorText ?? `HTTP ${dl.status}`} (path=${tarballPath})`);
+  }
+  await fs.writeFile(target, dl.body);
 
-  // Step 3: hash + verify against the descriptor's sha256.
-  const actual = crypto.createHash("sha256").update(Buffer.from(arrayBuf)).digest("hex");
+  // Step 3: hash + verify against the descriptor's sha256. The descriptor
+  // is a separately-signed JSON document, so this protects against a
+  // mid-transit substitution AND a release-server-side serving bug.
+  const actual = crypto.createHash("sha256").update(dl.body).digest("hex");
   if (actual !== desc.data.sha256) {
     throw new Error(`Artifact checksum mismatch — expected ${desc.data.sha256}, got ${actual}`);
   }
-  await logEvent(runId, "info", "verify", `Artifact verified (sha256=${actual.slice(0, 12)}…)`);
+  await logEvent(runId, "info", "verify",
+    `Artifact verified (${dl.body.byteLength} bytes, sha256=${actual.slice(0, 12)}…)`);
 
   return { artifactPath: target, sha256: actual };
 }
@@ -577,10 +608,17 @@ async function runOrchestrator(runId: number) {
     // place during the brief window where the binary is being swapped.
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await logEvent(runId, "error", run.state, msg);
-    await transition(runId, "failed", run.currentStep, {
+    // Re-read the row so we capture the ACTUAL step that failed, not the
+    // initial 'queued' value `run` was loaded with at the top of this fn.
+    const live = await prisma.updateRun.findUnique({
+      where: { id: runId },
+      select: { state: true, currentStep: true },
+    });
+    const failedStep = live?.currentStep ?? live?.state ?? "unknown";
+    await logEvent(runId, "error", failedStep, msg);
+    await transition(runId, "failed", failedStep, {
       errorMessage: msg,
-      errorStep:    run.currentStep ?? "unknown",
+      errorStep:    failedStep,
       finishedAt:   new Date(),
     });
     // Best-effort: drop maintenance mode on failure so the install stays usable
