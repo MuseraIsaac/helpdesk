@@ -81,6 +81,24 @@ router.get("/sections", requireAuth, requireAdmin, (_req, res) => {
  * always redacted). This lets agents load reply-composer defaults, branding
  * colours, SLA config, etc. without needing admin privileges.
  */
+/**
+ * GET /api/settings/password-policy
+ * Public — returns just the password complexity rules. Used by the login,
+ * forgot-password, and admin user-create forms to show a live checklist as
+ * the user types. Only the four policy flags are exposed; nothing else.
+ *
+ * Mounted before `/:section` so the literal path matches first.
+ */
+router.get("/password-policy", async (_req, res) => {
+  const s = await getSection("security");
+  res.json({
+    passwordMinLength:        s.passwordMinLength        ?? 8,
+    passwordRequireUppercase: s.passwordRequireUppercase ?? false,
+    passwordRequireNumber:    s.passwordRequireNumber    ?? true,
+    passwordRequireSymbol:    s.passwordRequireSymbol    ?? false,
+  });
+});
+
 router.get("/:section", requireAuth, async (req, res) => {
   const section = req.params.section as string;
   if (!isSettingsSection(section)) {
@@ -196,6 +214,23 @@ router.put("/:section", requireAuth, requireAdmin, async (req, res) => {
   // Bust the in-memory audit settings cache so logAudit picks up the change
   // within the same request cycle, not after the 60-second TTL expires.
   if (section === "audit") invalidateAuditSettingsCache();
+
+  // Same idea for the security policy cache (lockout, IP allowlist, password
+  // rules) so the admin's save is effective on the very next request.
+  if (section === "security") {
+    const { invalidateSecurityPolicyCache } = await import("../lib/security-policy");
+    invalidateSecurityPolicyCache();
+    // Email-verification enforcement lives inside Better Auth itself, so we
+    // also rebuild the auth instance to pick up changes to that flag.
+    void (async () => {
+      try {
+        const { reloadAuth } = await import("../lib/auth");
+        await reloadAuth();
+      } catch (err) {
+        console.error("[auth] reloadAuth after security save failed:", err);
+      }
+    })();
+  }
 
   // Rebuild Better Auth so Google Sign-In credential changes apply immediately
   // without a server restart. Fire-and-forget; failure is logged but doesn't

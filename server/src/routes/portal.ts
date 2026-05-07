@@ -87,7 +87,61 @@ router.post("/register", async (req, res) => {
     entityTitle: data.name, email: data.email, via: "portal",
   });
 
-  res.status(201).json({ message: "Account created. You can now sign in." });
+  // If the admin has the verification policy on, send the customer a one-time
+  // confirmation link via Better Auth's verifyEmail flow. Failure is logged
+  // but doesn't break registration — they can request a fresh link via the
+  // login page's "Resend verification email" affordance.
+  let verificationRequired = false;
+  try {
+    const { getSection } = await import("../lib/settings");
+    const sec = await getSection("security");
+    if (sec.requireEmailVerification) {
+      verificationRequired = true;
+      const { auth } = await import("../lib/auth");
+      void auth.api.sendVerificationEmail({ body: { email: data.email } });
+    }
+  } catch (err) {
+    console.error("[portal/register] failed to send verification email:", err);
+  }
+
+  res.status(201).json({
+    message: verificationRequired
+      ? "Account created. Check your inbox to verify your email before signing in."
+      : "Account created. You can now sign in.",
+    verificationRequired,
+  });
+});
+
+// ─── Resend verification email (public) ───────────────────────────────────
+//
+// Lets unverified users request a fresh confirmation link without exposing
+// whether the email exists — we always return 200 to avoid being a user-
+// enumeration oracle.
+router.post("/resend-verification", async (req, res) => {
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  if (!email) {
+    res.status(200).json({ ok: true });
+    return;
+  }
+  try {
+    const { getSection } = await import("../lib/settings");
+    const sec = await getSection("security");
+    if (!sec.requireEmailVerification) {
+      res.status(200).json({ ok: true });
+      return;
+    }
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { emailVerified: true },
+    });
+    if (user && !user.emailVerified) {
+      const { auth } = await import("../lib/auth");
+      void auth.api.sendVerificationEmail({ body: { email } });
+    }
+  } catch (err) {
+    console.error("[portal/resend-verification] failed:", err);
+  }
+  res.status(200).json({ ok: true });
 });
 
 // ─── My Account ────────────────────────────────────────────────────────────

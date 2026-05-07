@@ -53,7 +53,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Trash2, RotateCcw, CalendarClock, Send, Loader2, AtSign, Power, AlertCircle } from "lucide-react";
+import { Trash2, RotateCcw, CalendarClock, Send, Loader2, AtSign, Power, AlertCircle, Users, Search } from "lucide-react";
 import {
   generalSettingsSchema,
   brandingSettingsSchema,
@@ -105,6 +105,7 @@ import {
   type BusinessHoursSettings,
   type DemoDataSettings,
   type OutboundEmailAccount,
+  type TeamOutboundEmail,
 } from "core/schemas/settings.ts";
 import {
   languages,
@@ -116,6 +117,42 @@ import {
 import { injectThemeColors } from "@/lib/theme-injector";
 import { isValidHex, normalizeHex } from "@/lib/color-utils";
 import { portalAccentVars, agentLoginVars } from "@/lib/portalColor";
+
+// ── Dirty-field diff helper ───────────────────────────────────────────────────
+//
+// Returns an object containing only the top-level fields that the user has
+// actually edited, based on react-hook-form's `dirtyFields` map. Nested
+// objects/arrays are sent in full once any descendant is dirty — the server's
+// PUT handlers spread-merge incoming payloads at the top level, so partial
+// nested updates aren't expressible without rewriting the server side.
+//
+// Why this matters: every settings form re-submits the form's current state
+// on save. Secret fields are returned to the client masked as "••••••••" and
+// the server strips that placeholder before persisting — but if the masked
+// input ever drifts (autofill, focus blur, ⌘-Z), the server can't tell it's
+// stale and overwrites the real secret. Filtering by dirty fields guarantees
+// we never re-send a value the admin didn't explicitly change.
+function isFieldDirty(value: unknown): boolean {
+  if (value === true) return true;
+  if (Array.isArray(value)) return value.some(isFieldDirty);
+  if (value && typeof value === "object") return Object.values(value).some(isFieldDirty);
+  return false;
+}
+
+function pickDirtyFields<T extends Record<string, unknown>>(
+  values: T,
+  dirty: unknown,
+): Partial<T> {
+  const out: Partial<T> = {};
+  if (!dirty || typeof dirty !== "object") return out;
+  const dirtyMap = dirty as Record<string, unknown>;
+  for (const key of Object.keys(dirtyMap) as (keyof T)[]) {
+    if (isFieldDirty(dirtyMap[key as string])) {
+      out[key] = values[key];
+    }
+  }
+  return out;
+}
 
 // ── Loading skeleton ──────────────────────────────────────────────────────────
 
@@ -142,7 +179,7 @@ export function GeneralSection() {
   const { data, isLoading } = useSettings("general");
   const update = useUpdateSettings("general");
 
-  const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, formState: { isDirty, dirtyFields, errors } } =
     useForm<GeneralSettings>({ resolver: zodResolver(generalSettingsSchema), defaultValues: generalSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -153,7 +190,12 @@ export function GeneralSection() {
     <SettingsFormShell
       title="General"
       description="Organisation name, support email, and locale defaults."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -322,7 +364,7 @@ export function BrandingSection() {
   const { data, isLoading } = useSettings("branding");
   const update = useUpdateSettings("branding");
 
-  const { register, handleSubmit, reset, watch, setValue, formState: { isDirty } } =
+  const { register, handleSubmit, reset, watch, setValue, formState: { isDirty, dirtyFields } } =
     useForm<BrandingSettings>({ resolver: zodResolver(brandingSettingsSchema), defaultValues: brandingSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -348,7 +390,12 @@ export function BrandingSection() {
     <SettingsFormShell
       title="Branding"
       description="Company identity shown in the app, emails, and the public help center."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -802,7 +849,7 @@ export function TicketsSection() {
   const { data, isLoading } = useSettings("tickets");
   const update = useUpdateSettings("tickets");
 
-  const { handleSubmit, reset, control, register, watch, formState: { isDirty, errors } } =
+  const { handleSubmit, reset, control, register, watch, formState: { isDirty, dirtyFields, errors } } =
     useForm<TicketsSettings>({ resolver: zodResolver(ticketsSettingsSchema), defaultValues: ticketsSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -813,7 +860,12 @@ export function TicketsSection() {
     <SettingsFormShell
       title="Tickets"
       description="Default values and behavioral rules for new and existing tickets."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -1220,7 +1272,7 @@ export function TicketNumberingSection() {
 
   const defaultValues = useMemo(() => ticketNumberingSettingsSchema.parse({}), []);
 
-  const { register, handleSubmit, reset, control, formState: { isDirty } } =
+  const { register, handleSubmit, reset, control, formState: { isDirty, dirtyFields } } =
     useForm<TicketNumberingSettings>({ resolver: zodResolver(ticketNumberingSettingsSchema), defaultValues });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -1231,7 +1283,12 @@ export function TicketNumberingSection() {
     <SettingsFormShell
       title="Ticket Numbering"
       description="Each ITSM module has its own counter and prefix. Numbers are generated at creation and are permanent — changing settings here only affects new records."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -1288,7 +1345,7 @@ export function SlaSection() {
   const { data, isLoading } = useSettings("sla");
   const update = useUpdateSettings("sla");
 
-  const { register, handleSubmit, reset, control, watch, setValue, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, watch, setValue, formState: { isDirty, dirtyFields, errors } } =
     useForm<SlaSettings>({ resolver: zodResolver(slaSettingsSchema), defaultValues: slaSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -1310,7 +1367,12 @@ export function SlaSection() {
     <SettingsFormShell
       title="SLA"
       description="Define service-level targets and business hours for breach calculations."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -1413,7 +1475,7 @@ export function KnowledgeBaseSection() {
   const { data, isLoading } = useSettings("knowledge_base");
   const update = useUpdateSettings("knowledge_base");
 
-  const { handleSubmit, reset, control, register, formState: { isDirty, errors } } =
+  const { handleSubmit, reset, control, register, formState: { isDirty, dirtyFields, errors } } =
     useForm<KnowledgeBaseSettings>({ resolver: zodResolver(knowledgeBaseSettingsSchema), defaultValues: knowledgeBaseSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -1424,7 +1486,12 @@ export function KnowledgeBaseSection() {
     <SettingsFormShell
       title="Knowledge Base"
       description="Help center visibility and article display configuration."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -1476,7 +1543,7 @@ export function TemplatesSection() {
   const { data, isLoading } = useSettings("templates");
   const update = useUpdateSettings("templates");
 
-  const { handleSubmit, reset, control, formState: { isDirty } } =
+  const { handleSubmit, reset, control, formState: { isDirty, dirtyFields } } =
     useForm<TemplatesSettings>({ resolver: zodResolver(templatesSettingsSchema), defaultValues: templatesSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -1487,7 +1554,12 @@ export function TemplatesSection() {
     <SettingsFormShell
       title="Templates"
       description="Manage response template (macro) settings."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -1521,7 +1593,7 @@ export function AutomationsSection() {
   const { data, isLoading } = useSettings("automations");
   const update = useUpdateSettings("automations");
 
-  const { handleSubmit, reset, control, register, formState: { isDirty, errors } } =
+  const { handleSubmit, reset, control, register, formState: { isDirty, dirtyFields, errors } } =
     useForm<AutomationsSettings>({ resolver: zodResolver(automationsSettingsSchema), defaultValues: automationsSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -1532,7 +1604,12 @@ export function AutomationsSection() {
     <SettingsFormShell
       title="Automations"
       description="Configure the automation rule engine behaviour."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -1572,7 +1649,7 @@ export function UsersRolesSection() {
   const { data, isLoading } = useSettings("users_roles");
   const update = useUpdateSettings("users_roles");
 
-  const { handleSubmit, reset, control, formState: { isDirty } } =
+  const { handleSubmit, reset, control, formState: { isDirty, dirtyFields } } =
     useForm<UsersRolesSettings>({ resolver: zodResolver(usersRolesSettingsSchema), defaultValues: usersRolesSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -1583,7 +1660,12 @@ export function UsersRolesSection() {
     <SettingsFormShell
       title="Users & Roles"
       description="Agent account defaults and permission policies."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -1602,11 +1684,6 @@ export function UsersRolesSection() {
       </SettingsField>
       <SettingsSwitchRow label="Allow agent self-assignment" description="Agents can assign open tickets to themselves.">
         <Controller name="allowAgentSelfAssignment" control={control} render={({ field }) => (
-          <Switch checked={field.value} onCheckedChange={field.onChange} />
-        )} />
-      </SettingsSwitchRow>
-      <SettingsSwitchRow label="Require email verification" description="New accounts must verify their email before logging in.">
-        <Controller name="requireEmailVerification" control={control} render={({ field }) => (
           <Switch checked={field.value} onCheckedChange={field.onChange} />
         )} />
       </SettingsSwitchRow>
@@ -1685,7 +1762,7 @@ export function AppearanceSection() {
   const { data, isLoading } = useSettings("appearance");
   const update = useUpdateSettings("appearance");
 
-  const { handleSubmit, reset, control, watch, formState: { isDirty } } =
+  const { handleSubmit, reset, control, watch, formState: { isDirty, dirtyFields } } =
     useForm<AppearanceSettings>({ resolver: zodResolver(appearanceSettingsSchema), defaultValues: appearanceSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -1744,7 +1821,12 @@ export function AppearanceSection() {
     <SettingsFormShell
       title="Appearance"
       description="Interface defaults for all users. Individual users can override their own theme in Profile settings."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -2427,7 +2509,7 @@ export function IntegrationsSection() {
   const { data, isLoading } = useSettings("integrations");
   const update = useUpdateSettings("integrations");
 
-  const { handleSubmit, reset, control, register, watch, formState: { isDirty, errors } } =
+  const { handleSubmit, reset, control, register, watch, formState: { isDirty, dirtyFields, errors } } =
     useForm<IntegrationsSettings>({ resolver: zodResolver(integrationsSettingsSchema), defaultValues: integrationsSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -2461,7 +2543,19 @@ export function IntegrationsSection() {
     <SettingsFormShell
       title="Integrations"
       description="Connect email providers, Slack, and third-party services. API keys are stored encrypted and never echoed back."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Send only fields the user actually edited. Without this, every save
+        // re-submits the whole form — including secret fields whose displayed
+        // value is the redaction placeholder (e.g. `••••••••`). Browser
+        // autofill, focus blur, or even a re-render can subtly mutate that
+        // placeholder, after which the server stops recognising it and
+        // overwrites the real stored secret. By restricting the payload to
+        // dirty fields the password is never touched unless the admin
+        // explicitly retyped it.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -2576,6 +2670,10 @@ export function IntegrationsSection() {
 
       {emailEnabled && (
         <OutboundRoutingGroup control={control} watch={watch} />
+      )}
+
+      {emailEnabled && (
+        <TeamOutboundEmailGroup control={control} />
       )}
 
       <SettingsGroup title="Google Sign-In">
@@ -2772,7 +2870,7 @@ export function AdvancedSection() {
   const { data, isLoading } = useSettings("advanced");
   const update = useUpdateSettings("advanced");
 
-  const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, formState: { isDirty, dirtyFields, errors } } =
     useForm<AdvancedSettings>({ resolver: zodResolver(advancedSettingsSchema), defaultValues: advancedSettingsSchema.parse({}) });
 
   useEffect(() => { if (data) reset(data); }, [data, reset]);
@@ -2781,7 +2879,12 @@ export function AdvancedSection() {
     <SettingsFormShell
       title="Advanced"
       description="Debug settings, maintenance mode, and file upload configuration. Change with care."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
@@ -2823,23 +2926,6 @@ export function AdvancedSection() {
         </SettingsField>
       </SettingsGroup>
 
-      <SettingsGroup title="Security">
-        <SettingsField label="Session timeout" description="Idle sessions are invalidated after this many minutes." htmlFor="sessionTimeoutMinutes">
-          <div className="flex items-center gap-2">
-            <Input
-              id="sessionTimeoutMinutes"
-              type="number"
-              min={5}
-              max={43200}
-              className="w-28"
-              {...register("sessionTimeoutMinutes", { valueAsNumber: true })}
-            />
-            <span className="text-sm text-muted-foreground">minutes</span>
-          </div>
-          {errors.sessionTimeoutMinutes && <p className="text-xs text-destructive mt-1">{errors.sessionTimeoutMinutes.message}</p>}
-        </SettingsField>
-      </SettingsGroup>
-
       <SettingsGroup title="Debug">
         <SettingsSwitchRow label="Debug logging" description="Write verbose server logs. Disable in production.">
           <Controller name="debugLogging" control={control} render={({ field }) => (
@@ -2856,7 +2942,7 @@ export function AdvancedSection() {
 export function IncidentsSection() {
   const { data, isLoading } = useSettings("incidents");
   const update = useUpdateSettings("incidents");
-  const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, formState: { isDirty, dirtyFields, errors } } =
     useForm<IncidentsSettings>({ resolver: zodResolver(incidentsSettingsSchema), defaultValues: incidentsSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -2864,7 +2950,12 @@ export function IncidentsSection() {
     <SettingsFormShell
       title="Incidents"
       description="Configure severity levels, escalation behaviour, and major-incident thresholds."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
       {isLoading && <SectionLoading />}
@@ -2984,7 +3075,7 @@ export function IncidentsSection() {
 export function RequestsSection() {
   const { data, isLoading } = useSettings("requests");
   const update = useUpdateSettings("requests");
-  const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, formState: { isDirty, dirtyFields, errors } } =
     useForm<RequestsSettings>({ resolver: zodResolver(requestsSettingsSchema), defaultValues: requestsSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -2992,7 +3083,12 @@ export function RequestsSection() {
     <SettingsFormShell
       title="Requests"
       description="Service request approval, fulfillment targets, and catalog visibility."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
       {isLoading && <SectionLoading />}
@@ -3077,7 +3173,7 @@ export function RequestsSection() {
 export function ProblemsSection() {
   const { data, isLoading } = useSettings("problems");
   const update = useUpdateSettings("problems");
-  const { register, handleSubmit, reset, control, formState: { isDirty } } =
+  const { register, handleSubmit, reset, control, formState: { isDirty, dirtyFields } } =
     useForm<ProblemsSettings>({ resolver: zodResolver(problemsSettingsSchema), defaultValues: problemsSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -3085,7 +3181,12 @@ export function ProblemsSection() {
     <SettingsFormShell
       title="Problems"
       description="Problem management, known-error tracking, and recurrence detection."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
       {isLoading && <SectionLoading />}
@@ -3163,7 +3264,7 @@ export function ChangesSection() {
     return baseResolver(sanitized, ctx, options);
   };
 
-  const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, formState: { isDirty, dirtyFields, errors } } =
     useForm<ChangesSettings>({ resolver, defaultValues: changesSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
   const freezeEnabled = useWatch({ control, name: "freezeWindowEnabled" });
@@ -3200,7 +3301,12 @@ export function ChangesSection() {
     <SettingsFormShell
       title="Changes"
       description="Change types, CAB requirements, risk assessment, scheduling rules, and freeze windows."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
       {isLoading && <SectionLoading />}
@@ -3496,7 +3602,7 @@ export function ChangesSection() {
 export function ApprovalsSection() {
   const { data, isLoading } = useSettings("approvals");
   const update = useUpdateSettings("approvals");
-  const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, formState: { isDirty, dirtyFields, errors } } =
     useForm<ApprovalsSettings>({ resolver: zodResolver(approvalsSettingsSchema), defaultValues: approvalsSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -3504,7 +3610,12 @@ export function ApprovalsSection() {
     <SettingsFormShell
       title="Approvals"
       description="Approval workflow reminders, timeouts, delegation, and quorum rules."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
       {isLoading && <SectionLoading />}
@@ -3574,7 +3685,7 @@ export function ApprovalsSection() {
 export function CmdbSection() {
   const { data, isLoading } = useSettings("cmdb");
   const update = useUpdateSettings("cmdb");
-  const { register, handleSubmit, reset, control, watch, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, watch, formState: { isDirty, dirtyFields, errors } } =
     useForm<CmdbSettings>({ resolver: zodResolver(cmdbSettingsSchema), defaultValues: cmdbSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -3600,7 +3711,12 @@ export function CmdbSection() {
     <SettingsFormShell
       title="CMDB & Services"
       description="Configuration item types, service catalog, and impact analysis settings."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
       {isLoading && <SectionLoading />}
@@ -4031,7 +4147,7 @@ function NotificationEmailTemplates() {
 export function NotificationsSection() {
   const { data, isLoading } = useSettings("notifications");
   const update = useUpdateSettings("notifications");
-  const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, formState: { isDirty, dirtyFields, errors } } =
     useForm<NotificationsSettings>({ resolver: zodResolver(notificationsSettingsSchema), defaultValues: notificationsSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
   const digestEnabled = useWatch({ control, name: "digestModeEnabled" });
@@ -4040,7 +4156,12 @@ export function NotificationsSection() {
     <SettingsFormShell
       title="Notifications"
       description="Control which events generate notifications and how they are delivered."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
       {isLoading && <SectionLoading />}
@@ -4173,17 +4294,23 @@ export function NotificationsSection() {
 export function SecuritySection() {
   const { data, isLoading } = useSettings("security");
   const update = useUpdateSettings("security");
-  const { register, handleSubmit, reset, control, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, formState: { isDirty, dirtyFields, errors } } =
     useForm<SecuritySettings>({ resolver: zodResolver(securitySettingsSchema), defaultValues: securitySettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
   const lockoutEnabled = useWatch({ control, name: "failedLoginLockoutEnabled" });
   const ipAllowlistEnabled = useWatch({ control, name: "ipAllowlistEnabled" });
+  const enforceSessionTimeout = useWatch({ control, name: "enforceSessionTimeout" });
 
   return (
     <SettingsFormShell
       title="Security"
       description="Password policy, MFA enforcement, IP allowlisting, and login security."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
       {isLoading && <SectionLoading />}
@@ -4213,24 +4340,6 @@ export function SecuritySection() {
         </SettingsSwitchRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Multi-Factor Authentication">
-        <SettingsSwitchRow label="Enable MFA" description="Allow agents to enrol in multi-factor authentication.">
-          <Controller name="mfaEnabled" control={control} render={({ field }) => (
-            <Switch checked={field.value} onCheckedChange={field.onChange} />
-          )} />
-        </SettingsSwitchRow>
-        <SettingsSwitchRow label="Require MFA for admins" description="Administrators must have MFA enrolled to sign in.">
-          <Controller name="mfaRequiredForAdmins" control={control} render={({ field }) => (
-            <Switch checked={field.value} onCheckedChange={field.onChange} />
-          )} />
-        </SettingsSwitchRow>
-        <SettingsSwitchRow label="Require MFA for all agents" description="All agents must have MFA enrolled to sign in.">
-          <Controller name="mfaRequiredForAll" control={control} render={({ field }) => (
-            <Switch checked={field.value} onCheckedChange={field.onChange} />
-          )} />
-        </SettingsSwitchRow>
-      </SettingsGroup>
-
       <SettingsGroup title="Login Security">
         <SettingsSwitchRow label="Failed login lockout" description="Lock accounts after repeated failed sign-in attempts.">
           <Controller name="failedLoginLockoutEnabled" control={control} render={({ field }) => (
@@ -4254,11 +4363,36 @@ export function SecuritySection() {
             </SettingsField>
           </>
         )}
-        <SettingsSwitchRow label="Enforce session timeout" description="Force re-authentication after the session timeout period (set in Advanced).">
+        <SettingsSwitchRow label="Enforce session timeout" description="Idle agents are signed out after the timeout below. They'll be redirected to the login screen on their next request.">
           <Controller name="enforceSessionTimeout" control={control} render={({ field }) => (
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
+        <SettingsField
+          label="Session timeout"
+          description={enforceSessionTimeout
+            ? "Idle sessions are invalidated after this many minutes."
+            : "Has no effect until ‘Enforce session timeout’ is enabled above."}
+          htmlFor="sessionTimeoutMinutes"
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              id="sessionTimeoutMinutes"
+              type="number"
+              min={5}
+              max={43200}
+              className="w-28"
+              disabled={!enforceSessionTimeout}
+              {...register("sessionTimeoutMinutes", { valueAsNumber: true })}
+            />
+            <span className={`text-sm ${enforceSessionTimeout ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
+              minutes
+            </span>
+          </div>
+          {errors.sessionTimeoutMinutes && (
+            <p className="text-xs text-destructive mt-1">{errors.sessionTimeoutMinutes.message}</p>
+          )}
+        </SettingsField>
       </SettingsGroup>
 
       <SettingsGroup title="IP Allowlist">
@@ -4280,6 +4414,17 @@ export function SecuritySection() {
           </SettingsField>
         )}
       </SettingsGroup>
+
+      <SettingsGroup title="Account Verification">
+        <SettingsSwitchRow
+          label="Require email verification"
+          description="New accounts must click a verification link emailed to them before they can sign in. Existing accounts are unaffected."
+        >
+          <Controller name="requireEmailVerification" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
     </SettingsFormShell>
   );
 }
@@ -4289,7 +4434,7 @@ export function SecuritySection() {
 export function AuditSection() {
   const { data, isLoading } = useSettings("audit");
   const update = useUpdateSettings("audit");
-  const { register, handleSubmit, reset, control, watch, formState: { isDirty, errors } } =
+  const { register, handleSubmit, reset, control, watch, formState: { isDirty, dirtyFields, errors } } =
     useForm<AuditSettings>({ resolver: zodResolver(auditSettingsSchema), defaultValues: auditSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -4321,7 +4466,12 @@ export function AuditSection() {
     <SettingsFormShell
       title="Audit Log"
       description="Control what events are captured, how long they are retained, and export options."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
       {isLoading && <SectionLoading />}
@@ -4450,7 +4600,7 @@ const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export function BusinessHoursSection() {
   const { data, isLoading } = useSettings("business_hours");
   const update = useUpdateSettings("business_hours");
-  const { register, handleSubmit, reset, control, watch, setValue, formState: { isDirty } } =
+  const { register, handleSubmit, reset, control, watch, setValue, formState: { isDirty, dirtyFields } } =
     useForm<BusinessHoursSettings>({ resolver: zodResolver(businessHoursSettingsSchema), defaultValues: businessHoursSettingsSchema.parse({}) });
   useEffect(() => { if (data) reset(data); }, [data, reset]);
 
@@ -4467,7 +4617,12 @@ export function BusinessHoursSection() {
     <SettingsFormShell
       title="Business Hours"
       description="Define working days, hours, public holidays, and exclusion periods for Zentra."
-      onSubmit={handleSubmit((d) => update.mutate(d))}
+      onSubmit={handleSubmit((d) => {
+        // Only send fields the admin actually edited — see pickDirtyFields docs.
+        const diff = pickDirtyFields(d, dirtyFields);
+        if (Object.keys(diff).length === 0) return;
+        update.mutate(diff as typeof d);
+      })}
       isPending={update.isPending} isDirty={isDirty} error={update.error} isSuccess={update.isSuccess}
     >
       {isLoading && <SectionLoading />}
@@ -4545,7 +4700,7 @@ export function DemoDataSection() {
     handleSubmit,
     reset,
     control,
-    formState: { isDirty },
+    formState: { isDirty, dirtyFields },
   } = useForm<DemoDataSettings>({
     resolver: zodResolver(demoDataSettingsSchema),
     defaultValues: demoDataSettingsSchema.parse({}),
@@ -4555,7 +4710,11 @@ export function DemoDataSection() {
     if (data) reset(data);
   }, [data, reset]);
 
-  const onSubmit = handleSubmit((values) => updateSettings.mutate(values));
+  const onSubmit = handleSubmit((values) => {
+    const diff = pickDirtyFields(values, dirtyFields);
+    if (Object.keys(diff).length === 0) return;
+    updateSettings.mutate(diff as typeof values);
+  });
 
   if (isLoading) return (
     <div className="space-y-4 max-w-2xl">
@@ -4614,7 +4773,7 @@ export function TrashSection() {
   const updateSettings = useUpdateSettings("trash");
   const {
     handleSubmit, reset, control, register,
-    formState: { isDirty, errors },
+    formState: { isDirty, dirtyFields, errors },
   } = useForm<TrashSettings>({
     resolver: zodResolver(trashSettingsSchema),
     defaultValues: trashSettingsSchema.parse({}),
@@ -4624,7 +4783,11 @@ export function TrashSection() {
     if (data) reset(data);
   }, [data, reset]);
 
-  const onSubmit = handleSubmit((values) => updateSettings.mutate(values));
+  const onSubmit = handleSubmit((values) => {
+    const diff = pickDirtyFields(values, dirtyFields);
+    if (Object.keys(diff).length === 0) return;
+    updateSettings.mutate(diff as typeof values);
+  });
 
   if (isLoading) return (
     <div className="space-y-4 max-w-2xl">
@@ -5253,6 +5416,348 @@ function OutboundRoutingGroup({
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>Add at least one active outbound account above to route a purpose to a non-default sender.</div>
         </div>
+      )}
+    </SettingsGroup>
+  );
+}
+
+// ── Team-branded outbound email ───────────────────────────────────────────────
+//
+// One row per team. When an agent on the team replies, the From header reads
+// "Agent Name <team-group@example.com>". Toggle off to keep the email saved
+// while reverting to the system default for that team.
+
+interface TeamRow {
+  id: number;
+  name: string;
+  description: string | null;
+  color: string;
+  email: string | null;
+  memberCount: number;
+}
+
+function TeamOutboundEmailGroup({
+  control,
+}: {
+  control: IntegrationsFormCtl["control"];
+}) {
+  const { append, update, remove } = useFieldArray({ control, name: "teamOutboundEmails" });
+  const watchedFields = useWatch({ control, name: "teamOutboundEmails" }) as TeamOutboundEmail[] | undefined;
+  const accounts = (useWatch({ control, name: "outboundAccounts" }) ?? []) as OutboundEmailAccount[];
+  const activeAccounts = accounts
+    .map((acc, idx) => ({ acc, idx }))
+    .filter(({ acc }) => acc.isActive !== false && acc.id);
+
+  const { data: teamsData, isLoading } = useQuery({
+    queryKey: ["teams-list"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ teams: TeamRow[] }>("/api/teams");
+      return data.teams;
+    },
+  });
+
+  const teams = teamsData ?? [];
+
+  // Map of teamId → index in the field array, for quick lookups
+  const indexByTeamId = useMemo(() => {
+    const m = new Map<number, number>();
+    (watchedFields ?? []).forEach((f, i) => { if (f?.teamId != null) m.set(f.teamId, i); });
+    return m;
+  }, [watchedFields]);
+
+  const enabledCount = (watchedFields ?? []).filter((f) => f && f.isEnabled && f.accountId).length;
+  const mappedCount  = (watchedFields ?? []).filter((f) => f && f.accountId).length;
+
+  // ── Filtering / paging ──────────────────────────────────────────────────────
+  // With hundreds of teams, rendering them all blows up the page. We default
+  // to showing only configured teams and provide a search box + "show more"
+  // pager for the rest, so a fresh install isn't an endless scroll.
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "mapped" | "unmapped">("mapped");
+  const [pageSize, setPageSize] = useState(3);
+
+  // First-time visit: if the admin hasn't mapped anyone yet, show all teams so
+  // the section isn't empty.
+  useEffect(() => {
+    if (filter === "mapped" && mappedCount === 0 && teams.length > 0) {
+      setFilter("all");
+    }
+    // Only run when the data shape itself changes — don't fight admin's choice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mappedCount === 0, teams.length === 0]);
+
+  const filteredTeams = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return teams.filter((t) => {
+      const isMapped = (indexByTeamId.get(t.id) != null) &&
+        Boolean(watchedFields?.[indexByTeamId.get(t.id)!]?.accountId);
+      if (filter === "mapped"   && !isMapped) return false;
+      if (filter === "unmapped" &&  isMapped) return false;
+      if (!q) return true;
+      return (
+        t.name.toLowerCase().includes(q) ||
+        (t.description ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [teams, search, filter, indexByTeamId, watchedFields]);
+
+  const visibleTeams = filteredTeams.slice(0, pageSize);
+  const hiddenCount  = Math.max(0, filteredTeams.length - visibleTeams.length);
+
+  return (
+    <SettingsGroup title="Team-Branded Outbound Email">
+      <div className="text-xs text-muted-foreground -mt-2 mb-3 leading-relaxed">
+        Map each team to a group inbox so replies are sent as
+        {" "}<span className="font-mono text-foreground/80">Agent Name &lt;team-group@…&gt;</span>.
+        Recipients see who replied <em>and</em> can reach the whole team if they hit "Reply".
+        Toggle off to revert that team to the system default without losing the address.
+      </div>
+
+      {isLoading && (
+        <div className="rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
+          <Loader2 className="h-5 w-5 mx-auto mb-2 animate-spin text-muted-foreground/60" />
+          <div className="text-xs text-muted-foreground">Loading teams…</div>
+        </div>
+      )}
+
+      {!isLoading && teams.length === 0 && (
+        <div className="rounded-lg border border-dashed border-border bg-muted/20 px-6 py-10 text-center">
+          <Mail className="h-8 w-8 mx-auto mb-2 text-muted-foreground/60" />
+          <div className="text-sm font-medium text-foreground">No teams yet</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            Create a team in <span className="font-medium">Users &amp; Roles</span> to enable team-branded sending.
+          </div>
+        </div>
+      )}
+
+      {!isLoading && teams.length > 0 && activeAccounts.length === 0 && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-4 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+          <div className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
+            <div className="font-semibold mb-0.5">No outbound accounts configured</div>
+            Add an account in <span className="font-medium">Additional Outbound Email Accounts</span> above (e.g. <span className="font-mono">database@example.com</span>), then come back here to map it to a team.
+          </div>
+        </div>
+      )}
+
+      {!isLoading && teams.length > 0 && activeAccounts.length > 0 && (
+        <>
+          {/* Search + filter pills — keeps long lists usable */}
+          <div className="flex flex-col sm:flex-row gap-2 mb-3">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={`Search ${teams.length} team${teams.length === 1 ? "" : "s"}…`}
+                className="pl-8 h-9"
+              />
+            </div>
+            <div className="inline-flex items-center rounded-md border border-border bg-muted/30 p-0.5 self-start sm:self-auto">
+              {(["mapped", "all", "unmapped"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => { setFilter(opt); setPageSize(3); }}
+                  className={`px-3 py-1 text-xs font-medium rounded transition-colors capitalize ${
+                    filter === opt
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {opt === "mapped" ? `Mapped${mappedCount > 0 ? ` · ${mappedCount}` : ""}` : opt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredTeams.length === 0 && (
+            <div className="rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center text-xs text-muted-foreground">
+              {search.trim()
+                ? <>No teams match "<span className="font-medium text-foreground">{search}</span>".</>
+                : filter === "mapped"
+                  ? "No teams mapped yet. Switch to All to start configuring."
+                  : "No teams to show."}
+            </div>
+          )}
+
+          {filteredTeams.length > 0 && (
+          <div className="rounded-xl border border-border bg-card overflow-hidden divide-y divide-border/60">
+            {visibleTeams.map((team) => {
+              const idx = indexByTeamId.get(team.id);
+              const row = idx != null ? watchedFields?.[idx] : undefined;
+              const enabled = row?.isEnabled ?? false;
+              const accountId = row?.accountId ?? "";
+              const hasAccount = Boolean(accountId);
+              const account = hasAccount
+                ? activeAccounts.find(({ acc }) => acc.id === accountId)?.acc
+                : undefined;
+              const accountStillExists = hasAccount && Boolean(account);
+              const isLive = enabled && accountStillExists;
+
+              return (
+                <div key={team.id} className="flex items-center gap-3 px-4 py-3.5">
+                  {/* Team identity */}
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div
+                      className="h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ring-2 ring-background"
+                      style={{ background: `${team.color}1a`, color: team.color }}
+                      title={team.color}
+                    >
+                      <Users className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-foreground truncate">{team.name}</span>
+                        {isLive && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-700 dark:text-emerald-400">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            Live
+                          </span>
+                        )}
+                        {!isLive && accountStillExists && (
+                          <span className="inline-flex items-center text-[10px] font-semibold uppercase tracking-wide rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground">
+                            Paused
+                          </span>
+                        )}
+                        {hasAccount && !accountStillExists && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-400"
+                            title="The selected account was deleted or disabled. Pick a new one."
+                          >
+                            <AlertCircle className="h-2.5 w-2.5" />
+                            Unlinked
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {accountStillExists ? (
+                          <span className="flex items-center gap-1">
+                            <AtSign className="h-3 w-3" />
+                            <span className="font-mono">{account!.fromEmail}</span>
+                          </span>
+                        ) : (
+                          <span>
+                            {team.memberCount} member{team.memberCount === 1 ? "" : "s"}
+                            {team.description && <span className="hidden sm:inline"> · {team.description}</span>}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Account dropdown */}
+                  <div className="w-64 shrink-0">
+                    <Select
+                      value={accountId || "__none__"}
+                      onValueChange={(v) => {
+                        const nextAccountId = v === "__none__" ? "" : v;
+                        const next: TeamOutboundEmail = {
+                          teamId: team.id,
+                          accountId: nextAccountId,
+                          // Auto-enable when the admin first picks an account; keep the
+                          // toggle state otherwise.
+                          isEnabled: nextAccountId ? (enabled || !hasAccount) : enabled,
+                        };
+                        if (idx != null) update(idx, next);
+                        else append(next);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="System default" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">
+                          <span className="text-muted-foreground">System default</span>
+                        </SelectItem>
+                        {activeAccounts.map(({ acc, idx: accIdx }) => (
+                          <SelectItem key={acc.id} value={acc.id}>
+                            <div className="flex flex-col items-start leading-tight py-0.5">
+                              <span className="text-sm">{accountDisplayName(acc, accIdx)}</span>
+                              {acc.fromEmail && (
+                                <span className="text-[10px] text-muted-foreground font-mono">{acc.fromEmail}</span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* On/off + clear */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Switch
+                      checked={enabled}
+                      disabled={!accountStillExists}
+                      onCheckedChange={(v) => {
+                        if (idx != null) {
+                          update(idx, { teamId: team.id, accountId, isEnabled: v });
+                        }
+                      }}
+                      aria-label={`Enable team email for ${team.name}`}
+                    />
+                    {idx != null && (hasAccount || enabled) && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-destructive h-8 w-8"
+                        onClick={() => remove(idx)}
+                        aria-label="Clear team mapping"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          )}
+
+          {hiddenCount > 0 && (
+            <div className="mt-2 flex items-center justify-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setPageSize((n) => n + 3)}
+              >
+                Show {Math.min(3, hiddenCount)} more
+                <span className="ml-1 text-[10px] opacity-70">({hiddenCount} hidden)</span>
+              </Button>
+              {hiddenCount > 3 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => setPageSize(filteredTeams.length)}
+                >
+                  Show all
+                </Button>
+              )}
+            </div>
+          )}
+
+          <div className="mt-3 flex items-center justify-between gap-3 text-xs flex-wrap">
+            <div className="text-muted-foreground">
+              {enabledCount === 0
+                ? <>No team mapped to a group inbox yet.</>
+                : <>{enabledCount} of {teams.length} team{teams.length === 1 ? "" : "s"} sending as a group inbox.</>}
+              {filteredTeams.length > 0 && (
+                <span className="ml-1 opacity-70">
+                  Showing {visibleTeams.length} of {filteredTeams.length}.
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <AlertCircle className="h-3 w-3" />
+              <span>Replies use the agent's name with the selected account's address.</span>
+            </div>
+          </div>
+        </>
       )}
     </SettingsGroup>
   );

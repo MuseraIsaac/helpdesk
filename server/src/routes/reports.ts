@@ -254,8 +254,11 @@ router.get("/overview", async (req, res) => {
 
   const filters = parseTicketFilters(req.query as Record<string, unknown>);
 
-  // Build WHERE clause dynamically to avoid NULL timestamptz casting issues
-  let where = `WHERE TRUE`;
+  // Build WHERE clause dynamically to avoid NULL timestamptz casting issues.
+  // Always exclude soft-deleted tickets — the agent UI hides them, so report
+  // counts must too. Without this filter the dashboard showed e.g. "5 open"
+  // for tickets that had been deleted in another instance.
+  let where = `WHERE "deleted_at" IS NULL`;
   const params: unknown[] = [AI_AGENT_ID];
 
   if (fromDate) {
@@ -394,6 +397,7 @@ router.get("/volume", async (req, res) => {
     FROM days d
     LEFT JOIN ticket t
       ON t."createdAt"::date = d.day
+     AND t."deleted_at" IS NULL
      AND t."createdAt" >= $1
      AND t."createdAt" <= $2${tf.frag}
     GROUP BY d.day
@@ -421,9 +425,11 @@ router.get("/breakdowns", async (req, res) => {
   const notExcluded: ExcludedStatus[] = [...EXCLUDED_STATUSES];
   // Status filter takes precedence over the default "exclude system statuses" rule
   // so a user filtering by status='resolved' sees only resolved tickets.
+  // Always exclude soft-deleted tickets from every report query.
+  const notDeleted = { deletedAt: null } as const;
   const baseWhere = filters.status
-    ? { ...dateWhere, ...filterWhere }
-    : { status: { notIn: notExcluded }, ...dateWhere, ...filterWhere };
+    ? { ...notDeleted, ...dateWhere, ...filterWhere }
+    : { ...notDeleted, status: { notIn: notExcluded }, ...dateWhere, ...filterWhere };
 
   // Category and priority: two groupBy calls each (total + open) merged in JS
   const [categoryTotal, categoryOpen, priorityTotal, priorityOpen] = await Promise.all([
@@ -435,7 +441,7 @@ router.get("/breakdowns", async (req, res) => {
     }),
     prisma.ticket.groupBy({
       by: ["category"],
-      where: { ...dateWhere, ...filterWhere, status: "open" },
+      where: { ...notDeleted, ...dateWhere, ...filterWhere, status: "open" },
       _count: { id: true },
     }),
     prisma.ticket.groupBy({
@@ -446,7 +452,7 @@ router.get("/breakdowns", async (req, res) => {
     }),
     prisma.ticket.groupBy({
       by: ["priority"],
-      where: { ...dateWhere, ...filterWhere, status: "open" },
+      where: { ...notDeleted, ...dateWhere, ...filterWhere, status: "open" },
       _count: { id: true },
     }),
   ]);
@@ -470,8 +476,8 @@ router.get("/breakdowns", async (req, res) => {
 
   // Assignees: needs JOIN so use raw SQL
   let assigneeWhere = filters.status
-    ? `WHERE t."assignedToId" IS NOT NULL`
-    : `WHERE t.status NOT IN ('new','processing') AND t."assignedToId" IS NOT NULL`;
+    ? `WHERE t."deleted_at" IS NULL AND t."assignedToId" IS NOT NULL`
+    : `WHERE t."deleted_at" IS NULL AND t.status NOT IN ('new','processing') AND t."assignedToId" IS NOT NULL`;
   const assigneeParams: unknown[] = [];
   if (fromDate) {
     assigneeParams.push(fromDate);
@@ -556,7 +562,7 @@ router.get("/aging", async (req, res) => {
         ELSE 4
       END                                           AS sort
     FROM ticket
-    WHERE status = 'open'${tf.frag}
+    WHERE "deleted_at" IS NULL AND status = 'open'${tf.frag}
     GROUP BY bucket, sort
     ORDER BY sort
   `, ...tf.params);
@@ -626,7 +632,7 @@ router.get("/sla-by-dimension", async (req, res) => {
         COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL)               AS "totalWithSla",
         COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL
                            AND ${breachExpr})                                AS "breached"
-      FROM ticket WHERE status NOT IN ('new','processing') ${d1.where}
+      FROM ticket WHERE "deleted_at" IS NULL AND status NOT IN ('new','processing')${d1.where}
       GROUP BY priority ORDER BY "totalWithSla" DESC
     `, ...d1.params),
     prisma.$queryRawUnsafe<SlaDimRow[]>(`
@@ -634,7 +640,7 @@ router.get("/sla-by-dimension", async (req, res) => {
         COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL)               AS "totalWithSla",
         COUNT(*) FILTER (WHERE "resolutionDueAt" IS NOT NULL
                            AND ${breachExpr})                                AS "breached"
-      FROM ticket WHERE status NOT IN ('new','processing') ${d2.where}
+      FROM ticket WHERE "deleted_at" IS NULL AND status NOT IN ('new','processing')${d2.where}
       GROUP BY category ORDER BY "totalWithSla" DESC
     `, ...d2.params),
     prisma.$queryRawUnsafe<SlaDimRow[]>(`
@@ -643,7 +649,7 @@ router.get("/sla-by-dimension", async (req, res) => {
         COUNT(*) FILTER (WHERE t."resolutionDueAt" IS NOT NULL
                            AND ${tBreachExpr})                               AS "breached"
       FROM ticket t LEFT JOIN "queue" q ON q.id = t."queueId"
-      WHERE t.status NOT IN ('new','processing') ${d3.where}
+      WHERE t."deleted_at" IS NULL AND t.status NOT IN ('new','processing') ${d3.where}
       GROUP BY q.name ORDER BY "totalWithSla" DESC
     `, ...d3.params),
   ]);
@@ -1087,7 +1093,7 @@ router.get("/channel-breakdown", async (req, res) => {
   const rows = await prisma.$queryRawUnsafe<SourceRow[]>(`
     SELECT COALESCE(source, 'unknown') AS source, COUNT(*) AS count
     FROM ticket
-    WHERE TRUE ${statusGuard}
+    WHERE "deleted_at" IS NULL ${statusGuard}
       AND "createdAt" >= $1 AND "createdAt" <= $2${tf.frag}
     GROUP BY source
     ORDER BY count DESC
@@ -1146,7 +1152,8 @@ router.get("/resolution-distribution", async (req, res) => {
         ELSE 7
       END AS sort
     FROM ticket
-    WHERE "resolvedAt" IS NOT NULL
+    WHERE "deleted_at" IS NULL
+      AND "resolvedAt" IS NOT NULL
       AND status IN ('resolved', 'closed')
       AND "createdAt" >= $1 AND "createdAt" <= $2${tf.frag}
     GROUP BY bucket, sort
@@ -1198,7 +1205,8 @@ router.get("/agent-leaderboard", async (req, res) => {
       COUNT(*) FILTER (WHERE t."slaBreached" = true)                                AS "slaBreached"
     FROM ticket t
     JOIN "user" u ON u.id = t."assignedToId"
-    WHERE t."assignedToId" IS NOT NULL
+    WHERE t."deleted_at" IS NULL
+      AND t."assignedToId" IS NOT NULL
       ${statusGuard}
       AND t."createdAt" >= $1 AND t."createdAt" <= $2${tf.frag}
     GROUP BY t."assignedToId", u.name
@@ -1251,12 +1259,13 @@ router.get("/backlog-trend", async (req, res) => {
     events AS (
       SELECT "createdAt"::date  AS day, 1 AS opened, 0 AS closed
       FROM ticket
-      WHERE TRUE ${statusGuard}
+      WHERE "deleted_at" IS NULL ${statusGuard}
         AND "createdAt" >= $1 AND "createdAt" <= $2${tf.frag}
       UNION ALL
       SELECT "resolvedAt"::date AS day, 0 AS opened, 1 AS closed
       FROM ticket
-      WHERE "resolvedAt" IS NOT NULL
+      WHERE "deleted_at" IS NULL
+        AND "resolvedAt" IS NOT NULL
         ${filters.status ? "" : "AND status IN ('resolved','closed')"}
         AND "resolvedAt" >= $1 AND "resolvedAt" <= $2${tf.frag}
     )
@@ -1309,7 +1318,8 @@ router.get("/fcr", async (req, res) => {
       COUNT(*) FILTER (WHERE COALESCE(cr.customer_reply_count, 0) = 0)      AS "firstContact"
     FROM ticket t
     LEFT JOIN customer_replies cr ON cr."ticketId" = t.id
-    WHERE t.status IN ('resolved', 'closed')
+    WHERE t."deleted_at" IS NULL
+      AND t.status IN ('resolved', 'closed')
       AND t."createdAt" >= $1 AND t."createdAt" <= $2${tf.frag}
   `, since, until, ...tf.params);
 
@@ -1361,7 +1371,7 @@ router.get("/top-open-tickets", async (req, res) => {
       COALESCE(u.name, 'Unassigned')          AS "assigneeName"
     FROM ticket t
     LEFT JOIN "user" u ON u.id = t."assignedToId"
-    WHERE t.status = 'open'${tf.frag}
+    WHERE t."deleted_at" IS NULL AND t.status = 'open'${tf.frag}
     ORDER BY t."createdAt" ASC
     LIMIT 10
   `, ...tf.params);
@@ -1571,6 +1581,7 @@ router.get("/operational-health", async (_req, res) => {
         CASE WHEN "resolutionDueAt"    IS NOT NULL AND "resolvedAt"        IS NULL
              THEN "resolutionDueAt"    END AS res_due
       FROM ticket
+      WHERE "deleted_at" IS NULL
     ),
     t2 AS (
       SELECT *,
@@ -1619,7 +1630,8 @@ router.get("/operational-health", async (_req, res) => {
       )                                                                  AS at_risk,
 
       (SELECT COUNT(*) FROM ticket tt
-       WHERE tt.status IN ('open','in_progress')
+       WHERE tt."deleted_at" IS NULL
+         AND tt.status IN ('open','in_progress')
          AND tt."assignedToId" IS NOT NULL
          AND NOT EXISTS (
            SELECT 1 FROM reply r
@@ -1964,7 +1976,7 @@ router.get("/custom-field-distribution", async (req, res) => {
   // Using parameterised queries via Prisma.sql ensures the dynamic table name
   // and field key are safe — table name is whitelisted above; fieldKey is
   // regex-validated above.
-  const where: string[] = ['"deletedAt" IS NULL'];
+  const where: string[] = ['"deleted_at" IS NULL'];
   const params: (Date | string)[] = [];
   if (fromDate) {
     params.push(fromDate);

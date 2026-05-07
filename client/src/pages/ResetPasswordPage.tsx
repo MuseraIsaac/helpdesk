@@ -13,10 +13,14 @@ import {
   Loader2, Lock, ArrowLeft, ChevronRight, CheckCircle2,
   HeadphonesIcon, AlertTriangle,
 } from "lucide-react";
+import PasswordPolicyChecklist, {
+  usePasswordPolicy,
+  isPasswordCompliant,
+} from "@/components/PasswordPolicyChecklist";
 
 const schema = z
   .object({
-    password:        z.string().min(8, "Use at least 8 characters"),
+    password:        z.string().min(1, "Password is required"),
     confirmPassword: z.string().min(1, "Please confirm your password"),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -48,12 +52,22 @@ export default function ResetPasswordPage() {
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<FormData>({ resolver: zodResolver(schema) });
+
+  const passwordValue = watch("password") ?? "";
+  const { data: policy } = usePasswordPolicy();
+  const policyOk = isPasswordCompliant(passwordValue, policy);
 
   const mutation = useMutation({
     mutationFn: async (data: FormData) => {
       setServerError(null);
+      // Hard-stop on the client too — server still validates, but a clean
+      // inline message beats waiting for a 400.
+      if (policy && !isPasswordCompliant(data.password, policy)) {
+        throw new Error("Password doesn't meet the security requirements below.");
+      }
       const res = await resetPassword({ newPassword: data.password, token });
       if (res?.error) {
         // Better Auth surfaces token-expired / invalid as `error.message`.
@@ -178,6 +192,7 @@ export default function ResetPasswordPage() {
                     <span>•</span> {errors.password.message}
                   </p>
                 )}
+                <PasswordPolicyChecklist password={passwordValue} alwaysShow className="mt-1" />
               </div>
 
               <div className="space-y-1.5">
@@ -205,8 +220,8 @@ export default function ResetPasswordPage() {
                 type="submit"
                 size="lg"
                 className={`w-full h-11 font-semibold gap-2 mt-2 text-white ${accent.bg}`}
-                disabled={mutation.isPending}
-                style={!mutation.isPending ? { boxShadow: accent.glow } : undefined}
+                disabled={mutation.isPending || (passwordValue.length > 0 && !policyOk)}
+                style={!mutation.isPending && policyOk ? { boxShadow: accent.glow } : undefined}
               >
                 {mutation.isPending ? (
                   <>

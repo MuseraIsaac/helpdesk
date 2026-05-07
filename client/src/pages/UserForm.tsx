@@ -26,6 +26,10 @@ import { AlertTriangle, Users as UsersIcon, X, Check } from "lucide-react";
 import { Role } from "core/constants/role.ts";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
+import PasswordPolicyChecklist, {
+  usePasswordPolicy,
+  isPasswordCompliant,
+} from "@/components/PasswordPolicyChecklist";
 
 interface TeamOption { id: number; name: string; color: string | null }
 
@@ -76,6 +80,7 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
       email: user?.email ?? "",
       password: "",
       role: (user?.role as CreateUserInput["role"]) ?? "agent",
+      mustChangePassword: false,
     },
   });
 
@@ -213,20 +218,9 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
           <ErrorMessage message={form.formState.errors.email.message} />
         )}
       </div>
-      <div className="space-y-2">
-        <Label htmlFor="password">Password</Label>
-        <Input
-          id="password"
-          type="password"
-          placeholder={isEdit ? "Leave blank to keep current" : "Minimum 8 characters"}
-          autoComplete="new-password"
-          aria-invalid={!!form.formState.errors.password}
-          {...form.register("password")}
-        />
-        {form.formState.errors.password && (
-          <ErrorMessage message={form.formState.errors.password.message} />
-        )}
-      </div>
+      <PasswordField form={form} isEdit={isEdit} />
+
+      <ForcePasswordChangeField form={form} />
       <div className="space-y-2">
         <Label htmlFor="role">Role</Label>
         <select
@@ -386,5 +380,79 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
       </AlertDialogContent>
     </AlertDialog>
     </>
+  );
+}
+
+// ── Password field with live policy checklist ───────────────────────────────
+
+function PasswordField({
+  form,
+  isEdit,
+}: {
+  form: ReturnType<typeof useForm<CreateUserInput | UpdateUserInput>>;
+  isEdit: boolean;
+}) {
+  const { data: policy } = usePasswordPolicy();
+  const password = (form.watch("password") ?? "") as string;
+  // In edit mode an empty password means "keep current" — don't run the
+  // checklist or block submit. In create mode the field is mandatory.
+  const showChecklist = !isEdit || password.length > 0;
+  const compliant     = !showChecklist || isPasswordCompliant(password, policy);
+  const minLength     = policy?.passwordMinLength ?? 8;
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="password">Password</Label>
+      <Input
+        id="password"
+        type="password"
+        placeholder={isEdit ? "Leave blank to keep current" : `Minimum ${minLength} characters`}
+        autoComplete="new-password"
+        aria-invalid={!!form.formState.errors.password || (showChecklist && !compliant)}
+        {...form.register("password")}
+      />
+      {form.formState.errors.password && (
+        <ErrorMessage message={form.formState.errors.password.message} />
+      )}
+      {showChecklist && (
+        <PasswordPolicyChecklist password={password} alwaysShow />
+      )}
+    </div>
+  );
+}
+
+// ── Force-password-change checkbox ──────────────────────────────────────────
+
+function ForcePasswordChangeField({
+  form,
+}: {
+  form: ReturnType<typeof useForm<CreateUserInput | UpdateUserInput>>;
+}) {
+  const value = (form.watch("mustChangePassword") ?? false) as boolean;
+  return (
+    <label
+      className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer select-none transition-colors ${
+        value
+          ? "border-primary/40 bg-primary/5"
+          : "border-border bg-muted/20 hover:bg-muted/40"
+      }`}
+    >
+      <input
+        type="checkbox"
+        className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
+        checked={value}
+        onChange={(e) => form.setValue("mustChangePassword", e.target.checked, { shouldDirty: true })}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-medium text-foreground">Force password change on first sign-in</span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+          Recommended when issuing a temporary password. The user is sent to a
+          dedicated change-password screen the next time they sign in and can't
+          access the rest of the app until they pick their own password.
+        </p>
+      </div>
+    </label>
   );
 }

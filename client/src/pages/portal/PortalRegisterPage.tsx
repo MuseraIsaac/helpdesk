@@ -14,8 +14,12 @@ import { Label } from "@/components/ui/label";
 import {
   Loader2, Mail, Lock, User, ChevronRight,
   ArrowLeft, HeadphonesIcon, Sparkles,
-  ShieldCheck, Zap, Users,
+  ShieldCheck, Zap, Users, MailCheck,
 } from "lucide-react";
+import PasswordPolicyChecklist, {
+  usePasswordPolicy,
+  isPasswordCompliant,
+} from "@/components/PasswordPolicyChecklist";
 
 const BENEFITS = [
   { icon: Zap,         text: "Instant ticket creation and status tracking" },
@@ -48,15 +52,41 @@ export default function PortalRegisterPage() {
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<PortalRegisterInput>({ resolver: zodResolver(portalRegisterSchema) });
 
+  const passwordValue = watch("password") ?? "";
+  const emailValue    = watch("email") ?? "";
+  const { data: policy } = usePasswordPolicy();
+  const policyOk = isPasswordCompliant(passwordValue, policy);
+
+  // After register, the API may indicate verification is required. We then
+  // park the user on a confirmation panel rather than the login page so they
+  // know to check their inbox first.
+  const [verificationRequired, setVerificationRequired] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState("");
+
   const mutation = useMutation({
     mutationFn: async (data: PortalRegisterInput) => {
-      await axios.post("/api/portal/register", data);
+      const { data: resp } = await axios.post<{ verificationRequired?: boolean }>(
+        "/api/portal/register", data,
+      );
+      return { email: data.email, verificationRequired: !!resp?.verificationRequired };
     },
-    onSuccess: () => {
-      navigate("/portal/login", { replace: true });
+    onSuccess: ({ email, verificationRequired }) => {
+      if (verificationRequired) {
+        setRegisteredEmail(email);
+        setVerificationRequired(true);
+      } else {
+        navigate("/portal/login", { replace: true });
+      }
+    },
+  });
+
+  const resendMutation = useMutation({
+    mutationFn: async (email: string) => {
+      await axios.post("/api/portal/resend-verification", { email });
     },
   });
 
@@ -165,6 +195,15 @@ export default function PortalRegisterPage() {
 
         <div className="w-full max-w-[400px] relative z-10">
 
+          {verificationRequired ? (
+            <VerifyInboxPanel
+              email={registeredEmail || emailValue}
+              onResend={() => resendMutation.mutate(registeredEmail || emailValue)}
+              resending={resendMutation.isPending}
+              resent={resendMutation.isSuccess}
+            />
+          ) : (
+          <>
           <Link
             to="/portal/login"
             className="inline-flex items-center gap-1.5 text-xs text-muted-foreground/60 hover:text-muted-foreground mb-6 transition-colors"
@@ -257,14 +296,15 @@ export default function PortalRegisterPage() {
                   <span>•</span> {errors.password.message}
                 </p>
               )}
+              <PasswordPolicyChecklist password={passwordValue} alwaysShow className="mt-1" />
             </div>
 
             <Button
               type="submit"
               size="lg"
               className="w-full h-11 font-semibold gap-2 mt-2 bg-emerald-700 hover:bg-emerald-800 text-white"
-              disabled={mutation.isPending}
-              style={!mutation.isPending ? { boxShadow: "0 4px 16px rgba(5,150,105,0.35)" } : undefined}
+              disabled={mutation.isPending || (passwordValue.length > 0 && !policyOk)}
+              style={!mutation.isPending && policyOk ? { boxShadow: "0 4px 16px rgba(5,150,105,0.35)" } : undefined}
             >
               {mutation.isPending ? (
                 <><Loader2 className="h-4 w-4 animate-spin" />Creating account…</>
@@ -285,11 +325,77 @@ export default function PortalRegisterPage() {
               </Link>
             </p>
           </div>
+          </>
+          )}
         </div>
 
         <p className="absolute bottom-6 text-[11px] text-muted-foreground/40">
           {companyName} · Customer Support Portal
         </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Verify-your-inbox panel ──────────────────────────────────────────────────
+
+function VerifyInboxPanel({
+  email,
+  onResend,
+  resending,
+  resent,
+}: {
+  email: string;
+  onResend: () => void;
+  resending: boolean;
+  resent: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent p-6 text-center space-y-4">
+      <div className="mx-auto h-14 w-14 rounded-2xl bg-emerald-500/10 ring-2 ring-emerald-500/20 flex items-center justify-center">
+        <MailCheck className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
+      </div>
+      <div>
+        <h1 className="text-xl font-black tracking-tight text-foreground">Check your inbox</h1>
+        <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+          We've sent a verification link to{" "}
+          <span className="font-semibold text-foreground break-all">{email}</span>.
+          Click it to confirm your email — then you can sign in.
+        </p>
+      </div>
+
+      <div className="rounded-lg bg-muted/40 border border-border/50 px-4 py-3 text-left space-y-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Didn't receive the email?
+        </p>
+        <ul className="text-xs text-muted-foreground space-y-1">
+          <li>• Check your spam or promotions folder.</li>
+          <li>• Make sure <span className="font-mono text-foreground/80">{email}</span> is correct.</li>
+          <li>• Verification links expire after 24 hours.</li>
+        </ul>
+      </div>
+
+      <div className="flex items-center justify-center gap-2 pt-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onResend}
+          disabled={resending || resent}
+          className="font-semibold"
+        >
+          {resending
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Sending…</>
+            : resent
+              ? <>Email resent ✓</>
+              : <>Resend email</>}
+        </Button>
+        <Link
+          to="/portal/login"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:underline underline-offset-4 px-3 py-2"
+        >
+          Back to sign in <ArrowLeft className="h-3 w-3 rotate-180" />
+        </Link>
       </div>
     </div>
   );

@@ -21,6 +21,8 @@ export const createUserSchema = z.object({
   email: z.email("Invalid email address"),
   password: z.string().trim().min(8, "Password must be at least 8 characters"),
   role: roleKeyField.optional(),
+  /** When true, the new user is sent to /change-password on first sign-in. */
+  mustChangePassword: z.boolean().optional(),
 });
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;
@@ -34,6 +36,7 @@ export const updateUserSchema = z.object({
   ]),
   role: roleKeyField.optional(),
   globalTicketView: z.boolean().optional(),
+  mustChangePassword: z.boolean().optional(),
 });
 
 export const patchUserSchema = z.object({

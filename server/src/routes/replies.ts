@@ -65,7 +65,7 @@ router.post("/", requireAuth, async (req, res) => {
         select: { emailMessageId: true },
         orderBy: { createdAt: "asc" },
       },
-      team: { select: { email: true } },
+      team: { select: { id: true, email: true } },
     },
   });
   if (!ticket) {
@@ -255,10 +255,36 @@ router.post("/", requireAuth, async (req, res) => {
     emailBodyText = plainBody + quoteHeader + quotedBody.split("\n").map(l => `> ${l}`).join("\n");
   }
 
-  // Use the team's email address (if set) so the reply appears to come from
-  // the team inbox rather than the generic system from-address.
-  // Produces: "Isaac Musera <support@acme.io>"
-  const teamEmail = ticket.team?.email ?? null;
+  // Resolve the team-branded sender for this reply.
+  //
+  //   1. Settings → Integrations → "Team-Branded Outbound" map.
+  //      Admin picks an Outbound Account for the team. We then route via
+  //      that account's SMTP/SendGrid transport AND rebrand the From as
+  //      "Agent Name <account.fromEmail>". Toggling isEnabled off opts
+  //      the team out without losing the selection.
+  //   2. Legacy `team.email` column — for teams that were configured before
+  //      the multi-account UI shipped. Just rebrands the From; transport
+  //      stays on the default account.
+  //   3. No override — system default.
+  let teamAccountId: string | null = null;
+  let teamFromEmail: string | null = null;
+
+  if (ticket.team?.id) {
+    const integrationsCfg = await getSection("integrations");
+    const mapping = (integrationsCfg.teamOutboundEmails ?? [])
+      .find((m) => m.teamId === ticket.team!.id);
+
+    if (mapping && mapping.isEnabled && mapping.accountId) {
+      const account = (integrationsCfg.outboundAccounts ?? [])
+        .find((a) => a.id === mapping.accountId && a.isActive !== false);
+      if (account?.fromEmail) {
+        teamAccountId = account.id;
+        teamFromEmail = account.fromEmail;
+      }
+    } else if (!mapping && ticket.team.email) {
+      teamFromEmail = ticket.team.email;
+    }
+  }
 
   await sendEmailJob({
     to: emailTo,
@@ -271,7 +297,8 @@ router.post("/", requireAuth, async (req, res) => {
     ...(replyType !== "forward" && inReplyTo && { inReplyTo }),
     ...(replyType !== "forward" && references && { references }),
     ...(data.attachmentIds?.length && { attachmentIds: data.attachmentIds }),
-    ...(teamEmail && { from: { email: teamEmail, name: req.user.name } }),
+    ...(teamAccountId && { accountId: teamAccountId }),
+    ...(teamFromEmail && { from: { email: teamFromEmail, name: req.user.name } }),
   });
 
   // Fire ticket.reply_sent for event_workflow rules

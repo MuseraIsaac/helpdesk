@@ -19,6 +19,7 @@ import { logSystemAudit } from "./audit";
 function buildAuth(opts: {
   googleClientId?: string;
   googleClientSecret?: string;
+  requireEmailVerification?: boolean;
 }) {
   const googleEnabled = !!(opts.googleClientId && opts.googleClientSecret);
 
@@ -28,9 +29,51 @@ function buildAuth(opts: {
     database: prismaAdapter(prisma, {
       provider: "postgresql",
     }),
+    /**
+     * Email verification — sends the one-time link via the existing outbound
+     * email worker. The user lands on the in-app /verify-email page which
+     * POSTs the token back to /api/auth/verify-email.
+     */
+    emailVerification: {
+      sendOnSignUp: true,
+      autoSignInAfterVerification: false,
+      sendVerificationEmail: async ({ user, url, token }) => {
+        const { sendEmailJob } = await import("./send-email");
+        const appOrigin =
+          process.env.APP_URL ||
+          process.env.BETTER_AUTH_URL ||
+          process.env.BETTER_AUTH_BASE_URL ||
+          "";
+        // Better Auth gives us its own callback URL; rewrite to our in-app
+        // verification page so the user lands on a styled confirmation.
+        const verifyUrl = appOrigin
+          ? `${appOrigin.replace(/\/$/, "")}/verify-email?token=${encodeURIComponent(token)}`
+          : url;
+        const subject = "Verify your email";
+        const text =
+          `Hi ${user.name || "there"},\n\n` +
+          `Welcome to the helpdesk! Please confirm your email address by ` +
+          `opening the link below (valid for 24 hours):\n${verifyUrl}\n\n` +
+          `If you didn't expect this email, you can safely ignore it.\n`;
+        const html =
+          `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.55;color:#111;max-width:560px">` +
+          `<p>Hi ${user.name || "there"},</p>` +
+          `<p>Welcome to the helpdesk! Please confirm your email address by clicking the button below — the link is valid for 24 hours.</p>` +
+          `<p style="margin:24px 0"><a href="${verifyUrl}" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#4f46e5;color:#fff;text-decoration:none;font-weight:600">Verify email</a></p>` +
+          `<p style="font-size:12px;color:#666">Or copy this link into your browser:<br><span style="word-break:break-all">${verifyUrl}</span></p>` +
+          `<hr style="border:0;border-top:1px solid #e5e7eb;margin:24px 0">` +
+          `<p style="font-size:12px;color:#666">If you didn't expect this email, you can safely ignore it.</p>` +
+          `</div>`;
+        await sendEmailJob({ to: user.email, subject, body: text, bodyHtml: html, purpose: "notifications" });
+      },
+    },
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,
+      // Block sign-in for users with `emailVerified=false` when the policy is
+      // on. Better Auth returns its standard EMAIL_NOT_VERIFIED error which
+      // the login page converts into a friendly inline message.
+      requireEmailVerification: opts.requireEmailVerification ?? false,
       /**
        * Better Auth invokes this when a user posts to /api/auth/forget-password.
        * The reset URL it provides already includes the secure token; we just
@@ -109,6 +152,12 @@ function buildAuth(opts: {
           required: false,
           input: false,
         },
+        mustChangePassword: {
+          type: "boolean",
+          required: false,
+          defaultValue: false,
+          input: false,
+        },
       },
     },
     databaseHooks: {
@@ -156,6 +205,7 @@ type AuthInstance = ReturnType<typeof buildAuth>;
 let _instance: AuthInstance = buildAuth({
   googleClientId:     process.env.GOOGLE_CLIENT_ID,
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  requireEmailVerification: false,
 });
 
 let _googleEnabled =
@@ -197,13 +247,28 @@ async function resolveGoogleCreds(): Promise<{
   }
 }
 
+/** Read the current "require email verification" policy from Settings → Security. */
+async function resolveEmailVerificationPolicy(): Promise<boolean> {
+  try {
+    const { getSection } = await import("./settings");
+    const s = await getSection("security");
+    return s.requireEmailVerification === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Rebuild the Better Auth instance from the latest settings. Call this on
- * boot and after any change to integration settings that touches sign-in.
+ * boot and after any change to integration / security settings that touches
+ * sign-in (Google creds, email verification policy).
  */
 export async function reloadAuth(): Promise<void> {
-  const creds = await resolveGoogleCreds();
-  _instance = buildAuth(creds);
+  const [creds, requireEmailVerification] = await Promise.all([
+    resolveGoogleCreds(),
+    resolveEmailVerificationPolicy(),
+  ]);
+  _instance = buildAuth({ ...creds, requireEmailVerification });
   _googleEnabled = !!(creds.googleClientId && creds.googleClientSecret);
 }
 

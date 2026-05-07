@@ -146,6 +146,11 @@ model User {
   role             String  @default("agent") @db.VarChar(64)
   roleRef          Role    @relation("UserRole", fields: [role], references: [key], onUpdate: Cascade, onDelete: Restrict)
   globalTicketView Boolean @default(false)
+  /// When true, the user is forced through the change-password screen on
+  /// their next sign-in. Cleared automatically once they pick a new password.
+  /// Set by admins from the user editor when they want a one-time temporary
+  /// password to be replaced before any real work happens.
+  mustChangePassword Boolean @default(false) @map("must_change_password")
   createdAt        DateTime
   updatedAt        DateTime
   deletedAt        DateTime?

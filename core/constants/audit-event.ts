@@ -155,6 +155,7 @@ export const auditActions = [
   "user.created",
   "user.updated",
   "user.deleted",
+  "user.password_changed",
 
   // ── Role management (captureUserManagement) ─────────────────────────────
   "role.created",

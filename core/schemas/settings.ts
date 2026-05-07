@@ -393,7 +393,6 @@ export const automationsSettingsSchema = z.object({
 export const usersRolesSettingsSchema = z.object({
   defaultAgentRole:         z.enum(["agent", "readonly"]).default("agent"),
   allowAgentSelfAssignment: z.boolean().default(true),
-  requireEmailVerification: z.boolean().default(false),
   // Future: SSO settings, SCIM provisioning
 });
 
@@ -474,6 +473,25 @@ export const outboundPurposeAccountsSchema = z.object({
 
 export type OutboundPurposeAccounts = z.infer<typeof outboundPurposeAccountsSchema>;
 
+// ── Team-branded outbound email ───────────────────────────────────────────────
+//
+// Each row pairs a team with a "From" email that should be used whenever an
+// agent on that team replies to a ticket. The agent's display name is kept
+// so recipients see "Agent Name <database@example.com>" — recognizable to a
+// human, but routed back to the team mailbox.
+
+export const teamOutboundEmailSchema = z.object({
+  teamId:    z.number().int().positive(),
+  /** ID of the outbound account in `outboundAccounts` whose `fromEmail`
+   *  should appear as the sender. Empty string = no account picked yet. */
+  accountId: z.string().default(""),
+  /** Master switch. When false the system reverts to the default From for
+   *  this team's tickets even if an account is selected. */
+  isEnabled: z.boolean().default(true),
+});
+
+export type TeamOutboundEmail = z.infer<typeof teamOutboundEmailSchema>;
+
 export const VIDEO_BRIDGE_PROVIDERS = ["none", "teams", "googlemeet", "zoom", "webex"] as const;
 export type VideoBridgeProvider = (typeof VIDEO_BRIDGE_PROVIDERS)[number];
 
@@ -493,6 +511,9 @@ export const integrationsSettingsSchema = z.object({
   outboundAccounts:   z.array(outboundEmailAccountSchema).default([]),
   /** Per-purpose routing. A blank value means "use the default account". */
   purposeAccounts:    outboundPurposeAccountsSchema.default({ tickets: "", reports: "", notifications: "" }),
+  /** Per-team group inbox mapping. When an agent on a mapped team replies,
+   *  the message goes out as `Agent Name <team-group@…>`. */
+  teamOutboundEmails: z.array(teamOutboundEmailSchema).default([]),
   // ── Google Sign-In (OAuth provider for user login) ─────────────────────────
   // When enabled, users can sign in with Google on the agent and portal login
   // pages. Configured via Google Cloud Console → OAuth 2.0 Client. These are
@@ -576,7 +597,6 @@ export const advancedSettingsSchema = z.object({
   debugLogging:             z.boolean().default(false),
   maxAttachmentSizeMb:      z.number().int().min(1).max(100).default(10),
   allowedFileExtensions:    z.string().default("pdf,doc,docx,xls,xlsx,png,jpg,jpeg,gif,webp,zip,txt"),
-  sessionTimeoutMinutes:    z.number().int().min(5).max(43200).default(1440),
 });
 
 // ── Enterprise ITSM section schemas ──────────────────────────────────────────
@@ -772,10 +792,6 @@ export const securitySettingsSchema = z.object({
   passwordRequireUppercase:    z.boolean().default(false),
   passwordRequireNumber:       z.boolean().default(true),
   passwordRequireSymbol:       z.boolean().default(false),
-  // MFA
-  mfaEnabled:                  z.boolean().default(false),
-  mfaRequiredForAdmins:        z.boolean().default(false),
-  mfaRequiredForAll:           z.boolean().default(false),
   // Failed login policy
   failedLoginLockoutEnabled:   z.boolean().default(true),
   failedLoginMaxAttempts:      z.number().int().min(3).max(20).default(5),
@@ -785,6 +801,13 @@ export const securitySettingsSchema = z.object({
   ipAllowlist:                 z.string().default(""),
   // Session
   enforceSessionTimeout:       z.boolean().default(false),
+  /** Idle timeout in minutes — when enforceSessionTimeout is on, sessions
+   *  whose `updatedAt` is older than this are invalidated on the next request.
+   *  Capped at 30 days (43200) so a misconfiguration can't disable timeout. */
+  sessionTimeoutMinutes:       z.number().int().min(5).max(43200).default(1440),
+  /** When true, newly created users must click a one-time link emailed to
+   *  them before they can sign in. Existing users are unaffected. */
+  requireEmailVerification:    z.boolean().default(false),
 });
 
 export const auditSettingsSchema = z.object({

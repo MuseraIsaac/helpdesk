@@ -10,6 +10,7 @@ import { auth, reloadAuth } from "./lib/auth";
 import { requireAuth } from "./middleware/require-auth";
 import { resolveIdent } from "./middleware/resolve-ident";
 import { logSystemAudit } from "./lib/audit";
+import { enforceIpAllowlist, enforceLoginLockout, enforcePasswordPolicyOnReset } from "./lib/security-policy";
 import prisma from "./db";
 import usersRouter from "./routes/users";
 import ticketsRouter from "./routes/tickets";
@@ -171,8 +172,15 @@ const authLimiter = rateLimit({
 // Must be registered BEFORE the Better Auth handler so res.on('finish') fires
 // after the response is sent (but still in the same request cycle).
 
+// Apply the configured password complexity policy on the reset-password flow
+// so admins-set policies are enforced everywhere — not just on admin-driven
+// user creation.
+app.post("/api/auth/reset-password", enforcePasswordPolicyOnReset);
+
 // Failed logins — fires when the sign-in endpoint returns an error status.
-app.post("/api/auth/sign-in/email", (req, res, next) => {
+// `enforceLoginLockout` buffers the body to read the email, applies lockout
+// state from Settings → Security, and re-streams the body to Better Auth.
+app.post("/api/auth/sign-in/email", enforceLoginLockout, (req, res, next) => {
   res.on("finish", () => {
     if (res.statusCode >= 400) {
       void logSystemAudit(null, "auth.login_failed", {
@@ -203,7 +211,10 @@ app.post("/api/auth/sign-out", (req, res, next) => {
 // Mount Better Auth handler BEFORE express.json()
 // Better Auth parses its own request bodies
 // toNodeHandler returns a promise; must be caught for Express 5
-app.all("/api/auth/{*any}", authLimiter, (req, res, next) => {
+//
+// `enforceIpAllowlist` runs first to block agent sign-ins from networks
+// outside the configured allowlist (Settings → Security → IP Allowlist).
+app.all("/api/auth/{*any}", enforceIpAllowlist, authLimiter, (req, res, next) => {
   toNodeHandler(auth)(req, res).catch(next);
 });
 

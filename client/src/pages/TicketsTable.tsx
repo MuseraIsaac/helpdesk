@@ -80,13 +80,20 @@ const ALL_COLUMN_DEFS: Record<ColumnId, ColumnDef<Ticket>> = {
     accessorKey: "subject",
     header: "Subject",
     enableSorting: true,
+    // Cap the column at a comfortable reading width and truncate overflow with
+    // an ellipsis. Native title attribute reveals the full subject on hover so
+    // nothing is hidden — just visually contained.
     cell: ({ row }) => (
       <TicketConversationPreview
         lastReply={row.original.lastReply}
         lastNote={row.original.lastNote}
       >
-        <div className="flex items-center gap-1.5">
-          <Link to={`/tickets/${row.original.ticketNumber}`} className="link font-medium">
+        <div className="flex items-center gap-1.5 min-w-0 max-w-[28rem]">
+          <Link
+            to={`/tickets/${row.original.ticketNumber}`}
+            title={row.original.subject}
+            className="link font-medium truncate min-w-0"
+          >
             {row.original.subject}
           </Link>
           {row.original.isEscalated && (

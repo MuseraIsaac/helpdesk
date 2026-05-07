@@ -65,6 +65,8 @@ const PortalLoginPage           = lazy(() => import("./pages/portal/PortalLoginP
 const PortalRegisterPage        = lazy(() => import("./pages/portal/PortalRegisterPage"));
 const ForgotPasswordPage        = lazy(() => import("./pages/ForgotPasswordPage"));
 const ResetPasswordPage         = lazy(() => import("./pages/ResetPasswordPage"));
+const VerifyEmailPage           = lazy(() => import("./pages/VerifyEmailPage"));
+const ChangePasswordPage        = lazy(() => import("./pages/ChangePasswordPage"));
 const PortalTicketsPage         = lazy(() => import("./pages/portal/PortalTicketsPage"));
 const PortalTicketDetailPage    = lazy(() => import("./pages/portal/PortalTicketDetailPage"));
 const PortalNewTicketPage       = lazy(() => import("./pages/portal/PortalNewTicketPage"));
@@ -183,7 +185,12 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password"  element={<ResetPasswordPage />} />
+      <Route path="/verify-email"    element={<VerifyEmailPage />} />
       <Route element={<ProtectedRoute />}>
+        {/* Force-change-password lives inside the protected scope but
+             outside the Layout — the user shouldn't see the sidebar / topbar
+             until they've completed this required step. */}
+        <Route path="/change-password" element={<ChangePasswordPage />} />
         <Route element={<Layout />}>
           <Route path="/" element={<DefaultLandingRoute />} />
           <Route path="/profile" element={<ProfilePage />} />
@@ -306,6 +313,7 @@ function App() {
       <Route path="/portal/register" element={<PortalRegisterPage />} />
       <Route path="/portal/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/portal/reset-password"  element={<ResetPasswordPage />} />
+      <Route path="/portal/verify-email"    element={<VerifyEmailPage />} />
       <Route element={<CustomerRoute />}>
         <Route element={<PortalLayout />}>
           <Route path="/portal/tickets" element={<PortalTicketsPage />} />

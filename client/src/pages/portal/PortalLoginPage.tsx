@@ -59,6 +59,8 @@ export default function PortalLoginPage() {
   const navigate = useNavigate();
   const [serverError, setServerError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
+  const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
 
   // Per-portal "Remember me" — separate localStorage key from the agent
   // login so the two surfaces can have independent preferences (a kiosk PC
@@ -111,13 +113,38 @@ export default function PortalLoginPage() {
 
   const onSubmit = async (data: LoginFormData) => {
     setServerError("");
+    setUnverifiedEmail(null);
+    setResendState("idle");
     const { error } = await signIn.email(data);
     if (error) {
-      setServerError(error.message ?? "Login failed. Check your email and password.");
+      // Better Auth returns EMAIL_NOT_VERIFIED when sign-in is blocked because
+      // the user hasn't clicked the verification link yet. Surface a dedicated
+      // panel with a "resend" affordance so they have a clear path forward.
+      const code = (error as { code?: string }).code;
+      if (code === "EMAIL_NOT_VERIFIED" || /verif/i.test(error.message ?? "")) {
+        setUnverifiedEmail(data.email);
+      } else {
+        setServerError(error.message ?? "Login failed. Check your email and password.");
+      }
       return;
     }
     navigate("/portal/tickets", { replace: true });
   };
+
+  async function resendVerification() {
+    if (!unverifiedEmail) return;
+    setResendState("sending");
+    try {
+      await fetch("/api/portal/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: unverifiedEmail }),
+      });
+      setResendState("sent");
+    } catch {
+      setResendState("idle");
+    }
+  }
 
   async function handleGoogleSignIn() {
     setServerError("");
@@ -256,6 +283,36 @@ export default function PortalLoginPage() {
             <div className="mb-5 flex items-start gap-3 rounded-xl border border-destructive/25 bg-destructive/8 px-4 py-3 text-sm text-destructive">
               <span className="shrink-0 mt-0.5">⚠</span>
               <span>{serverError}</span>
+            </div>
+          )}
+
+          {unverifiedEmail && (
+            <div className="mb-5 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3.5 text-sm space-y-2">
+              <div className="flex items-start gap-2.5">
+                <span className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400">✉</span>
+                <div className="min-w-0">
+                  <p className="font-semibold text-amber-700 dark:text-amber-400">
+                    Please verify your email
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                    We sent a verification link to <span className="font-mono text-foreground/80 break-all">{unverifiedEmail}</span>.
+                    Click it to activate your account, then sign in here.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-2 pl-6">
+                <button
+                  type="button"
+                  onClick={resendVerification}
+                  disabled={resendState !== "idle"}
+                  className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:underline underline-offset-4 disabled:opacity-60 disabled:no-underline"
+                >
+                  {resendState === "sending" ? "Sending…" : resendState === "sent" ? "Email resent ✓" : "Resend verification email"}
+                </button>
+                <span className="text-[10px] text-muted-foreground/70">
+                  Check your spam folder
+                </span>
+              </div>
             </div>
           )}
 
