@@ -189,11 +189,16 @@ is_ipv4() {
 
 # Lists every release tag of the form vMAJOR.MINOR.PATCH on the configured
 # remote, sorted newest-first. Empty output if none / network down.
+#
+# Tail `|| true` is mandatory: when grep matches nothing (no v* tags yet, or
+# git missing) the pipe exits non-zero, and our `set -o pipefail` plus ERR
+# trap would print a spurious "FATAL: line N: sort -Vr". The fallback in
+# phase_pick_release already handles empty output gracefully.
 list_remote_releases() {
-  git ls-remote --tags --refs "$REPO_URL" 'v*' 2>/dev/null \
-    | awk '{print $2}' | sed 's|refs/tags/||' \
-    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-    | sort -Vr
+  { git ls-remote --tags --refs "$REPO_URL" 'v*' 2>/dev/null \
+      | awk '{print $2}' | sed 's|refs/tags/||' \
+      | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+      | sort -Vr; } || true
 }
 
 # Interactive release picker. Shows every v* tag plus "main" and lets the
@@ -206,6 +211,15 @@ phase_pick_release() {
   if [[ -n "$BRANCH" && "$BRANCH" != "latest" ]]; then
     log "BRANCH is set to '$BRANCH' — keeping it (set BRANCH= to enable picker)"
     return 0
+  fi
+
+  # The picker needs git, but git is normally pulled in later by phase_packages.
+  # On a fresh CentOS Stream box that means the picker would always see an
+  # empty tag list and silently fall back to main. Install just git inline so
+  # the operator actually gets to choose a release.
+  if ! command -v git >/dev/null 2>&1; then
+    log "Installing git (needed to query release tags)"
+    dnf -y install git >/dev/null 2>&1 || warn "  dnf install git failed — picker will fall back to main"
   fi
 
   log "Loading available releases from $REPO_URL"

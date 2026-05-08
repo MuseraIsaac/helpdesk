@@ -42,10 +42,45 @@ async function main() {
   }
   console.log(`Seeded ${BUILTIN_ROLES.length} built-in roles.`);
 
-  // Seed admin user
+  // Seed (or reset) admin user.
+  //
+  // First-time install: create the user + credential row.
+  // Re-runs (existing admin): default behaviour is to LEAVE the password as-is
+  // — we don't want install.sh to clobber a password the operator changed via
+  // the UI. To force a reset (e.g. operator forgot the password and is
+  // re-running with a fresh ADMIN_PASSWORD), set SEED_ADMIN_FORCE_RESET=1.
+  const forceReset = process.env.SEED_ADMIN_FORCE_RESET === "1";
   const existingAdmin = await prisma.user.findUnique({ where: { email } });
+
   if (existingAdmin) {
-    console.log(`Admin user ${email} already exists — skipping.`);
+    if (forceReset) {
+      const hashedPassword = await hashPassword(password);
+      const account = await prisma.account.findFirst({
+        where: { userId: existingAdmin.id, providerId: "credential" },
+      });
+      if (account) {
+        await prisma.account.update({
+          where: { id: account.id },
+          data:  { password: hashedPassword, updatedAt: now },
+        });
+      } else {
+        await prisma.account.create({
+          data: {
+            id:         crypto.randomUUID(),
+            accountId:  existingAdmin.id,
+            providerId: "credential",
+            userId:     existingAdmin.id,
+            password:   hashedPassword,
+            createdAt:  now,
+            updatedAt:  now,
+          },
+        });
+      }
+      console.log(`Admin user ${email} password RESET (SEED_ADMIN_FORCE_RESET=1).`);
+    } else {
+      console.log(`Admin user ${email} already exists — leaving password unchanged.`);
+      console.log(`  (Set SEED_ADMIN_FORCE_RESET=1 to overwrite, or run scripts/reset-admin-password.ts.)`);
+    }
   } else {
     const hashedPassword = await hashPassword(password);
     const userId = crypto.randomUUID();
