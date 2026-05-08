@@ -23,26 +23,17 @@ import {
   BookOpen,
   FileText,
   BarChart2,
-  Zap,
-  Users,
-  Wrench,
-  UserCog,
-  Settings2,
   ShieldCheck,
   CheckSquare,
   ShoppingBag,
   Contact,
   Building2,
-  Tag,
-  CircleDot,
   Key,
   Cloud,
   Radar,
   FlaskConical,
   Trash2,
   CalendarDays,
-  ScrollText,
-  Package,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { can, type Permission } from "core/constants/permission.ts";
@@ -279,82 +270,20 @@ export const NAV_SECTIONS: NavSection[] = [
   },
 
   // ── Administration ─────────────────────────────────────────────────────────
-  // The entire section is admin-only via the section-level `roles` gate.
-  // `collapsible` makes Layout render it as a click-to-expand dropdown so
-  // the long admin list doesn't dominate the sidebar — most admins only
-  // dip into these screens occasionally.
+  // Collapsed into a single sidebar entry that lands on the Administration
+  // hub (`/admin`). The hub itself renders a tabbed switcher across all
+  // admin tools — see `client/src/lib/admin-tabs.ts` and
+  // `client/src/pages/admin/AdminHubLayout.tsx`.
   {
     id: "administration",
     label: "Administration",
     roles: ["admin"],
-    collapsible: true,
-    defaultExpanded: false,
     items: [
       {
-        id: "ticket-types",
-        to: "/admin/ticket-types",
-        label: "Ticket Types",
-        icon: Tag,
-      },
-      {
-        id: "ticket-statuses",
-        to: "/admin/ticket-statuses",
-        label: "Ticket Statuses",
-        icon: CircleDot,
-      },
-      {
-        id: "form-builder",
-        to: "/admin/forms",
-        label: "Form Builder",
-        icon: Settings2,
-      },
-      {
-        id: "cab-groups",
-        to: "/admin/cab-groups",
-        label: "CAB Groups",
+        id: "admin-hub",
+        to: "/admin",
+        label: "Administration",
         icon: ShieldCheck,
-      },
-      {
-        id: "automations",
-        to: "/automations",
-        label: "Automations",
-        icon: Zap,
-      },
-      {
-        id: "teams",
-        to: "/teams",
-        label: "Teams",
-        icon: Users,
-      },
-      {
-        id: "users",
-        to: "/users",
-        label: "Users",
-        icon: UserCog,
-      },
-      {
-        id: "roles",
-        to: "/admin/roles",
-        label: "Roles & Permissions",
-        icon: ShieldCheck,
-      },
-      {
-        id: "macros",
-        to: "/macros",
-        label: "Macros",
-        icon: Wrench,
-      },
-      {
-        id: "audit-log",
-        to: "/admin/audit-log",
-        label: "Audit Log",
-        icon: ScrollText,
-      },
-      {
-        id: "updates",
-        to: "/admin/updates",
-        label: "Updates",
-        icon: Package,
       },
     ],
   },
@@ -431,14 +360,25 @@ export function resolveModuleBreadcrumb(pathname: string, role: string): string 
       if (matched) return `${section.label}  ·  ${item.label}`;
     }
   }
-  if (pathname.startsWith("/duty-plans"))    return "ITSM  ·  Duty Plans";
-  if (pathname.startsWith("/settings"))      return "Administration  ·  Settings";
-  if (pathname.startsWith("/profile"))       return "Account  ·  Profile";
-  if (pathname.startsWith("/customers"))     return "Contacts  ·  Customers";
-  if (pathname.startsWith("/organizations")) return "Contacts  ·  Organizations";
-  if (pathname.startsWith("/notifications")) return "Account  ·  Notifications";
-  if (pathname.startsWith("/admin/trash"))   return "Administration  ·  Trash";
-  if (pathname.startsWith("/admin/updates")) return "Administration  ·  Updates";
-  if (pathname.startsWith("/demo-data"))     return "Developer  ·  Demo Data";
+  if (pathname.startsWith("/duty-plans"))             return "ITSM  ·  Duty Plans";
+  if (pathname.startsWith("/settings"))               return "Administration  ·  Settings";
+  if (pathname.startsWith("/profile"))                return "Account  ·  Profile";
+  if (pathname.startsWith("/customers"))              return "Contacts  ·  Customers";
+  if (pathname.startsWith("/organizations"))          return "Contacts  ·  Organizations";
+  if (pathname.startsWith("/notifications"))          return "Account  ·  Notifications";
+  if (pathname.startsWith("/admin/trash"))            return "Administration  ·  Trash";
+  if (pathname.startsWith("/admin/updates"))          return "Administration  ·  Updates";
+  if (pathname.startsWith("/admin/audit-log"))        return "Administration  ·  Audit Log";
+  if (pathname.startsWith("/admin/forms"))            return "Administration  ·  Form Builder";
+  if (pathname.startsWith("/admin/cab-groups"))       return "Administration  ·  CAB Groups";
+  if (pathname.startsWith("/admin/ticket-types"))     return "Administration  ·  Ticket Types";
+  if (pathname.startsWith("/admin/ticket-statuses"))  return "Administration  ·  Ticket Statuses";
+  if (pathname.startsWith("/admin/roles"))            return "Administration  ·  Roles & Permissions";
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) return "Administration";
+  if (pathname.startsWith("/users"))                  return "Administration  ·  Users";
+  if (pathname.startsWith("/teams"))                  return "Administration  ·  Teams";
+  if (pathname.startsWith("/macros"))                 return "Administration  ·  Macros";
+  if (pathname.startsWith("/automations"))            return "Administration  ·  Automations";
+  if (pathname.startsWith("/demo-data"))              return "Developer  ·  Demo Data";
   return "ITSM Platform";
 }

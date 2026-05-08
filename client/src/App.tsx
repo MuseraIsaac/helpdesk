@@ -121,6 +121,8 @@ const AssetsReport              = lazy(() => import("./pages/reports/AssetsRepor
 const InsightsReport            = lazy(() => import("./pages/reports/InsightsReport"));
 
 const DemoDataPage              = lazy(() => import("./pages/DemoDataPage"));
+const AdminHubLayout            = lazy(() => import("./pages/admin/AdminHubLayout"));
+const AdminOverviewPage         = lazy(() => import("./pages/admin/AdminOverviewPage"));
 const TrashPage                 = lazy(() => import("./pages/TrashPage"));
 const AuditLogPage              = lazy(() => import("./pages/AuditLogPage"));
 const UpdatesPage               = lazy(() => import("./pages/UpdatesPage"));
@@ -250,27 +252,35 @@ function App() {
 
           <Route element={<AdminRoute />}>
             <Route path="/settings/:section" element={<SettingsPage />} />
-            <Route path="/users" element={<UsersPage />} />
-            <Route path="/teams" element={<TeamsPage />} />
-            <Route path="/macros" element={<MacrosPage />} />
-            <Route path="/admin/forms" element={<FormBuilderPage />} />
-            <Route path="/admin/cab-groups" element={<CabGroupsPage />} />
-            <Route path="/admin/ticket-types" element={<TicketTypesPage />} />
-            <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
-            <Route path="/admin/audit-log" element={<AuditLogPage />} />
-            <Route path="/admin/updates"   element={<UpdatesPage />} />
-            <Route path="/admin/roles" element={<RolesPage />} />
-            {/* Automation Platform */}
-            <Route path="/automations" element={<AutomationPlatformPage />} />
-            <Route path="/automations/rules/new" element={<AutomationRuleFormPage />} />
-            <Route path="/automations/rules/:id" element={<AutomationRuleFormPage />} />
-            <Route path="/automations/executions" element={<AutomationExecutionsPage />} />
-            <Route path="/automations/webhooks" element={<OutboundWebhooksPage />} />
-            <Route path="/automations/routing" element={<RoutingConfigPage />} />
-            {/* Legacy scenarios — kept for backward compatibility */}
-            <Route path="/automations/scenarios" element={<ScenariosPage />} />
             <Route path="/catalog/admin" element={<CatalogAdminPage />} />
             <Route path="/demo-data" element={<DemoDataPage />} />
+
+            {/* ── Administration hub ──────────────────────────────────────
+                Every page below shares the AdminHubLayout chrome (gradient
+                hero + tabbed switcher) so admins can move between tools
+                without leaving the umbrella page. URLs are unchanged. */}
+            <Route element={<AdminHubLayout />}>
+              <Route path="/admin" element={<AdminOverviewPage />} />
+              <Route path="/users" element={<UsersPage />} />
+              <Route path="/teams" element={<TeamsPage />} />
+              <Route path="/macros" element={<MacrosPage />} />
+              <Route path="/admin/forms" element={<FormBuilderPage />} />
+              <Route path="/admin/cab-groups" element={<CabGroupsPage />} />
+              <Route path="/admin/ticket-types" element={<TicketTypesPage />} />
+              <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
+              <Route path="/admin/audit-log" element={<AuditLogPage />} />
+              <Route path="/admin/updates"   element={<UpdatesPage />} />
+              <Route path="/admin/roles" element={<RolesPage />} />
+              {/* Automation Platform */}
+              <Route path="/automations" element={<AutomationPlatformPage />} />
+              <Route path="/automations/rules/new" element={<AutomationRuleFormPage />} />
+              <Route path="/automations/rules/:id" element={<AutomationRuleFormPage />} />
+              <Route path="/automations/executions" element={<AutomationExecutionsPage />} />
+              <Route path="/automations/webhooks" element={<OutboundWebhooksPage />} />
+              <Route path="/automations/routing" element={<RoutingConfigPage />} />
+              {/* Legacy scenarios — kept for backward compatibility */}
+              <Route path="/automations/scenarios" element={<ScenariosPage />} />
+            </Route>
           </Route>
           <Route element={<SupervisorRoute />}>
             <Route path="/kb" element={<KbPage />} />
