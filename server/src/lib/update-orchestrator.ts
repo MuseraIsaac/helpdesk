@@ -289,9 +289,16 @@ async function installDeps(runId: number, stagingDir: string): Promise<void> {
     return;
   }
   const bun = process.env.UPDATE_BUN_BIN || "bun";
-  await logEvent(runId, "info", "install_deps", `Running ${bun} install --frozen-lockfile`);
+  const env = buildBuildEnv(stagingDir);
+
+  // Pre-create bun's cache dir so it doesn't try to mkdir under HOME.
+  await fs.mkdir(env.HOME!, { recursive: true });
+
+  await logEvent(runId, "info", "install_deps",
+    `Running ${bun} install --frozen-lockfile (cache: ${env.BUN_INSTALL_CACHE_DIR})`);
   const { stdout, stderr } = await execAsync(bun, ["install", "--frozen-lockfile"], {
     cwd: stagingDir,
+    env,
   });
   await logEvent(runId, "info", "install_deps", "bun install output", {
     stdout: stdout.slice(-2000), stderr: stderr.slice(-2000),
@@ -326,8 +333,16 @@ async function buildClient(runId: number, stagingDir: string): Promise<void> {
     await logEvent(runId, "info", "build", "No client/ directory in artifact — skipping build");
     return;
   }
+  // vite uses several ~/.cache scratch paths that aren't writable under our
+  // hardened systemd unit. Same env redirection as installDeps.
+  const env = buildBuildEnv(stagingDir);
+  await fs.mkdir(env.HOME!, { recursive: true });
+
   await logEvent(runId, "info", "build", `Building SPA in ${clientDir}`);
-  const { stdout, stderr } = await execAsync(bun, ["x", "vite", "build"], { cwd: clientDir });
+  const { stdout, stderr } = await execAsync(bun, ["x", "vite", "build"], {
+    cwd: clientDir,
+    env,
+  });
   await logEvent(runId, "info", "build", "vite build output", {
     stdout: stdout.slice(-2000), stderr: stderr.slice(-2000),
   });
@@ -644,12 +659,50 @@ function compareSemver(a: string, b: string): number {
 function execAsync(
   cmd: string,
   args: string[],
-  options: { cwd?: string } = {},
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { cwd: options.cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new Error(stderr || err.message));
-      else resolve({ stdout, stderr });
-    });
+    execFile(
+      cmd,
+      args,
+      {
+        cwd: options.cwd,
+        env: options.env,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+      (err, stdout, stderr) => {
+        if (err) reject(new Error(stderr || err.message));
+        else resolve({ stdout, stderr });
+      },
+    );
   });
+}
+
+/**
+ * Build the env block for bun/vite invocations during an update.
+ *
+ * The systemd unit hardens us with `ProtectSystem=strict` + `ProtectHome=true`,
+ * which means bun's defaults (`$HOME/.bun/install/cache`, plus various
+ * `~/.cache/...` scratch dirs vite uses) sit on a read-only mount and bun
+ * dies with `unable to write files to tempdir: ReadOnlyFileSystem`.
+ *
+ * We redirect every writable path bun/vite touch into the staging dir,
+ * which IS writable (it's in `ReadWritePaths`). The cache is therefore
+ * fresh per-update — that's slower than persisting it, but reliable on
+ * locked-down units. Operators can opt into a persistent cache by setting
+ * `UPDATE_BUN_CACHE_DIR=/opt/zentra/.bun-cache` (in .env) and adding that
+ * path to `ReadWritePaths` in the systemd unit.
+ */
+function buildBuildEnv(stagingDir: string): NodeJS.ProcessEnv {
+  const cacheDir = process.env.UPDATE_BUN_CACHE_DIR || path.join(stagingDir, ".bun-cache");
+  const tmpDir   = process.env.UPDATE_TMPDIR || "/tmp"; // PrivateTmp namespace; writable
+  return {
+    ...process.env,
+    HOME:                  cacheDir,  // bun + vite both look at HOME for several scratch paths
+    XDG_CACHE_HOME:        cacheDir,
+    BUN_INSTALL_CACHE_DIR: cacheDir,  // bun's documented cache override
+    TMPDIR:                tmpDir,
+    TMP:                   tmpDir,
+    TEMP:                  tmpDir,
+  };
 }
