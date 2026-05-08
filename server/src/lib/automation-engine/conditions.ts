@@ -155,13 +155,70 @@ function resolveField(snapshot: EntitySnapshot, field: string): unknown {
     return cf?.[field.slice(7)] ?? null;
   }
 
+  // ── Tags ──────────────────────────────────────────────────────────────────
+  // Tags are stored under customFields.tags. Returning a comma-separated list
+  // lets the existing string operators (contains / not_contains) match cleanly:
+  // condition `tag contains "vip"` succeeds when the array includes "vip".
+  if (field === "tag" || field === "tags") {
+    const cf = raw["customFields"] as Record<string, unknown> | undefined;
+    const tags = cf?.tags;
+    return Array.isArray(tags) ? tags.join(",") : "";
+  }
+
   return raw[field] ?? null;
 }
 
 // ── Operator evaluation ───────────────────────────────────────────────────────
 
+/**
+ * Status conditions can be expressed against either:
+ *   - a workflow-state enum value: "open" / "in_progress" / "resolved" / "closed" / "escalated"
+ *   - an admin-defined ticket-status row encoded as `cs:<id>`
+ *
+ * Returns the candidate values to OR-match against. Empty array if not a status field.
+ */
+function statusCandidates(snapshot: EntitySnapshot, field: string): string[] | null {
+  if (field !== "status" && field !== "previous.status") return null;
+  const raw = snapshot as unknown as Record<string, unknown>;
+  if (field === "status") {
+    const out: string[] = [];
+    if (raw.status) out.push(String(raw.status));
+    if (raw.customStatusId != null) out.push(`cs:${raw.customStatusId}`);
+    return out;
+  }
+  // previous.status
+  const prev = raw["previousValues"] as Record<string, unknown> | undefined;
+  const out: string[] = [];
+  if (prev?.status) out.push(String(prev.status));
+  if (prev?.customStatusId != null) out.push(`cs:${prev.customStatusId}`);
+  return out;
+}
+
 function evaluateLeaf(condition: AutomationLeafCondition, snapshot: EntitySnapshot): boolean {
-  const actual = resolveField(snapshot, condition.field);
+  const candidates = statusCandidates(snapshot, condition.field);
+  // For status fields, match if ANY candidate satisfies the operator (back-compat
+  // with rules that stored "open" alongside new rules that store "cs:7").
+  if (candidates) {
+    if (candidates.length === 0) {
+      // No status set at all — treat as empty for is_empty/is_not_empty, otherwise no match
+      if (condition.operator === "is_empty") return true;
+      if (condition.operator === "is_not_empty") return false;
+      return false;
+    }
+    // Negative operators must hold for ALL candidates (else a rule like
+    // `status neq open` would spuriously pass via the `cs:<id>` candidate).
+    const negative = condition.operator === "neq"
+      || condition.operator === "not_in"
+      || condition.operator === "not_contains"
+      || condition.operator === "is_not_empty";
+    return negative
+      ? candidates.every((c) => evaluateLeafAgainst(condition, c))
+      : candidates.some((c)  => evaluateLeafAgainst(condition, c));
+  }
+  return evaluateLeafAgainst(condition, resolveField(snapshot, condition.field));
+}
+
+function evaluateLeafAgainst(condition: AutomationLeafCondition, actual: unknown): boolean {
   const { operator, value } = condition;
 
   switch (operator) {

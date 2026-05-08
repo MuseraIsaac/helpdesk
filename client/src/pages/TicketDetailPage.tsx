@@ -20,6 +20,7 @@ import PresenceIndicator from "@/components/PresenceIndicator";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
 import MergeTicketDialog from "@/components/MergeTicketDialog";
 import AddChildTicketDialog from "@/components/AddChildTicketDialog";
+import TicketCopilotDrawer from "@/components/TicketCopilotDrawer";
 import StatusBadge from "@/components/StatusBadge";
 import TicketTypeBadge from "@/components/TicketTypeBadge";
 import { EscalationBadge } from "@/components/EscalationBadge";
@@ -37,7 +38,8 @@ import {
   MessageSquare, Lock, ChevronDown, ChevronRight, Star, Link2,
   X, Forward, BookmarkPlus, Activity, Ticket as TicketIcon, UserCircle, Calendar,
   Bell, BellOff, Merge, GitMerge, Server, Database, Plus, Loader2,
-  ExternalLink, Scissors, ArrowDownToLine, ArrowUpRight, AlertTriangle,
+  ExternalLink, Scissors, ArrowDownToLine, ArrowUpRight, AlertTriangle, Sparkles,
+  ShieldOff, ShieldCheck,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -465,6 +467,7 @@ export default function TicketDetailPage() {
   const defaultReplyMode: ReplyType = ticketSettings?.replyDefaultMode ?? "reply_all";
   const presenceEnabled = ticketSettings?.presenceEnabled ?? true;
   const mergeEnabled = ticketSettings?.mergeTicketsEnabled ?? true;
+  const copilotEnabled = ticketSettings?.copilotEnabled ?? true;
 
   const [composeMode, setComposeMode] = useState<ComposeMode>(null);
   const [quoteData, setQuoteData] = useState<QuoteData | null>(null);
@@ -475,7 +478,28 @@ export default function TicketDetailPage() {
   const [addChildDialog,  setAddChildDialog]  = useState(false);
   const [unmergeConfirm,  setUnmergeConfirm]  = useState<number | null>(null);
   const [activityOpen,    setActivityOpen]    = useState(false);
+  const [copilotOpen,     setCopilotOpen]     = useState(false);
   const composeRef = useRef<HTMLDivElement>(null);
+
+  // ⌘/Ctrl+I toggles the AI Copilot drawer while a ticket is in view.
+  // Skipped when copilot is disabled by admin policy so the shortcut is
+  // a true no-op rather than briefly opening a panel that fails to fetch.
+  useEffect(() => {
+    if (!copilotEnabled) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "i") {
+        // Don't steal the shortcut while the user is typing into a form field.
+        const tgt = e.target as HTMLElement | null;
+        if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) {
+          return;
+        }
+        e.preventDefault();
+        setCopilotOpen((prev) => !prev);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [copilotEnabled]);
 
   const openCompose = useCallback((mode: ComposeMode, quote?: QuoteData) => {
     setComposeMode(mode);
@@ -649,6 +673,35 @@ export default function TicketDetailPage() {
     },
   });
 
+  // ── Spam toggle ──────────────────────────────────────────────────────────
+  const [spamConfirmOpen, setSpamConfirmOpen] = useState(false);
+
+  const markSpamMutation = useMutation({
+    mutationFn: () => axios.post(`/api/tickets/${id}/spam`),
+    onSuccess: () => {
+      setSpamConfirmOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["ticket", id] });
+      void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      toast.success("Ticket marked as spam and closed", {
+        action: {
+          label: "Undo",
+          onClick: () => unmarkSpamMutation.mutate(),
+        },
+      });
+    },
+    onError: () => toast.error("Failed to mark ticket as spam"),
+  });
+
+  const unmarkSpamMutation = useMutation({
+    mutationFn: () => axios.post(`/api/tickets/${id}/unspam`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["ticket", id] });
+      void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      toast.success("Ticket restored");
+    },
+    onError: () => toast.error("Failed to restore ticket"),
+  });
+
   if (isLoading) {
     return (
       <div className="space-y-4 p-2">
@@ -701,6 +754,25 @@ export default function TicketDetailPage() {
             <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
               {presenceEnabled && session?.user && (
                 <PresenceIndicator viewers={viewers} currentUserId={session.user.id} />
+              )}
+
+              {/* AI Copilot — opens the side drawer with summary, draft
+               *  reply, KB articles, and similar tickets. Tinted violet so
+               *  it visually pairs with other AI surfaces (TicketSummary,
+               *  ArticleSuggestions). Hidden when admins have switched the
+               *  feature off in Tickets → AI Copilot. */}
+              {copilotEnabled && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 h-8 border-violet-400/50 text-violet-700 dark:text-violet-300 hover:bg-violet-500/10 hover:border-violet-500/70 shadow-sm"
+                  onClick={() => setCopilotOpen(true)}
+                  title="Open AI Copilot (⌘/Ctrl+I)"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Copilot</span>
+                </Button>
               )}
 
               {/* New Ticket — quick path to start a fresh ticket without
@@ -768,6 +840,70 @@ export default function TicketDetailPage() {
                 <BookmarkPlus className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Template</span>
               </Button>
+
+              {/* Mark as spam (or unmark if already flagged) */}
+              {ticket.isSpam ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 h-8 border-emerald-300/70 text-emerald-700 hover:bg-emerald-500/10 hover:border-emerald-400 dark:border-emerald-700/50 dark:text-emerald-400"
+                  onClick={() => unmarkSpamMutation.mutate()}
+                  disabled={unmarkSpamMutation.isPending}
+                  title="Restore this ticket — clears the spam flag and reopens it"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Not spam</span>
+                </Button>
+              ) : (
+                <Popover open={spamConfirmOpen} onOpenChange={setSpamConfirmOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 h-8 border-rose-300/70 text-rose-700 hover:bg-rose-500/10 hover:border-rose-400 dark:border-rose-800/50 dark:text-rose-400"
+                      title="Flag this ticket as spam and close it"
+                    >
+                      <ShieldOff className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Spam</span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" side="bottom" className="w-72 p-4">
+                    <div className="space-y-3">
+                      <div className="flex items-start gap-2">
+                        <ShieldOff className="h-4 w-4 text-rose-600 dark:text-rose-400 mt-0.5 shrink-0" />
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold">Mark as spam?</p>
+                          <p className="text-xs text-muted-foreground">
+                            The ticket will be flagged as spam and immediately closed. You can undo this from the toast or restore it later from the ticket header.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 pt-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSpamConfirmOpen(false)}
+                          disabled={markSpamMutation.isPending}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => markSpamMutation.mutate()}
+                          disabled={markSpamMutation.isPending}
+                        >
+                          {markSpamMutation.isPending ? "Marking…" : "Mark as spam"}
+                        </Button>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
               <RunScenarioButton
                 ticketId={ticket.id}
                 variant="header"
@@ -1324,6 +1460,15 @@ export default function TicketDetailPage() {
         ticketId={ticket.id}
         initialTab={scenarioTab}
       />
+
+      {/* AI Copilot drawer — toggled by the Copilot button or ⌘/Ctrl+I */}
+      {copilotEnabled && (
+        <TicketCopilotDrawer
+          ticket={ticket}
+          open={copilotOpen}
+          onOpenChange={setCopilotOpen}
+        />
+      )}
     </div>
   );
 }

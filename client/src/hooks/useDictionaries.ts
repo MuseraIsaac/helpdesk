@@ -92,11 +92,12 @@ export function useTicketTypes() {
 
 export interface TicketStatusConfig {
   id: number;
-  slug: string;
   label: string;
   color: string | null;
-  category: string;
+  workflowState: "open" | "in_progress" | "resolved" | "closed";
+  slaBehavior: "continue" | "on_hold";
   position: number;
+  isActive: boolean;
 }
 
 export function useTicketStatusConfigs() {

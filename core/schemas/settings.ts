@@ -303,6 +303,14 @@ export const ticketsSettingsSchema = z.object({
    * the button (e.g. organisations restricting AI features by policy).
    */
   summarizeEnabled:             z.boolean().default(true),
+  /**
+   * AI Copilot drawer on the ticket detail page (Cmd/Ctrl+I). When enabled,
+   * agents can open a side panel with AI summary, suggested reply draft,
+   * similar tickets, and KB suggestions — a unified surface for the AI
+   * features already scattered around the ticket UI. Defaults on; switch
+   * off to hide the panel (e.g. orgs restricting AI features by policy).
+   */
+  copilotEnabled:               z.boolean().default(true),
 
   // ── Resolution / closure field-completion enforcement ──────────────────────
   //

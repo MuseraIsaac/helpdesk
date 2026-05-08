@@ -11,22 +11,22 @@
  *   <ConditionBuilder value={conditionGroup} onChange={setConditionGroup} />
  */
 
-import { useId } from "react";
+import { createContext, useContext, useId, useMemo } from "react";
 import { Plus, Trash2, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import SearchableSelect from "@/components/SearchableSelect";
 import { CONDITION_OPERATOR_LABELS } from "core/constants/automation";
 import type { AutomationConditionGroup, AutomationLeafCondition, AutomationCondition } from "core/schemas/automations";
+import { useTicketStatusConfigs } from "@/hooks/useDictionaries";
 
 // ── Field registry ─────────────────────────────────────────────────────────────
 
@@ -245,6 +245,16 @@ export const FIELD_CATEGORIES = [
   "Custom",
 ];
 
+// ── Dynamic field-registry context ────────────────────────────────────────────
+// Lets nested rows pick up admin-managed enum options (e.g. ticket statuses)
+// without each row refetching them.
+
+const FieldsContext = createContext<ConditionFieldDef[]>(CONDITION_FIELDS);
+
+function useFields() {
+  return useContext(FieldsContext);
+}
+
 // ── Operator sets by field type ────────────────────────────────────────────────
 
 type Operator = keyof typeof CONDITION_OPERATOR_LABELS;
@@ -406,28 +416,28 @@ function ValueInput({
 // ── Field picker ──────────────────────────────────────────────────────────────
 
 function FieldPicker({ value, onChange }: { value: string; onChange: (key: string) => void }) {
+  const allFields = useFields();
+  const groups = useMemo(
+    () =>
+      FIELD_CATEGORIES
+        .map((cat) => ({
+          label: cat,
+          options: allFields
+            .filter((f) => f.category === cat)
+            .map((f) => ({ value: f.key, label: f.label, hint: f.type })),
+        }))
+        .filter((g) => g.options.length > 0),
+    [allFields]
+  );
   return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="w-52 shrink-0">
-        <SelectValue placeholder="Select field…" />
-      </SelectTrigger>
-      <SelectContent className="max-h-80">
-        {FIELD_CATEGORIES.map((cat) => {
-          const fields = CONDITION_FIELDS.filter((f) => f.category === cat);
-          if (fields.length === 0) return null;
-          return (
-            <SelectGroup key={cat}>
-              <SelectLabel className="text-xs text-muted-foreground px-2 py-1">{cat}</SelectLabel>
-              {fields.map((f) => (
-                <SelectItem key={f.key} value={f.key}>
-                  {f.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          );
-        })}
-      </SelectContent>
-    </Select>
+    <SearchableSelect
+      value={value}
+      onChange={onChange}
+      groups={groups}
+      placeholder="Select field…"
+      searchPlaceholder="Search fields…"
+      className="w-52 shrink-0"
+    />
   );
 }
 
@@ -442,11 +452,12 @@ function LeafRow({
   onChange: (c: AutomationLeafCondition) => void;
   onDelete: () => void;
 }) {
-  const fieldDef = CONDITION_FIELDS.find((f) => f.key === condition.field);
+  const allFields = useFields();
+  const fieldDef = allFields.find((f) => f.key === condition.field);
   const availableOps = fieldDef ? opsForType(fieldDef.type) : STRING_OPS;
 
   function setField(key: string) {
-    const def = CONDITION_FIELDS.find((f) => f.key === key);
+    const def = allFields.find((f) => f.key === key);
     onChange({
       type: "condition",
       field: key,
@@ -648,11 +659,34 @@ export interface ConditionBuilderProps {
 }
 
 export default function ConditionBuilder({ value, onChange }: ConditionBuilderProps) {
+  const { data: statusConfigs } = useTicketStatusConfigs();
+
+  // Override the static status / previous.status enum options with the
+  // admin-managed list (which includes any custom statuses).
+  const fields = useMemo<ConditionFieldDef[]>(() => {
+    if (!statusConfigs || statusConfigs.length === 0) return CONDITION_FIELDS;
+    const sorted = [...statusConfigs]
+      .filter((s) => s.isActive !== false)
+      .sort((a, b) => a.position - b.position);
+    // Encode each admin-defined status as `cs:<id>` so every entry has a unique
+    // dropdown value (Radix Select would otherwise render the trigger as the
+    // concatenation of all items sharing a value). The engine resolves the
+    // ticket's customStatusId to the same `cs:<id>` form for matching.
+    const statusOptions = sorted.map((s) => ({ label: s.label, value: `cs:${s.id}` }));
+    return CONDITION_FIELDS.map((f) =>
+      f.key === "status" || f.key === "previous.status"
+        ? { ...f, options: statusOptions }
+        : f
+    );
+  }, [statusConfigs]);
+
   return (
-    <ConditionGroup
-      group={value}
-      onChange={onChange}
-      depth={0}
-    />
+    <FieldsContext.Provider value={fields}>
+      <ConditionGroup
+        group={value}
+        onChange={onChange}
+        depth={0}
+      />
+    </FieldsContext.Provider>
   );
 }

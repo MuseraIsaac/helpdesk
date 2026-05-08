@@ -44,6 +44,9 @@ export const auditActions = [
   // Automation / intake routing
   "rule.applied",
   "ticket.intake_suppressed",
+  // Spam (manual or automated)
+  "ticket.marked_spam",
+  "ticket.unmarked_spam",
   // Workflow engine
   "workflow.executed",
   "workflow.failed",

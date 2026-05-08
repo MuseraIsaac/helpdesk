@@ -973,6 +973,14 @@ export function TicketsSection() {
             <Switch checked={field.value} onCheckedChange={field.onChange} />
           )} />
         </SettingsSwitchRow>
+        <SettingsSwitchRow
+          label="Enable AI Copilot drawer (⌘/Ctrl+I)"
+          description="Adds the violet “Copilot” button to the ticket header and unlocks the side panel with AI summary, draft reply, similar tickets, and KB suggestions. When off, the button, drawer, and keyboard shortcut disappear from the ticket UI completely, and server endpoints reject Copilot requests."
+        >
+          <Controller name="copilotEnabled" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
       </SettingsGroup>
 
       <SettingsGroup title="Resolution requirements">

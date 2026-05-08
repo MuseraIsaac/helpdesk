@@ -15,6 +15,7 @@ export interface TicketSnapshot {
   subject: string;
   body: string;
   status: string;
+  customStatusId?: number | null;  // FK to TicketStatusConfig — present when admin-defined statuses are in use
   category: string | null;
   priority: string | null;
   severity: string | null;

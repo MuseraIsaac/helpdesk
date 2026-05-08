@@ -65,6 +65,10 @@ export interface Ticket {
   slaPausedAt: string | null;
   slaPausedMinutes: number;
 
+  // Intake / spam flags — set by automation rules or manually by agents
+  isSpam?: boolean;
+  isQuarantined?: boolean;
+
   // Escalation
   isEscalated: boolean;
   escalatedAt: string | null;

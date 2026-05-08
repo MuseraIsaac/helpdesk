@@ -29,6 +29,7 @@ async function loadTicketSnapshot(entityId: number): Promise<TicketSnapshot | nu
       subject: true,
       body: true,
       status: true,
+      customStatusId: true,
       category: true,
       priority: true,
       severity: true,

@@ -1266,6 +1266,61 @@ router.post("/:id/unmerge", requireAuth, requirePermission("tickets.update"), as
   res.json({ ok: true });
 });
 
+// ─── Mark / unmark spam ────────────────────────────────────────────────────
+//
+// POST /api/tickets/:id/spam      → flag isSpam=true and close the ticket.
+// POST /api/tickets/:id/unspam    → clear isSpam and reopen to "open".
+//
+// The mark_spam automation action follows the same convention; this endpoint
+// gives agents a manual escape hatch for tickets the automation rules missed.
+router.post("/:id/spam", requireAuth, requirePermission("tickets.update"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid ticket ID" }); return; }
+
+  const ticket = await prisma.ticket.findFirst({
+    where:  { id, deletedAt: null },
+    select: { id: true, isSpam: true, status: true },
+  });
+  if (!ticket) { res.status(404).json({ error: "Ticket not found" }); return; }
+  if (ticket.isSpam) { res.status(200).json({ ok: true, alreadySpam: true }); return; }
+
+  await prisma.ticket.update({
+    where: { id },
+    data:  { isSpam: true, status: "closed", resolvedAt: new Date() },
+  });
+
+  await Promise.all([
+    logAudit(id, req.user.id, "ticket.marked_spam", { previousStatus: ticket.status }),
+    logAudit(id, req.user.id, "ticket.status_changed", { from: ticket.status, to: "closed", reason: "marked_spam" }),
+  ]);
+
+  res.json({ ok: true });
+});
+
+router.post("/:id/unspam", requireAuth, requirePermission("tickets.update"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ error: "Invalid ticket ID" }); return; }
+
+  const ticket = await prisma.ticket.findFirst({
+    where:  { id, deletedAt: null },
+    select: { id: true, isSpam: true, status: true },
+  });
+  if (!ticket) { res.status(404).json({ error: "Ticket not found" }); return; }
+  if (!ticket.isSpam) { res.status(200).json({ ok: true, notSpam: true }); return; }
+
+  await prisma.ticket.update({
+    where: { id },
+    data:  { isSpam: false, status: "open", resolvedAt: null },
+  });
+
+  await Promise.all([
+    logAudit(id, req.user.id, "ticket.unmarked_spam", { previousStatus: ticket.status }),
+    logAudit(id, req.user.id, "ticket.status_changed", { from: ticket.status, to: "open", reason: "unmarked_spam" }),
+  ]);
+
+  res.json({ ok: true });
+});
+
 // ─── Absorb ────────────────────────────────────────────────────────────────
 //
 // POST /api/tickets/:id/absorb  { childId }

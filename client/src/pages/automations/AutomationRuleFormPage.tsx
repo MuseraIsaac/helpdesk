@@ -5,7 +5,7 @@
  * and the full action set defined in core/schemas/automations.ts.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
@@ -18,6 +18,7 @@ import {
   GitCommit, ChevronRight, ChevronsUpDown, Check, Sparkles,
   Settings2, GitBranch, Clock, RefreshCw, Bell, DatabaseZap,
   Activity, Webhook, FlaskConical, Info, History,
+  Search, Loader2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -513,6 +514,72 @@ function ActionRow({
               ))}
             </SelectContent>
           </Select>
+        )}
+
+        {actionType === "set_severity" && (
+          <Select
+            value={(value as any).severity ?? ""}
+            onValueChange={(severity) => onChange({ ...value, severity })}
+          >
+            <SelectTrigger><SelectValue placeholder="Select severity..." /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sev1">SEV1 — Critical</SelectItem>
+              <SelectItem value="sev2">SEV2 — Major</SelectItem>
+              <SelectItem value="sev3">SEV3 — Minor</SelectItem>
+              <SelectItem value="sev4">SEV4 — Low</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
+
+        {actionType === "set_impact" && (
+          <Select
+            value={(value as any).impact ?? ""}
+            onValueChange={(impact) => onChange({ ...value, impact })}
+          >
+            <SelectTrigger><SelectValue placeholder="Select impact..." /></SelectTrigger>
+            <SelectContent>
+              {["high", "medium", "low"].map((v) => (
+                <SelectItem key={v} value={v}>{v.charAt(0).toUpperCase() + v.slice(1)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {actionType === "set_urgency" && (
+          <Select
+            value={(value as any).urgency ?? ""}
+            onValueChange={(urgency) => onChange({ ...value, urgency })}
+          >
+            <SelectTrigger><SelectValue placeholder="Select urgency..." /></SelectTrigger>
+            <SelectContent>
+              {["high", "medium", "low"].map((v) => (
+                <SelectItem key={v} value={v}>{v.charAt(0).toUpperCase() + v.slice(1)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {(actionType === "add_tag" || actionType === "remove_tag") && (
+          <div className="space-y-1">
+            <Input
+              placeholder={actionType === "add_tag" ? "Tag to add (e.g. vip, escalated, customer-replied)…" : "Tag to remove…"}
+              value={(value as any).tag ?? ""}
+              onChange={(e) => onChange({ ...value, tag: e.target.value })}
+              maxLength={50}
+            />
+            <p className="text-xs text-muted-foreground">
+              Tags are normalised (lowercased, trimmed) before being stored on the ticket.
+            </p>
+          </div>
+        )}
+
+        {actionType === "set_affected_system" && (
+          <Input
+            placeholder="Affected system (e.g. Salesforce, AWS RDS — production, Office 365)…"
+            value={(value as any).system ?? ""}
+            onChange={(e) => onChange({ ...value, system: e.target.value })}
+            maxLength={200}
+          />
         )}
 
         {(actionType === "assign_agent") && (
@@ -1782,15 +1849,50 @@ function generateRuleSummary(
 
 // ── Test Run dialog ───────────────────────────────────────────────────────────
 
+interface TicketPickResult {
+  id: number;
+  ticketNumber: string;
+  subject: string;
+  status: string;
+  senderName: string;
+}
+
 function TestRunDialog({ ruleId, onClose }: { ruleId: number; onClose: () => void }) {
-  const [entityId, setEntityId] = useState("");
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<TicketPickResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selected, setSelected] = useState<TicketPickResult | null>(null);
   const [result, setResult] = useState<unknown>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 80);
+  }, []);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!query.trim() || selected) { setResults([]); return; }
+
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const { data } = await axios.get<{ tickets: TicketPickResult[] }>(
+          `/api/tickets/search?q=${encodeURIComponent(query)}`
+        );
+        setResults(data.tickets);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query, selected]);
 
   const testMutation = useMutation({
     mutationFn: async () => {
-      const id = parseInt(entityId, 10);
-      if (!id) throw new Error("Enter a valid numeric ticket/entity ID");
-      const { data } = await axios.post(`/api/automations/${ruleId}/test`, { entityId: id });
+      if (!selected) throw new Error("Select a ticket to test against");
+      const { data } = await axios.post(`/api/automations/${ruleId}/test`, { entityId: selected.id });
       return data;
     },
     onSuccess: (data) => setResult(data),
@@ -1803,25 +1905,91 @@ function TestRunDialog({ ruleId, onClose }: { ruleId: number; onClose: () => voi
         <DialogHeader>
           <DialogTitle>Test Rule</DialogTitle>
           <DialogDescription>
-            Dry-run this rule against a specific entity to preview which conditions match
+            Dry-run this rule against a specific ticket to preview which conditions match
             and what actions would fire. The run IS recorded in execution history.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="Entity ID (e.g. ticket #42 → enter 42)..."
-              value={entityId}
-              onChange={(e) => setEntityId(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && testMutation.mutate()}
-              type="number"
-              min={1}
-              className="flex-1"
-            />
-            <Button onClick={() => testMutation.mutate()} disabled={testMutation.isPending || !entityId}>
+          {!selected ? (
+            <>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  ref={inputRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search by ticket number, subject or email…"
+                  className="pl-8 pr-8"
+                />
+                {searching && (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground animate-spin" />
+                )}
+                {query && !searching && (
+                  <button
+                    type="button"
+                    onClick={() => { setQuery(""); setResults([]); }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {results.length > 0 && (
+                <div className="rounded-lg border bg-card overflow-hidden divide-y divide-border/40 max-h-72 overflow-y-auto">
+                  {results.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => { setSelected(t); setResults([]); }}
+                      className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[11px] font-semibold text-muted-foreground">{t.ticketNumber}</span>
+                          <span className="text-[11px] text-muted-foreground/60">·</span>
+                          <span className="text-[11px] text-muted-foreground">{t.senderName}</span>
+                        </div>
+                        <p className="text-sm truncate mt-0.5">{t.subject}</p>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] shrink-0 mt-0.5">
+                        {t.status}
+                      </Badge>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {!searching && query && results.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-3">No matching tickets found.</p>
+              )}
+            </>
+          ) : (
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 flex items-start gap-2.5">
+              <CheckCircle2 className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground mb-0.5">Testing against:</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-[12px] font-bold text-primary">{selected.ticketNumber}</span>
+                  <span className="text-sm font-medium truncate">{selected.subject}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setSelected(null); setResult(null); setQuery(""); }}
+                className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <Button onClick={() => testMutation.mutate()} disabled={testMutation.isPending || !selected}>
               {testMutation.isPending ? "Running..." : "Run Test"}
             </Button>
           </div>
+
           {result && (
             <div className="rounded-md border bg-muted/20 p-3 space-y-2 max-h-72 overflow-y-auto">
               <pre className="text-xs font-mono whitespace-pre-wrap break-all">

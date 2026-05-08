@@ -25,6 +25,7 @@ import {
   handleCreateLinkedRequest, handleCreateChildTicket, handleCreateFollowUp,
   handleLinkToProblem, handleUpdateLinkedRecords, handleMergeIntoTicket,
 } from "./lifecycle";
+import { generateTicketNumber } from "../ticket-number";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -77,6 +78,117 @@ async function handleSetStatus(action: Extract<AutomationAction, { type: "set_st
   await prisma.ticket.update({ where: { id: snapshot.id }, data: { status: action.status as any } });
   void logAudit(snapshot.id, AI_AGENT_ID, "rule.applied", { action: "set_status", status: action.status });
   return ok("set_status", { status: action.status });
+}
+
+async function handleSetSeverity(action: Extract<AutomationAction, { type: "set_severity" }>, snapshot: TicketSnapshot): Promise<ActionResult> {
+  if (snapshot.severity === action.severity) return skip("set_severity", "already_set");
+  await prisma.ticket.update({ where: { id: snapshot.id }, data: { severity: action.severity as any } });
+  void logAudit(snapshot.id, AI_AGENT_ID, "rule.applied", { action: "set_severity", severity: action.severity });
+  return ok("set_severity", { severity: action.severity });
+}
+
+async function handleSetImpact(action: Extract<AutomationAction, { type: "set_impact" }>, snapshot: TicketSnapshot): Promise<ActionResult> {
+  if (snapshot.impact === action.impact) return skip("set_impact", "already_set");
+  await prisma.ticket.update({ where: { id: snapshot.id }, data: { impact: action.impact as any } });
+  void logAudit(snapshot.id, AI_AGENT_ID, "rule.applied", { action: "set_impact", impact: action.impact });
+  return ok("set_impact", { impact: action.impact });
+}
+
+async function handleSetUrgency(action: Extract<AutomationAction, { type: "set_urgency" }>, snapshot: TicketSnapshot): Promise<ActionResult> {
+  if (snapshot.urgency === action.urgency) return skip("set_urgency", "already_set");
+  await prisma.ticket.update({ where: { id: snapshot.id }, data: { urgency: action.urgency as any } });
+  void logAudit(snapshot.id, AI_AGENT_ID, "rule.applied", { action: "set_urgency", urgency: action.urgency });
+  return ok("set_urgency", { urgency: action.urgency });
+}
+
+// ── Tags ──────────────────────────────────────────────────────────────────────
+// The Ticket model has no first-class tags column; we persist them inside the
+// customFields JSON blob under the reserved key `tags` (always a string[]).
+// Storage is normalised on every read/write: lowercase + trimmed + de-duplicated.
+
+const TAGS_KEY = "tags";
+
+function readTags(snapshot: TicketSnapshot): string[] {
+  const raw = (snapshot.customFields as Record<string, unknown> | null | undefined)?.[TAGS_KEY];
+  return Array.isArray(raw) ? raw.filter((t): t is string => typeof t === "string") : [];
+}
+
+function normaliseTag(tag: string): string {
+  return tag.trim().toLowerCase();
+}
+
+async function writeTags(ticketId: number, customFields: Record<string, unknown> | null | undefined, tags: string[]): Promise<void> {
+  const next = { ...(customFields ?? {}), [TAGS_KEY]: tags };
+  await prisma.ticket.update({ where: { id: ticketId }, data: { customFields: next as any } });
+}
+
+async function handleAddTag(action: Extract<AutomationAction, { type: "add_tag" }>, snapshot: TicketSnapshot): Promise<ActionResult> {
+  const tag = normaliseTag(action.tag);
+  if (!tag) return skip("add_tag", "empty_tag");
+  const current = readTags(snapshot);
+  if (current.includes(tag)) return skip("add_tag", "already_tagged");
+  await writeTags(snapshot.id, snapshot.customFields, [...current, tag]);
+  void logAudit(snapshot.id, AI_AGENT_ID, "rule.applied", { action: "add_tag", tag });
+  return ok("add_tag", { tag });
+}
+
+async function handleRemoveTag(action: Extract<AutomationAction, { type: "remove_tag" }>, snapshot: TicketSnapshot): Promise<ActionResult> {
+  const tag = normaliseTag(action.tag);
+  if (!tag) return skip("remove_tag", "empty_tag");
+  const current = readTags(snapshot);
+  if (!current.includes(tag)) return skip("remove_tag", "not_tagged");
+  await writeTags(snapshot.id, snapshot.customFields, current.filter((t) => t !== tag));
+  void logAudit(snapshot.id, AI_AGENT_ID, "rule.applied", { action: "remove_tag", tag });
+  return ok("remove_tag", { tag });
+}
+
+// ── Linked incident creation ──────────────────────────────────────────────────
+// Maps ticket-side severity ("sev1"–"sev4") onto IncidentPriority ("p1"–"p4").
+// Skips if a linked incident already exists for this ticket.
+
+const SEVERITY_TO_PRIORITY: Record<string, "p1" | "p2" | "p3" | "p4"> = {
+  sev1: "p1", sev2: "p2", sev3: "p3", sev4: "p4",
+};
+
+async function handleCreateIncident(action: Extract<AutomationAction, { type: "create_incident" }>, snapshot: TicketSnapshot): Promise<ActionResult> {
+  if (snapshot.linkedIncidentId) {
+    return skip("create_incident", "already_linked");
+  }
+
+  // Resolve incident priority: explicit action.severity → ticket severity → default p3
+  const sev = action.severity ?? snapshot.severity ?? "sev3";
+  const priority = SEVERITY_TO_PRIORITY[sev] ?? "p3";
+
+  const now = new Date();
+  const incidentNumber = await generateTicketNumber("incident", now);
+  const title = (action.title?.trim()) || `Incident from ${snapshot.ticketNumber ?? `ticket #${snapshot.id}`}: ${snapshot.subject}`;
+
+  const incident = await prisma.incident.create({
+    data: {
+      incidentNumber,
+      title: title.slice(0, 500),
+      description: snapshot.body?.slice(0, 5000) ?? null,
+      priority: priority as any,
+      isMajor: priority === "p1",
+      affectedSystem: snapshot.affectedSystem ?? null,
+      teamId: snapshot.teamId ?? null,
+      assignedToId: snapshot.assignedToId ?? null,
+      createdById: AI_AGENT_ID,
+    },
+    select: { id: true, incidentNumber: true },
+  });
+
+  // Link the source ticket so the back-relation (sourceTicket) resolves.
+  await prisma.ticket.update({
+    where: { id: snapshot.id },
+    data:  { linkedIncidentId: incident.id },
+  });
+
+  void logAudit(snapshot.id, AI_AGENT_ID, "rule.applied", {
+    action: "create_incident", incidentId: incident.id, incidentNumber: incident.incidentNumber, priority,
+  });
+
+  return ok("create_incident", { incidentId: incident.id, incidentNumber: incident.incidentNumber, priority });
 }
 
 async function handleAssignAgent(action: Extract<AutomationAction, { type: "assign_agent" }>, snapshot: TicketSnapshot): Promise<ActionResult> {
@@ -640,11 +752,11 @@ export async function executeAutomationAction(
       case "set_category":       return handleSetCategory(action, snapshot);
       case "set_status":         return handleSetStatus(action, snapshot);
       case "set_type":           return skip("set_type", "not_yet_implemented");
-      case "set_severity":       return skip("set_severity", "not_yet_implemented");
-      case "set_impact":         return skip("set_impact", "not_yet_implemented");
-      case "set_urgency":        return skip("set_urgency", "not_yet_implemented");
-      case "add_tag":            return skip("add_tag", "tags_not_yet_implemented");
-      case "remove_tag":         return skip("remove_tag", "tags_not_yet_implemented");
+      case "set_severity":       return handleSetSeverity(action, snapshot);
+      case "set_impact":         return handleSetImpact(action, snapshot);
+      case "set_urgency":        return handleSetUrgency(action, snapshot);
+      case "add_tag":            return handleAddTag(action, snapshot);
+      case "remove_tag":         return handleRemoveTag(action, snapshot);
       case "set_affected_system":
         return handleSetField({ type: "set_field", field: "affectedSystem", value: action.system }, snapshot);
       case "assign_agent":       return handleAssignAgent(action, snapshot);
@@ -667,7 +779,7 @@ export async function executeAutomationAction(
       case "pause_sla":          return handlePauseSla(action, snapshot);
       case "resume_sla":         return handleResumeSla(action, snapshot);
       case "trigger_webhook":    return handleTriggerWebhook(action, snapshot);
-      case "create_incident":    return skip("create_incident", "not_yet_implemented");
+      case "create_incident":    return handleCreateIncident(action, snapshot);
       case "stop_processing":    return ok("stop_processing");
       // Intake-specific
       case "suppress_creation":  return handleSuppressCreation(action, snapshot);

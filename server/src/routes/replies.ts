@@ -409,4 +409,67 @@ router.post("/polish", requireAuth, async (req, res) => {
   res.json({ body: text });
 });
 
+// ── Draft reply (Copilot) ─────────────────────────────────────────────────────
+//
+// Generates a *new* suggested reply from scratch — used by the AI Copilot
+// drawer on the ticket detail page. Takes the customer's message + any
+// existing conversation as context and returns a polite, ready-to-send
+// agent reply. Gated by the `copilotEnabled` admin setting.
+
+router.post("/draft", requireAuth, async (req, res) => {
+  const ticketId = parseId(req.params.ticketId);
+  if (!ticketId) {
+    res.status(400).json({ error: "Invalid ticket ID" });
+    return;
+  }
+
+  const ticketsCfg = await getSection("tickets");
+  if (ticketsCfg.copilotEnabled === false) {
+    res.status(403).json({ error: "Copilot is disabled by your administrator" });
+    return;
+  }
+
+  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+  if (!ticket) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+
+  const replies = await prisma.reply.findMany({
+    where: { ticketId },
+    orderBy: { createdAt: "asc" },
+    include: { user: { select: { name: true } } },
+  });
+
+  const conversation = replies
+    .map((r) => {
+      const sender =
+        r.senderType === "agent" ? (r.user?.name ?? "Agent") : ticket.senderName;
+      return `${sender}: ${r.body}`;
+    })
+    .join("\n\n");
+
+  const agentName = req.user.name;
+  const customerName = ticket.senderName.split(" ")[0];
+
+  const { text } = await generateText({
+    model: openai("gpt-5-nano"),
+    system:
+      "You are a senior support engineer drafting a reply on behalf of an agent. " +
+      "Write a clear, professional, friendly response that addresses the customer's " +
+      "issue directly. Avoid filler. If you need information from the customer, " +
+      "ask one focused follow-up question. If the issue is resolvable from context, " +
+      "give concrete next steps in a short numbered list. " +
+      `Address the customer by their first name: ${customerName}. ` +
+      `Sign off with the agent's name on its own line: ${agentName}. ` +
+      "Return only the reply body — no subject, no preamble, no markdown fencing.",
+    prompt:
+      `Subject: ${ticket.subject}\n\n` +
+      `Customer's original message:\n${ticket.body}\n\n` +
+      (conversation ? `Conversation so far:\n${conversation}` : "No replies yet."),
+  });
+
+  res.json({ body: text });
+});
+
 export default router;

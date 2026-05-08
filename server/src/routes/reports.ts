@@ -2068,4 +2068,81 @@ router.get("/custom-field-distribution", async (req, res) => {
   });
 });
 
+// ── KPI Sparklines ────────────────────────────────────────────────────────────
+//
+// GET /api/reports/kpi-sparklines?days=14
+//
+// Returns short daily series (length = `days`, default 14, max 60) plus a
+// half-vs-half delta % for each KPI rendered on the dashboard. Powers the
+// inline sparklines and trend deltas on the top-row Metric cards.
+//
+// Series:
+//   created    — tickets created that day
+//   resolved   — tickets resolved that day (resolvedAt::date)
+//   breached   — SLA-breached tickets resolved that day (slaBreached = true)
+//   escalated  — tickets first escalated that day (escalatedAt::date)
+//
+// Deltas compare the *recent* half (most recent ⌈days/2⌉ days) to the
+// *previous* half. Returns null when the previous half sums to zero.
+
+router.get("/kpi-sparklines", async (req, res) => {
+  const days = Math.min(60, Math.max(2, Number(req.query.days ?? 14) || 14));
+
+  const since = new Date();
+  since.setDate(since.getDate() - (days - 1));
+  since.setHours(0, 0, 0, 0);
+  const until = new Date();
+  until.setHours(23, 59, 59, 999);
+
+  type DayRow = { date: string; n: bigint };
+
+  async function dailyCount(column: string, extraWhere = ""): Promise<number[]> {
+    const rows = await prisma.$queryRawUnsafe<DayRow[]>(
+      `WITH days AS (
+        SELECT generate_series($1::timestamp, $2::timestamp, '1 day'::interval)::date AS day
+      )
+      SELECT TO_CHAR(d.day, 'YYYY-MM-DD') AS date,
+             COALESCE(COUNT(t.id), 0)::bigint AS n
+        FROM days d
+        LEFT JOIN ticket t
+          ON t."${column}"::date = d.day
+         AND t."deleted_at" IS NULL
+         AND t."${column}" >= $1
+         AND t."${column}" <= $2
+         ${extraWhere}
+       GROUP BY d.day
+       ORDER BY d.day`,
+      since, until,
+    );
+    return rows.map((r) => Number(r.n));
+  }
+
+  const [created, resolved, breached, escalated] = await Promise.all([
+    dailyCount("createdAt"),
+    dailyCount("resolvedAt"),
+    dailyCount("resolvedAt", `AND t."slaBreached" = true`),
+    dailyCount("escalatedAt"),
+  ]);
+
+  function deltaPct(series: number[]): number | null {
+    if (series.length < 2) return null;
+    const half = Math.ceil(series.length / 2);
+    const recent = series.slice(-half).reduce((a, b) => a + b, 0);
+    const prev   = series.slice(0, series.length - half).reduce((a, b) => a + b, 0);
+    if (prev === 0) return recent === 0 ? 0 : null;
+    return Math.round(((recent - prev) / prev) * 100);
+  }
+
+  res.json({
+    days,
+    series: { created, resolved, breached, escalated },
+    delta: {
+      created:   deltaPct(created),
+      resolved:  deltaPct(resolved),
+      breached:  deltaPct(breached),
+      escalated: deltaPct(escalated),
+    },
+  });
+});
+
 export default router;

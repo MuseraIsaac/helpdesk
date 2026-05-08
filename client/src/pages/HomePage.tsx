@@ -598,13 +598,200 @@ interface MetricCardProps {
    *  is rendered as a standalone dashboard widget rather than nested inside
    *  a composite container. */
   fillCard?: boolean;
+  /** Per-day series rendered as an inline sparkline under the value. */
+  trend?: number[];
+  /** Half-vs-half delta in percent (-100…+inf). Rendered as a green/red chip
+   *  next to the value. `null`/`undefined` hides the chip. */
+  delta?: number | null;
+  /** Set true when an *increase* is bad for this metric (e.g. escalations,
+   *  SLA breaches) — flips the delta chip's red/green colour mapping. */
+  inverseDelta?: boolean;
+  /** Animate numeric values with a brief count-up. Defaults true for numeric
+   *  values; set false for already-formatted strings (durations, percents). */
+  animateValue?: boolean;
+}
+
+// ── Count-up animation ─────────────────────────────────────────────────────────
+//
+// Lightweight rAF-driven number animation. Eases out (1 - (1-t)^3) over ~600ms
+// from the previous rendered value to the new target. Restarts smoothly when
+// the target changes mid-flight (e.g. live overview refetch).
+
+function useCountUp(target: number | null, durationMs = 600): number {
+  const [display, setDisplay] = useState<number>(target ?? 0);
+  const fromRef  = useRef<number>(target ?? 0);
+  const startRef = useRef<number>(0);
+  const rafRef   = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (target == null) return;
+    fromRef.current  = display;
+    startRef.current = performance.now();
+
+    const tick = (now: number) => {
+      const elapsed = now - startRef.current;
+      const t = Math.min(1, elapsed / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const next = fromRef.current + (target - fromRef.current) * eased;
+      setDisplay(next);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, durationMs]);
+
+  return display;
+}
+
+// ── Sparkline ──────────────────────────────────────────────────────────────────
+//
+// Tiny inline SVG sparkline. Renders a smoothed area below a stroke line
+// using a Catmull-Rom-like quadratic curve. No recharts dependency — that
+// keeps it cheap inside the dashboard's AutoFitBox scaler.
+
+function Sparkline({
+  data, color, width = 100, height = 26,
+}: {
+  data:   number[];
+  color:  string;
+  width?: number;
+  height?: number;
+}) {
+  if (!data || data.length < 2) return null;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+
+  // Inset 1px on each side so the stroke isn't clipped at the SVG bounds.
+  const padX = 1;
+  const stepX = (width - padX * 2) / (data.length - 1);
+  const points = data.map((v, i) => {
+    const x = padX + i * stepX;
+    const y = height - 1 - ((v - min) / range) * (height - 2);
+    return [x, y] as const;
+  });
+
+  // Smoothed line: emit a quadratic curve through midpoints.
+  let line = `M ${points[0][0]},${points[0][1]}`;
+  for (let i = 1; i < points.length; i++) {
+    const [x0, y0] = points[i - 1];
+    const [x1, y1] = points[i];
+    const mx = (x0 + x1) / 2;
+    const my = (y0 + y1) / 2;
+    line += ` Q ${x0},${y0} ${mx},${my}`;
+  }
+  // Final straight segment from the last midpoint to the last point.
+  line += ` L ${points[points.length - 1][0]},${points[points.length - 1][1]}`;
+
+  // Closed area path (line + bottom edge) for the soft fill underneath.
+  const area =
+    line +
+    ` L ${points[points.length - 1][0]},${height} ` +
+    `L ${points[0][0]},${height} Z`;
+
+  const gradId = `sparkfill-${Math.abs(
+    color.split("").reduce((a, c) => a + c.charCodeAt(0), 0),
+  )}`;
+
+  return (
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      className="overflow-visible block"
+      aria-hidden
+    >
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stopColor={color} stopOpacity="0.32" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#${gradId})`} />
+      <path d={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      {/* Final-point dot for "live" feel */}
+      <circle
+        cx={points[points.length - 1][0]}
+        cy={points[points.length - 1][1]}
+        r={1.75}
+        fill={color}
+      />
+    </svg>
+  );
+}
+
+// ── Delta chip ─────────────────────────────────────────────────────────────────
+//
+// Compact ▲/▼ percent-change pill rendered next to a metric's value. Green
+// for "good" direction, red for "bad", neutral grey when the delta is zero.
+// `inverse` flips the colour mapping for metrics where a *decrease* is good
+// (escalations, breaches, reopens).
+
+function DeltaChip({ value, inverse = false }: { value: number; inverse?: boolean }) {
+  if (value === 0) {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold text-muted-foreground bg-muted/40">
+        <span className="opacity-60">·</span> 0%
+      </span>
+    );
+  }
+  const up = value > 0;
+  const good = inverse ? !up : up;
+  const cls = good
+    ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+    : "text-rose-600 dark:text-rose-400 bg-rose-500/10";
+  return (
+    <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums ${cls}`}>
+      <span className="text-[8px] leading-none">{up ? "▲" : "▼"}</span>
+      {up ? "+" : ""}{value}%
+    </span>
+  );
+}
+
+// ── Live pulse indicator ───────────────────────────────────────────────────────
+//
+// Tiny dot that pulses while a query is fetching, then settles to a steady
+// glow afterwards — gives the dashboard a "this data is live" feel without a
+// noisy spinner.
+
+function LivePulse({ active, label = "Live" }: { active: boolean; label?: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400"
+      title="Auto-refreshes every 30 seconds"
+    >
+      <span className="relative flex h-2 w-2">
+        {active && (
+          <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-75" />
+        )}
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+      </span>
+      {label}
+    </span>
+  );
 }
 
 function MetricCard({
   title, value, icon: Icon, hint, loading,
   variant = "default", href, accentColor, sub, fillCard = false,
+  trend, delta, inverseDelta = false, animateValue,
 }: MetricCardProps) {
   const density = useDensity();
+
+  // Decide whether to animate. If the caller set animateValue explicitly,
+  // honor that. Otherwise default-on for plain numeric values, off for
+  // pre-formatted strings (e.g. "12m 34s", "92%").
+  const numericTarget =
+    typeof value === "number" ? value :
+    (typeof value === "string" && /^-?\d+$/.test(value)) ? Number(value) :
+    null;
+  const shouldAnimate = animateValue ?? (numericTarget != null);
+  const animated = useCountUp(shouldAnimate ? numericTarget : null);
 
   // Resolve colour: explicit accentColor wins; fall back to variant colours
   const resolvedColor =
@@ -706,17 +893,42 @@ function MetricCard({
           <Skeleton className={density === "compact" ? "h-7 w-16" : "h-9 w-20"} />
         ) : (
           <div>
-            <p
-              className={[
-                "metric-card-value font-extrabold tracking-tight leading-none tabular-nums",
-                density === "compact" ? "text-[1.75rem]" : "text-[2.25rem]",
-                isEmpty ? "text-muted-foreground/50 font-bold" : "",
-              ].join(" ")}
-              style={isEmpty ? undefined : valueStyle}
-            >
-              {value ?? "—"}
-            </p>
+            {/* Value + delta chip on the same baseline */}
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <p
+                className={[
+                  "metric-card-value font-extrabold tracking-tight leading-none tabular-nums",
+                  density === "compact" ? "text-[1.75rem]" : "text-[2.25rem]",
+                  isEmpty ? "text-muted-foreground/50 font-bold" : "",
+                ].join(" ")}
+                style={isEmpty ? undefined : valueStyle}
+              >
+                {/* Render the animated number when we're animating, otherwise
+                 *  fall through to the original value (formatted strings like
+                 *  durations and percentages flow through unchanged). */}
+                {shouldAnimate && numericTarget != null
+                  ? Math.round(animated).toLocaleString()
+                  : (value ?? "—")}
+              </p>
+              {delta != null && (
+                <DeltaChip value={delta} inverse={inverseDelta} />
+              )}
+            </div>
+
             {sub && <p className="text-[11px] text-muted-foreground mt-2 leading-tight">{sub}</p>}
+
+            {/* Sparkline lives at the very bottom, sitting just above the
+             *  accent rail. Width fills the card so it scales with the cell. */}
+            {trend && trend.length >= 2 && (
+              <div className="mt-3 -mb-1">
+                <Sparkline
+                  data={trend}
+                  color={resolvedColor ?? "#94A3B8"}
+                  width={180}
+                  height={28}
+                />
+              </div>
+            )}
           </div>
         )}
       </CardContent>
@@ -1884,12 +2096,33 @@ export default function HomePage() {
     return !!atomics && atomics.some((a) => visibleWidgets.has(a));
   };
 
-  const { data: overview, isLoading: overviewLoading, error: overviewError } =
+  const { data: overview, isLoading: overviewLoading, error: overviewError, isFetching: overviewFetching } =
     useQuery<OverviewStats>({
       queryKey: ["reports-overview", from, to],
       queryFn: async () => (await axios.get(`/api/reports/overview?${fromToParams}`)).data,
       staleTime: STALE_TIME,
+      // Background refresh keeps the dashboard feeling live without forcing
+      // a hard reload. 30s is fast enough that a freshly created/resolved
+      // ticket lands within "I just did that" perception.
+      refetchInterval: 30_000,
+      refetchIntervalInBackground: false,
     });
+
+  // KPI sparkline trend series — short daily counts for the top KPI cards.
+  // Returns null delta when there's not enough data; pass-through to the
+  // <DeltaChip>, which hides the chip in that case.
+  interface KpiSparklines {
+    days:   number;
+    series: { created: number[]; resolved: number[]; breached: number[]; escalated: number[] };
+    delta:  { created: number | null; resolved: number | null; breached: number | null; escalated: number | null };
+  }
+  const { data: kpiSpark } = useQuery<KpiSparklines>({
+    queryKey: ["reports-kpi-sparklines"],
+    queryFn:  async () => (await axios.get("/api/reports/kpi-sparklines?days=14")).data,
+    staleTime: STALE_TIME,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  });
 
   const { data: volume, isLoading: volumeLoading, error: volumeError } =
     useQuery<VolumeData>({
@@ -2336,10 +2569,10 @@ export default function HomePage() {
             />
             <CardContent>
               <div className={`grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 ${density === "compact" ? "gap-2" : "gap-3"}`}>
-                <MetricCard title="Total Tickets"   value={overview?.totalTickets}     icon={TicketIcon}    loading={overviewLoading} accentColor="#6366F1" hint="All non-system tickets in the selected period." href={ticketsUrl()} />
+                <MetricCard title="Total Tickets"   value={overview?.totalTickets}     icon={TicketIcon}    loading={overviewLoading} accentColor="#6366F1" hint="All non-system tickets in the selected period." href={ticketsUrl()} trend={kpiSpark?.series.created} delta={kpiSpark?.delta.created} />
                 <MetricCard title="Open"            value={overview?.openTickets}      icon={CircleDot}     loading={overviewLoading} accentColor="#F97316" hint="Tickets currently awaiting agent response." href={ticketsUrl({ status: "open" })} />
-                <MetricCard title="Resolved"        value={overview?.resolvedTickets}  icon={TrendingUp}    loading={overviewLoading} accentColor="#22C55E" hint="Tickets marked resolved or closed." href={ticketsUrl({ status: "resolved" })} />
-                <MetricCard title="Escalated"       value={overview?.escalatedTickets} icon={AlertTriangle} loading={overviewLoading} accentColor={overview?.escalatedTickets ? "#EF4444" : "#94A3B8"} hint="Tickets that were escalated at any point." href={ticketsUrl({ escalated: true })} />
+                <MetricCard title="Resolved"        value={overview?.resolvedTickets}  icon={TrendingUp}    loading={overviewLoading} accentColor="#22C55E" hint="Tickets marked resolved or closed." href={ticketsUrl({ status: "resolved" })} trend={kpiSpark?.series.resolved} delta={kpiSpark?.delta.resolved} />
+                <MetricCard title="Escalated"       value={overview?.escalatedTickets} icon={AlertTriangle} loading={overviewLoading} accentColor={overview?.escalatedTickets ? "#EF4444" : "#94A3B8"} hint="Tickets that were escalated at any point." href={ticketsUrl({ escalated: true })} trend={kpiSpark?.series.escalated} delta={kpiSpark?.delta.escalated} inverseDelta />
                 <MetricCard title="Reopened"        value={overview?.reopenedTickets}  icon={RotateCcw}     loading={overviewLoading} accentColor={overview?.reopenedTickets ? "#A855F7" : "#94A3B8"} hint="Resolved tickets that received a new reply and returned to open." href={ticketsUrl({ status: "open" })} />
               </div>
             </CardContent>
@@ -2366,7 +2599,7 @@ export default function HomePage() {
                 <MetricCard title="MTTR"           value={formatDuration(overview?.avgResolutionSeconds)}    icon={Hourglass}   loading={overviewLoading} accentColor="#6366F1" hint="Mean Time To Resolve — avg time from creation to resolution." href={ticketsUrl({ status: "open" })} />
                 <MetricCard title="AI Resolution"  value={overview ? `${overview.aiResolutionRate}%` : undefined} icon={Sparkles} loading={overviewLoading} accentColor="#A855F7" hint="Percentage of resolved tickets handled entirely by the AI agent." href={ticketsUrl({ status: "resolved" })} />
                 <MetricCard title="SLA Compliance" value={pct(overview?.slaComplianceRate)} icon={ShieldCheck} loading={overviewLoading} accentColor={slaColor} hint="% of SLA-tracked tickets resolved within deadline." href={ticketsUrl({ view: "overdue" })} />
-                <MetricCard title="SLA Breached"   value={overview?.breachedTickets} icon={ShieldAlert} loading={overviewLoading} accentColor={overview?.breachedTickets ? "#EF4444" : "#94A3B8"} hint="Tickets that exceeded their SLA resolution deadline." href={ticketsUrl({ view: "overdue" })} />
+                <MetricCard title="SLA Breached"   value={overview?.breachedTickets} icon={ShieldAlert} loading={overviewLoading} accentColor={overview?.breachedTickets ? "#EF4444" : "#94A3B8"} hint="Tickets that exceeded their SLA resolution deadline." href={ticketsUrl({ view: "overdue" })} trend={kpiSpark?.series.breached} delta={kpiSpark?.delta.breached} inverseDelta />
               </div>
             </CardContent>
           </Card>
@@ -4173,9 +4406,12 @@ export default function HomePage() {
                         <Activity className="h-5 w-5 text-primary" />
                       </div>
                       <div>
-                        <h1 className="text-xl font-bold tracking-tight leading-tight">
-                          {greeting}{firstName ? `, ${firstName}` : ""}
-                        </h1>
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <h1 className="text-xl font-bold tracking-tight leading-tight">
+                            {greeting}{firstName ? `, ${firstName}` : ""}
+                          </h1>
+                          <LivePulse active={overviewFetching} />
+                        </div>
                         <p className="text-xs text-muted-foreground mt-0.5">{todayLabel}</p>
                       </div>
                     </div>
