@@ -187,6 +187,17 @@ is_ipv4() {
   [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
+# Returns 0 if $1 (a domain) resolves directly to $2 (this server's IP); 1
+# otherwise. "Otherwise" includes: domain doesn't resolve, domain resolves
+# to something else (a CDN like Cloudflare in front, a different host, etc.).
+# Used to detect CDN-fronted deployments so we don't try to issue an origin
+# Let's Encrypt cert that the CDN's edge would terminate.
+domain_resolves_here() {
+  local domain="$1" expected="$2" resolved
+  resolved=$(getent hosts "$domain" 2>/dev/null | awk '{print $1; exit}')
+  [[ -n "$resolved" && "$resolved" == "$expected" ]]
+}
+
 # Lists every release tag of the form vMAJOR.MINOR.PATCH on the configured
 # remote, sorted newest-first. Empty output if none / network down.
 #
@@ -293,25 +304,54 @@ EOF
     log "  IP install detected — Caddy will serve plain HTTP only."
   else
     IS_IP=0
-    # Detect if the domain points elsewhere (e.g. Cloudflare proxy in front).
-    # In that case Let's Encrypt HTTP-01 won't reach this origin — we default
-    # USE_TLS to 'n' to spare the operator a frustrating cert-issuance loop.
-    local resolved
-    resolved=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1; exit}')
-    local cf_likely=0
-    if [[ -n "$resolved" && "$resolved" != "$SERVER_IP" ]]; then
-      warn "  $DOMAIN currently resolves to $resolved (this server is $SERVER_IP)."
-      warn "  If a CDN/proxy (Cloudflare, etc.) is in front, Let's Encrypt HTTP-01 will fail."
-      warn "  You can enable TLS later — for now, plain HTTP is the safe default."
-      cf_likely=1
+    # Detect whether this domain points DIRECTLY at this server. If it
+    # doesn't, a CDN (Cloudflare, Fastly, etc.) is almost certainly in
+    # front. Origin Let's Encrypt then becomes a footgun:
+    #   • the ACME challenge often hits the CDN edge instead of origin
+    #   • even when the cert is issued, the CDN handles browser TLS, so
+    #     the origin cert is never seen
+    #   • Better Auth keys "Secure" cookie flag off the configured URL,
+    #     so a TLS=y/origin-HTTP mismatch silently breaks login
+    if domain_resolves_here "$DOMAIN" "$SERVER_IP"; then
+      PROXY_DETECTED=0
+      local default_tls="y"
+    else
+      PROXY_DETECTED=1
+      local default_tls="n"
+      local resolved
+      resolved=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1; exit}')
+      warn "  $DOMAIN resolves to ${resolved:-(unresolved)} — not this server ($SERVER_IP)."
+      warn "  This usually means a CDN (Cloudflare, etc.) is fronting the domain."
+      warn "  Origin TLS via Let's Encrypt is fragile in that case; the safe default"
+      warn "  is plain HTTP at the origin (let the CDN terminate browser-facing TLS)."
     fi
-    local default_tls="y"
-    [[ "$cf_likely" -eq 1 ]] && default_tls="n"
-    prompt USE_TLS "Issue a Let's Encrypt cert for $DOMAIN?" "$default_tls"
+    prompt USE_TLS "Issue a Let's Encrypt cert for $DOMAIN at the origin?" "$default_tls"
     case "${USE_TLS:-n}" in
       y|Y|yes|YES|1|true) USE_TLS=1; prompt LE_EMAIL "Let's Encrypt notification email" "ops@$DOMAIN" ;;
       *)                  USE_TLS=0; LE_EMAIL="${LE_EMAIL:-}" ;;
     esac
+
+    # ── Guardrail: don't let TLS=y stick when a CDN is in front ──────────
+    # This is the configuration that bit us before:
+    #   USE_TLS=1 + DOMAIN behind CDN  →  BETTER_AUTH_URL=https://DOMAIN
+    #   →  Better Auth emits Secure cookies
+    #   →  user accesses via http (origin or via CDN flexible mode)
+    #   →  browser silently drops the cookie  →  "Invalid email or password"
+    # We refuse the trap here. Operator who genuinely wants origin TLS even
+    # with CDN proxy on (e.g. Cloudflare Full mode) sets TLS_FORCE=1.
+    if [[ "$USE_TLS" == "1" && "$PROXY_DETECTED" == "1" && "${TLS_FORCE-}" != "1" ]]; then
+      warn ""
+      warn "  Blocking origin TLS: $DOMAIN is behind a CDN/proxy."
+      warn "  Pick one of these paths:"
+      warn "    1. Stay with origin HTTP (recommended) — let the CDN terminate"
+      warn "       browser-facing TLS. Cloudflare: SSL/TLS → 'Flexible'."
+      warn "    2. Disable the CDN proxy (grey cloud in Cloudflare DNS), rerun."
+      warn "    3. Set TLS_FORCE=1 to override this check (advanced)."
+      warn ""
+      warn "  Continuing with origin HTTP — your domain still works via the CDN."
+      USE_TLS=0
+      LE_EMAIL=""
+    fi
   fi
 
   prompt REPLICAS       "Number of API replicas" "$REPLICAS"
@@ -518,15 +558,35 @@ phase_env() {
   local env_file="$APP_DIR/server/.env"
   install -d -m 0750 -o "$APP_USER" -g "$APP_GROUP" "$APP_DIR/server"
 
-  # Build the canonical URL + the comma-separated list of trusted origins.
-  # Always include the IP and localhost so an ops user can hit the box
-  # directly even if DNS is broken. With TLS, primary_url uses https; with
-  # plain-HTTP installs it uses http.
+  # ── Canonical URL + scheme decision ───────────────────────────────────
+  #
+  # The scheme of $app_url is critical: Better Auth derives the cookie's
+  # `Secure` flag from it. The rule that has to hold is:
+  #
+  #   "If a browser will EVER see this app over plain HTTP, the URL
+  #    written here MUST be http://… — otherwise the Secure cookie is
+  #    silently dropped and login appears to fail with 'invalid email
+  #    or password'."
+  #
+  # USE_TLS=1 means Caddy is serving TLS at the origin AND the domain
+  # resolves directly here (the CDN guardrail above prevents the broken
+  # combination). In every other case (IP-only, behind CDN, etc.) some
+  # browser somewhere will hit plain HTTP, so we use http://.
   local scheme="http"; [[ "$USE_TLS" == "1" ]] && scheme="https"
   local app_url="$scheme://$DOMAIN"
   local origins="$app_url"
+
+  # Always include the IP for direct ops access — even on a TLS install
+  # the operator may want to hit http://IP from the same box for debugging.
   if [[ "$IS_IP" != "1" ]]; then
     origins+=",http://$SERVER_IP"
+  fi
+
+  # CDN scenario: the public URL the customer sees is https://DOMAIN even
+  # though our origin is http://DOMAIN. CORS needs to allow that origin or
+  # browser fetch() calls from the SPA fail.
+  if [[ "$IS_IP" != "1" && "$USE_TLS" != "1" ]]; then
+    origins+=",https://$DOMAIN"
   fi
   origins+=",http://localhost,http://127.0.0.1"
 
@@ -1000,7 +1060,71 @@ EOF
   chown "$APP_USER:$APP_GROUP" "$APP_DIR/scripts/update.sh"
 }
 
-# ── 3.14 Final summary ─────────────────────────────────────────────────────
+# ── 3.14 Sanity check — verify a real login round-trip works ──────────────
+# Catches subtle config mismatches that pass every individual phase yet leave
+# the install login-broken. The classic example is the Better Auth Secure-cookie
+# trap: BETTER_AUTH_URL set to https:// while origin only serves http://, so
+# the cookie is silently dropped by the browser. Curl-ing here lets us look
+# at the actual Set-Cookie header and tell the operator if something is off.
+phase_sanity_check() {
+  log "Verifying admin login round-trip"
+
+  local probe_url="http://127.0.0.1:$APP_BASE_PORT"
+  local body resp_file headers_file
+  resp_file=$(mktemp)
+  headers_file=$(mktemp)
+  trap 'rm -f "$resp_file" "$headers_file"' RETURN
+
+  # Caddy + replicas just got enabled in earlier phases; allow a few attempts
+  # so a slow boot doesn't false-positive.
+  local status=000 attempt=0
+  while (( attempt < 8 )); do
+    status=$(curl -s -o "$resp_file" -D "$headers_file" -w "%{http_code}" \
+      -X POST "$probe_url/api/auth/sign-in/email" \
+      -H "Content-Type: application/json" \
+      -H "Origin: http://$SERVER_IP" \
+      --data "{\"email\":\"$ADMIN_EMAIL\",\"password\":$(printf '%s' "$ADMIN_PASSWORD" | jq -Rs .)}" \
+      --max-time 5 2>/dev/null || echo "000")
+    [[ "$status" == "200" ]] && break
+    sleep 2; attempt=$((attempt + 1))
+  done
+
+  if [[ "$status" != "200" ]]; then
+    warn "  Login round-trip returned HTTP $status (expected 200)."
+    warn "  Investigate:    sudo journalctl -u 'zentra-api@*' -n 100"
+    warn "  Reset password: cd $APP_DIR/server && \\"
+    warn "                  RESET_EMAIL=$ADMIN_EMAIL RESET_PASSWORD='<new>' \\"
+    warn "                  /usr/local/bin/bun scripts/reset-admin-password.ts"
+    return 0
+  fi
+
+  # The response succeeded — but does the cookie the SPA gets actually work
+  # in the browser? On a plain-HTTP install, a Secure-flagged cookie is
+  # silently dropped by every browser. That's the symptom that looks like
+  # "Invalid email or password" even though the password was correct.
+  local cookie_line
+  cookie_line=$(grep -i "^set-cookie:" "$headers_file" | head -1)
+  if [[ "$cookie_line" == *"Secure"* && "$USE_TLS" != "1" ]]; then
+    warn ""
+    warn "  Login succeeds via curl but the session cookie has the Secure flag,"
+    warn "  while the install is serving plain HTTP. Browsers will silently"
+    warn "  drop this cookie and the SPA will say 'Invalid email or password'."
+    warn ""
+    warn "  Cause: BETTER_AUTH_URL in .env points to https://… while origin"
+    warn "  is http://… — usually because TLS_FORCE=1 was set or .env was"
+    warn "  hand-edited. Fix:"
+    warn "    sudo sed -i 's|^BETTER_AUTH_URL=.*|BETTER_AUTH_URL=\"http://$DOMAIN\"|' \\"
+    warn "      $APP_DIR/server/.env"
+    warn "    sudo sed -i 's|^APP_URL=.*|APP_URL=\"http://$DOMAIN\"|' \\"
+    warn "      $APP_DIR/server/.env"
+    warn "    sudo systemctl restart 'zentra-api@*'"
+    return 0
+  fi
+
+  ok "  Login OK (HTTP 200, cookie scheme matches origin scheme)"
+}
+
+# ── 3.15 Final summary ─────────────────────────────────────────────────────
 phase_summary() {
   install -m 0600 -o "$APP_USER" -g "$APP_GROUP" /dev/stdin "$APP_HOME/.db_password" <<<"$DB_PASSWORD"
 
@@ -1068,6 +1192,7 @@ main() {
   phase_cert_watchdog
   phase_finalize_helper
   phase_update_script
+  phase_sanity_check
   phase_summary
 }
 
