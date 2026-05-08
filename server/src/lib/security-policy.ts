@@ -279,59 +279,40 @@ export const enforcePasswordPolicyOnReset: RequestHandler = (req, res, next) => 
  * tracks the success/failure of the underlying Better Auth response so the
  * counter advances correctly.
  *
- * Why the manual body-buffering: Better Auth's handler reads the raw HTTP
- * stream itself (`toNodeHandler` constructs a Web Request from the
- * IncomingMessage). We can't drop `express.json()` in front because that
- * consumes the body before Better Auth sees it. So we buffer the raw bytes,
- * parse the email out, then re-emit the buffer as a fresh Readable that
- * Better Auth iterates as if nothing happened.
+ * Body access: this middleware runs AFTER the global `express.json()` parser
+ * (mounted in index.ts), so `req.body` is already an object. We read the
+ * email from there directly — no stream-replay tricks. Earlier versions of
+ * this middleware tried to re-buffer the raw stream and replay it, which
+ * mostly worked on Node but fails on Bun: Bun's stricter Web-Streams
+ * implementation rejects the second consumer of the constructed
+ * `ReadableStream` with `ReadableStream has already been used`, surfacing
+ * as a generic 500 on every sign-in. Reading `req.body` is non-destructive
+ * — Better Auth's `toNodeHandler` adapter detects an already-parsed body
+ * and constructs its Web Request from `req.body` rather than streaming
+ * from the IncomingMessage.
  */
-export const enforceLoginLockout: RequestHandler = (req, res, next) => {
-  const chunks: Buffer[] = [];
-  req.on("data", (c: Buffer) => chunks.push(c));
-  req.on("end", async () => {
-    const raw = Buffer.concat(chunks);
+export const enforceLoginLockout: RequestHandler = async (req, res, next) => {
+  const parsed = req.body as { email?: unknown } | undefined;
+  const email  = typeof parsed?.email === "string" ? parsed.email : null;
 
-    let email: string | null = null;
-    try {
-      const parsed = JSON.parse(raw.toString("utf8")) as { email?: unknown };
-      if (typeof parsed?.email === "string") email = parsed.email;
-    } catch { /* malformed JSON — let Better Auth respond with its own error */ }
-
-    if (email) {
-      const state = await getLockoutState(email);
-      if (state.locked) {
-        const minutes = Math.ceil(state.remainingMs / 60_000);
-        res.status(429).json({
-          error: `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
-          lockedForMinutes: minutes,
-        });
-        return;
-      }
-      res.on("finish", () => {
-        // Better Auth returns 200 on success, 401/400 on bad creds.
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          recordSuccessfulLogin(email!);
-        } else if (res.statusCode === 401 || res.statusCode === 400) {
-          void recordFailedLogin(email!);
-        }
+  if (email) {
+    const state = await getLockoutState(email);
+    if (state.locked) {
+      const minutes = Math.ceil(state.remainingMs / 60_000);
+      res.status(429).json({
+        error: `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+        lockedForMinutes: minutes,
       });
+      return;
     }
-
-    // ── Replay the body for Better Auth ──────────────────────────────────────
-    // Replace the request's read methods with those of a fresh Readable that
-    // emits the buffered bytes. Better Auth's downstream Web Request adapter
-    // reads via async iteration / pipe.
-    const { Readable } = await import("stream");
-    const replay = Readable.from(raw);
-    type StreamMethods = Pick<typeof replay, "on" | "once" | "pipe" | "removeListener" | "addListener" | "read">;
-    const proxyMethods: (keyof StreamMethods)[] = ["on", "once", "pipe", "removeListener", "addListener", "read"];
-    for (const m of proxyMethods) {
-      (req as unknown as Record<string, unknown>)[m] = replay[m].bind(replay) as never;
-    }
-    (req as unknown as Record<symbol, unknown>)[Symbol.asyncIterator] =
-      replay[Symbol.asyncIterator].bind(replay);
-
-    next();
-  });
+    res.on("finish", () => {
+      // Better Auth returns 200 on success, 401/400 on bad creds.
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        recordSuccessfulLogin(email);
+      } else if (res.statusCode === 401 || res.statusCode === 400) {
+        void recordFailedLogin(email);
+      }
+    });
+  }
+  next();
 };

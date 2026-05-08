@@ -126,6 +126,17 @@ const app = express();
 const port = process.env.PORT || 3000;
 const isProduction = process.env.NODE_ENV === "production";
 
+// Trust loopback as a proxy. install.sh provisions Caddy on 127.0.0.1
+// fronting the bun replicas, so every real request arrives with
+// X-Forwarded-For set by Caddy. Without `trust proxy`, express-rate-limit
+// refuses to operate (ERR_ERL_UNEXPECTED_X_FORWARDED_FOR), which surfaces
+// as HTTP 500 on /api/auth/sign-in/email and other limited routes.
+//
+// We trust ONLY loopback — an external attacker can't reach Express
+// directly, so they can't spoof XFF. Set TRUST_PROXY in .env to override
+// (e.g. "uniquelocal" if you front this with a non-loopback proxy).
+app.set("trust proxy", process.env.TRUST_PROXY || "loopback");
+
 const publicAppUrl =
   process.env.BETTER_AUTH_URL ||
   process.env.BETTER_AUTH_BASE_URL ||

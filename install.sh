@@ -72,7 +72,13 @@ BRANCH="${BRANCH:-latest}"
 
 # === SEED ADMIN (used on first run; harmless after) ───────────────────────
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"            # blank → auto-generate
+# ┌────────────────────────────────────────────────────────────────────────┐
+# │  Default admin password — EDIT THIS LINE to change it for new installs │
+# │  Must be ≥ 8 chars (Better Auth requirement). Mix upper/lower/digit/   │
+# │  symbol if you also enable a complexity policy later in Settings.      │
+# │  Override at install time:  ADMIN_PASSWORD='YourPassw0rd!' bash install.sh
+# └────────────────────────────────────────────────────────────────────────┘
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-Zentr@2026}"
 
 # === OPTIONAL APP SECRETS ─────────────────────────────────────────────────
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
@@ -167,6 +173,83 @@ run_as_app() {
   runuser -u "$APP_USER" -- bash -lc "export PATH=/usr/local/bin:\$PATH; $*"
 }
 
+# Returns the server's primary IPv4 — used as the default DOMAIN when the
+# operator doesn't have a real domain pointing here yet.
+detect_server_ip() {
+  local ip
+  ip=$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')
+  [[ -z "$ip" ]] && ip=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+  echo "${ip:-127.0.0.1}"
+}
+
+# Returns 0 if the argument looks like an IPv4 address, 1 otherwise.
+is_ipv4() {
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+# Lists every release tag of the form vMAJOR.MINOR.PATCH on the configured
+# remote, sorted newest-first. Empty output if none / network down.
+list_remote_releases() {
+  git ls-remote --tags --refs "$REPO_URL" 'v*' 2>/dev/null \
+    | awk '{print $2}' | sed 's|refs/tags/||' \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -Vr
+}
+
+# Interactive release picker. Shows every v* tag plus "main" and lets the
+# operator pick by number. Honours $BRANCH if it's already a concrete value
+# (latest is auto-resolved later in phase_repo).
+phase_pick_release() {
+  # Non-interactive: leave $BRANCH alone and let phase_repo resolve "latest".
+  [[ "${NONINTERACTIVE-}" == "1" ]] && return 0
+  # Already a concrete tag/branch? Show what we'll use, but still allow override.
+  if [[ -n "$BRANCH" && "$BRANCH" != "latest" ]]; then
+    log "BRANCH is set to '$BRANCH' — keeping it (set BRANCH= to enable picker)"
+    return 0
+  fi
+
+  log "Loading available releases from $REPO_URL"
+  local tags
+  mapfile -t tags < <(list_remote_releases)
+
+  if [[ ${#tags[@]} -eq 0 ]]; then
+    warn "No vX.Y.Z release tags found on $REPO_URL — defaulting to BRANCH=main."
+    BRANCH="main"
+    return 0
+  fi
+
+  echo
+  echo "  ┌───────────────────────────────────────────────────────────────"
+  echo "  │  Available Zentra releases"
+  echo "  ├───────────────────────────────────────────────────────────────"
+  printf "  │   %2d  %-22s %s\n" 1 "${tags[0]}" "(latest stable — recommended)"
+  for i in "${!tags[@]}"; do
+    [[ $i -eq 0 ]] && continue
+    printf "  │   %2d  %s\n" $((i+1)) "${tags[$i]}"
+  done
+  printf "  │   %2d  %-22s %s\n" 0 "main" "(bleeding-edge HEAD — for development)"
+  echo "  └───────────────────────────────────────────────────────────────"
+  echo
+
+  local choice
+  read -rp "  Pick a release [1]: " choice
+  choice="${choice:-1}"
+
+  case "$choice" in
+    0|m|main)              BRANCH="main" ;;
+    [1-9]|[1-9][0-9])
+      if (( choice >= 1 && choice <= ${#tags[@]} )); then
+        BRANCH="${tags[$((choice-1))]}"
+      else
+        die "Choice out of range: $choice (have ${#tags[@]} tags + main)"
+      fi
+      ;;
+    v[0-9]*\.[0-9]*\.[0-9]*) BRANCH="$choice" ;;
+    *) die "Invalid choice: '$choice' (number or v1.2.3 or 'main')" ;;
+  esac
+  ok "  → installing $BRANCH"
+}
+
 # ════════════════════════════════════════════════════════════════════════════
 # 3. PHASES
 # ════════════════════════════════════════════════════════════════════════════
@@ -174,12 +257,50 @@ run_as_app() {
 # ── 3.1 Gather inputs ──────────────────────────────────────────────────────
 phase_inputs() {
   log "Collecting installation settings"
-  prompt DOMAIN         "Domain (e.g. helpdesk.example.com)"
+
+  # Server IP autodetected so DOMAIN can default to it for IP-only installs.
+  SERVER_IP="$(detect_server_ip)"
+
+  cat <<EOF
+
+  Hostname for this install. You can use:
+    • a real domain (helpdesk.example.com)  → optional TLS via Let's Encrypt
+    • the server IP                         → plain HTTP, no domain needed
+  Both work; you can also enter a domain now and add TLS later.
+
+EOF
+  prompt DOMAIN "Domain or server IP" "$SERVER_IP"
   [[ -n "$DOMAIN" ]] || die "DOMAIN is required"
 
-  prompt LE_EMAIL       "Let's Encrypt notification email" "ops@$DOMAIN"
+  if is_ipv4 "$DOMAIN"; then
+    IS_IP=1
+    USE_TLS=0
+    LE_EMAIL="${LE_EMAIL:-}"
+    log "  IP install detected — Caddy will serve plain HTTP only."
+  else
+    IS_IP=0
+    # Detect if the domain points elsewhere (e.g. Cloudflare proxy in front).
+    # In that case Let's Encrypt HTTP-01 won't reach this origin — we default
+    # USE_TLS to 'n' to spare the operator a frustrating cert-issuance loop.
+    local resolved
+    resolved=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1; exit}')
+    local cf_likely=0
+    if [[ -n "$resolved" && "$resolved" != "$SERVER_IP" ]]; then
+      warn "  $DOMAIN currently resolves to $resolved (this server is $SERVER_IP)."
+      warn "  If a CDN/proxy (Cloudflare, etc.) is in front, Let's Encrypt HTTP-01 will fail."
+      warn "  You can enable TLS later — for now, plain HTTP is the safe default."
+      cf_likely=1
+    fi
+    local default_tls="y"
+    [[ "$cf_likely" -eq 1 ]] && default_tls="n"
+    prompt USE_TLS "Issue a Let's Encrypt cert for $DOMAIN?" "$default_tls"
+    case "${USE_TLS:-n}" in
+      y|Y|yes|YES|1|true) USE_TLS=1; prompt LE_EMAIL "Let's Encrypt notification email" "ops@$DOMAIN" ;;
+      *)                  USE_TLS=0; LE_EMAIL="${LE_EMAIL:-}" ;;
+    esac
+  fi
+
   prompt REPLICAS       "Number of API replicas" "$REPLICAS"
-  prompt BRANCH         "Repo branch" "$BRANCH"
   prompt ADMIN_EMAIL    "Initial admin email"  "$ADMIN_EMAIL"
   prompt_secret ADMIN_PASSWORD "Initial admin password"
   prompt_secret DB_PASSWORD    "PostgreSQL password for '$DB_USER'"
@@ -187,18 +308,34 @@ phase_inputs() {
   [[ "$REPLICAS" =~ ^[0-9]+$ ]] && (( REPLICAS >= 1 && REPLICAS <= 16 )) \
     || die "REPLICAS must be a number between 1 and 16 (got: $REPLICAS)"
 
+  # Release picker — runs AFTER the basic prompts so the network call to
+  # GitHub doesn't delay the simple-input phase. Only fires interactively.
+  phase_pick_release
+
   ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(gen_secret)}"
   DB_PASSWORD="${DB_PASSWORD:-$(gen_secret)}"
   BETTER_AUTH_SECRET="$(openssl rand -hex 32)"
   DOWNLOAD_TOKEN_SECRET="$(openssl rand -hex 32)"
 
+  # Compute the URLs the install will be reachable on, for the summary +
+  # for the .env (BETTER_AUTH_URL / TRUSTED_ORIGINS).
+  local scheme="http"
+  [[ "$USE_TLS" == "1" ]] && scheme="https"
+  local primary_url ip_url
+  primary_url="$scheme://$DOMAIN"
+  ip_url="http://$SERVER_IP"
+  [[ "$IS_IP" == "1" ]] && ip_url=""   # already the same as primary
+
   cat <<EOF
 
   ┌──────────────────────────────────────────────────────────────────────
-  │ Domain         : https://$DOMAIN
-  │ Let's Encrypt  : $LE_EMAIL
+  │ Primary URL    : $primary_url
+EOF
+  [[ -n "$ip_url" ]] && echo "  │ Direct IP URL  : $ip_url"
+  cat <<EOF
+  │ TLS            : $([[ "$USE_TLS" == "1" ]] && echo "Let's Encrypt ($LE_EMAIL)" || echo "off (plain HTTP)")
   │ API replicas   : $REPLICAS  (ports $APP_BASE_PORT..$((APP_BASE_PORT + REPLICAS - 1)))
-  │ Repo / branch  : $REPO_URL  ($BRANCH)
+  │ Repo / ref     : $REPO_URL  ($BRANCH)
   │ App user       : $APP_USER     (home: $APP_HOME, code: $APP_DIR)
   │ PostgreSQL     : 127.0.0.1:5432  (db=$DB_NAME, user=$DB_USER)
   │ Admin email    : $ADMIN_EMAIL
@@ -365,14 +502,25 @@ phase_repo() {
 phase_env() {
   log "Writing $APP_DIR/server/.env"
   local env_file="$APP_DIR/server/.env"
-  local app_url="https://$DOMAIN"
   install -d -m 0750 -o "$APP_USER" -g "$APP_GROUP" "$APP_DIR/server"
+
+  # Build the canonical URL + the comma-separated list of trusted origins.
+  # Always include the IP and localhost so an ops user can hit the box
+  # directly even if DNS is broken. With TLS, primary_url uses https; with
+  # plain-HTTP installs it uses http.
+  local scheme="http"; [[ "$USE_TLS" == "1" ]] && scheme="https"
+  local app_url="$scheme://$DOMAIN"
+  local origins="$app_url"
+  if [[ "$IS_IP" != "1" ]]; then
+    origins+=",http://$SERVER_IP"
+  fi
+  origins+=",http://localhost,http://127.0.0.1"
 
   cat > "$env_file" <<EOF
 # Generated by install.sh — re-running install regenerates this file.
 NODE_ENV=production
 APP_URL="$app_url"
-TRUSTED_ORIGINS="$app_url"
+TRUSTED_ORIGINS="$origins"
 
 DATABASE_URL="postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME?schema=public"
 DATABASE_POOL_MAX=40
@@ -560,16 +708,10 @@ EOF
     upstreams+=" 127.0.0.1:$((APP_BASE_PORT + i))"
   done
 
-  # IMPORTANT: use `handle` blocks so try_files (under file_server) cannot
-  # rewrite /api/* to /index.html before reverse_proxy gets a chance to run.
-  # In Caddy's default directive order try_files runs *before* reverse_proxy,
-  # so without explicit handle blocks API calls return the SPA HTML.
-  cat > /etc/caddy/Caddyfile <<EOF
-{
-  email $LE_EMAIL
-}
-
-$DOMAIN {
+  # The same set of handle blocks is used in every mode — a small inline helper
+  # avoids repeating the rules across three slightly-different vhosts.
+  local app_block
+  app_block="$(cat <<EOF
   encode zstd gzip
 
   # API → load-balanced across the Bun replicas
@@ -591,8 +733,54 @@ $DOMAIN {
     try_files {path} /index.html
     file_server
   }
+EOF
+  )"
+
+  # Three install modes shape the Caddyfile:
+  #   1. IP-only          → single :80 block, auto_https off
+  #   2. Domain + TLS     → domain block with Let's Encrypt + IP fallback on :80
+  #   3. Domain no TLS    → domain + IP both on :80 (e.g. behind Cloudflare proxy)
+  if [[ "$IS_IP" == "1" ]]; then
+    cat > /etc/caddy/Caddyfile <<EOF
+# Plain-HTTP install — accessed via http://$DOMAIN
+{
+  auto_https off
+}
+
+:80 {
+$app_block
 }
 EOF
+  elif [[ "$USE_TLS" == "1" ]]; then
+    cat > /etc/caddy/Caddyfile <<EOF
+# Domain install with Let's Encrypt TLS + plain-HTTP fallback for IP access.
+{
+  email $LE_EMAIL
+}
+
+$DOMAIN {
+$app_block
+}
+
+# Direct IP access (testing, ops) — plain HTTP only.
+http://$SERVER_IP {
+$app_block
+}
+EOF
+  else
+    cat > /etc/caddy/Caddyfile <<EOF
+# Domain install without origin TLS — typical when a CDN (Cloudflare, etc.)
+# terminates TLS in front. Browser ↔ CDN is HTTPS; CDN ↔ origin is HTTP.
+# Both http://\$DOMAIN and http://\$SERVER_IP are served.
+{
+  auto_https off
+}
+
+http://$DOMAIN, http://$SERVER_IP, :80 {
+$app_block
+}
+EOF
+  fi
 
   # SELinux: let Caddy reach upstream ports + read the static dir.
   if command -v setsebool >/dev/null 2>&1; then
@@ -802,16 +990,25 @@ EOF
 phase_summary() {
   install -m 0600 -o "$APP_USER" -g "$APP_GROUP" /dev/stdin "$APP_HOME/.db_password" <<<"$DB_PASSWORD"
 
+  local scheme="http"; [[ "$USE_TLS" == "1" ]] && scheme="https"
   cat <<EOF
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║  Zentra ITSM is installed.                                                   ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
-║  URL          : https://$DOMAIN
-║  Replicas     : $REPLICAS  (ports $APP_BASE_PORT..$((APP_BASE_PORT + REPLICAS - 1)))
-║  PostgreSQL   : 127.0.0.1:5432  (db=$DB_NAME, user=$DB_USER)
-║  App user     : $APP_USER
-║  App dir      : $APP_DIR
+║  Access URLs                                                                 ║
+║    Primary  : $scheme://$DOMAIN
+EOF
+  [[ "$IS_IP" != "1" ]] && cat <<EOF
+║    Direct IP: http://$SERVER_IP
+EOF
+  cat <<EOF
+║  TLS        : $([[ "$USE_TLS" == "1" ]] && echo "Let's Encrypt for $DOMAIN" || echo "off (plain HTTP — terminate at a CDN if you need HTTPS)")
+║  Release    : $BRANCH
+║  Replicas   : $REPLICAS  (ports $APP_BASE_PORT..$((APP_BASE_PORT + REPLICAS - 1)))
+║  PostgreSQL : 127.0.0.1:5432  (db=$DB_NAME, user=$DB_USER)
+║  App user   : $APP_USER
+║  App dir    : $APP_DIR
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║  Initial admin login                                                         ║
 ║    email    : $ADMIN_EMAIL

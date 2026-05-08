@@ -201,7 +201,8 @@
       "Bash(bash -n \"c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/scripts/enable-update-orchestrator.sh\")",
       "Bash(bash -n \"c:/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/scripts/zentra-finalize-update.sh\")",
       "Bash(grep -E '^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+$')",
-      "WebFetch(domain:www.glpi-project.org)"
+      "WebFetch(domain:www.glpi-project.org)",
+      "Bash(ssh-keygen -R 178.105.55.229)"
     ]
   }
 }
