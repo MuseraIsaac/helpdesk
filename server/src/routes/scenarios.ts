@@ -31,6 +31,7 @@ import {
 import type { WorkflowAction, TicketWorkflowSnapshot } from "../lib/workflow/types";
 import { executeWorkflowActions } from "../lib/workflow/actions";
 import { logAudit } from "../lib/audit";
+import { loadTicketDetail } from "./tickets";
 import prisma from "../db";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -342,10 +343,18 @@ router.post(
         data: { status: finalStatus, completedAt: new Date() },
       });
 
+      // Return the freshly-shaped ticket alongside the execution result so
+      // the client can write it straight into its TanStack Query cache —
+      // matching the optimistic-then-authoritative pattern used by the
+      // ticket PATCH flow ("Save Changes"). This avoids relying on
+      // invalidate-and-refetch which can race or hit stale-time guards.
+      const ticketAfter = await loadTicketDetail(body.ticketId);
+
       res.json({
         executionId: execution.id,
         status: finalStatus,
         results,
+        ticket: ticketAfter,
       });
     } catch (err) {
       // Unexpected top-level failure

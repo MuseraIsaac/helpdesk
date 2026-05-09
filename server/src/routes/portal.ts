@@ -434,7 +434,7 @@ router.post("/tickets/:id/replies", requireCustomer, async (req, res) => {
 
   const ticket = await prisma.ticket.findUnique({
     where: { id },
-    select: { senderEmail: true, status: true },
+    select: { senderEmail: true, status: true, ticketNumber: true },
   });
 
   if (!ticket) {
@@ -472,13 +472,18 @@ router.post("/tickets/:id/replies", requireCustomer, async (req, res) => {
     },
   });
 
-  // Re-open resolved tickets when the customer follows up
-  if (ticket.status === "resolved") {
-    await prisma.ticket.update({
-      where: { id },
-      data: { status: "open" },
-    });
-  }
+  // Stamp lastCustomerReplyAt so the agent UI can render the
+  // "Customer Responded" badge and time-since-last-reply metrics see this
+  // event the same way they see inbound-email and webhook replies.
+  // Folded into the same UPDATE that re-opens a resolved ticket below to
+  // avoid two writes per portal reply.
+  await prisma.ticket.update({
+    where: { id },
+    data: {
+      lastCustomerReplyAt: reply.createdAt,
+      ...(ticket.status === "resolved" ? { status: "open" as const } : {}),
+    },
+  });
 
   // Push to agents currently viewing the ticket
   emitTicketEvent({
@@ -490,6 +495,17 @@ router.post("/tickets/:id/replies", requireCustomer, async (req, res) => {
     authorName:   req.user.name ?? null,
     channel:      "portal",
     createdAt:    reply.createdAt.toISOString(),
+  });
+
+  // Push to agents currently viewing the Tickets list — drives the live
+  // "new updates" banner.
+  emitTicketListEvent({
+    type:         "ticket.updated",
+    ticketId:     id,
+    ticketNumber: ticket.ticketNumber,
+    change:       "reply",
+    authorUserId: null,
+    updatedAt:    reply.createdAt.toISOString(),
   });
 
   res.status(201).json({ reply });

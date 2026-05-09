@@ -964,6 +964,17 @@ export function TicketsSection() {
         </SettingsSwitchRow>
       </SettingsGroup>
 
+      <SettingsGroup title="Inbound activity">
+        <SettingsSwitchRow
+          label="Show “Customer Responded” badge"
+          description="Tags a ticket on the list and detail pages whenever the customer has replied after the most recent agent reply. Helps agents triage which tickets are now waiting on the team. Disable to hide the badge organisation-wide."
+        >
+          <Controller name="customerRespondedBadgeEnabled" control={control} render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
+        </SettingsSwitchRow>
+      </SettingsGroup>
+
       <SettingsGroup title="AI assistance">
         <SettingsSwitchRow
           label="Show Summarize button on the ticket page"

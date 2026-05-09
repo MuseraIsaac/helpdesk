@@ -84,9 +84,13 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
     },
   });
 
+  // Customer accounts are managed via the portal sign-up flow — admins can
+  // only update name + password here, never role or team membership.
+  const isCustomer = isEdit && user?.role === Role.customer;
+
   // ── Team membership (edit mode only, non-customers) ─────────────────────────
   const watchedRole = form.watch("role") as string | undefined;
-  const supportsTeams = isEdit && watchedRole !== Role.customer;
+  const supportsTeams = isEdit && !isCustomer && watchedRole !== Role.customer;
 
   const { data: teamsData } = useQuery({
     queryKey: ["dict", "teams"],
@@ -167,8 +171,12 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
       setPendingPayload(data);
       return;
     }
+    // For customer accounts the role field is read-only; strip it from the
+    // payload so the server's "system roles cannot be assigned via the user
+    // editor" guard isn't triggered by a same-value re-submit.
+    const payload: typeof data = isCustomer ? { ...data, role: undefined } : data;
     try {
-      await mutation.mutateAsync(data);
+      await mutation.mutateAsync(payload);
       await persistTeams();
     } catch {
       return; // mutation.error state already set; keep dialog open
@@ -223,19 +231,40 @@ export default function UserForm({ user, onSuccess }: UserFormProps) {
       <ForcePasswordChangeField form={form} />
       <div className="space-y-2">
         <Label htmlFor="role">Role</Label>
-        <select
-          id="role"
-          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          {...form.register("role")}
-        >
-          {assignable.map((r) => (
-            <option key={r.key} value={r.key}>
-              {r.name}
-            </option>
-          ))}
-        </select>
-        {form.formState.errors.role && (
-          <ErrorMessage message={form.formState.errors.role.message} />
+        {isCustomer ? (
+          <>
+            {/* Customer accounts can't be re-roled from this form. We keep the
+                role value pinned in the form state via a hidden input so the
+                update payload is valid; the dropdown is replaced with a
+                read-only indicator. */}
+            <input type="hidden" {...form.register("role")} />
+            <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                Customer
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                Customer accounts are managed via the portal — role can't be changed here.
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            <select
+              id="role"
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              {...form.register("role")}
+            >
+              {assignable.map((r) => (
+                <option key={r.key} value={r.key}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+            {form.formState.errors.role && (
+              <ErrorMessage message={form.formState.errors.role.message} />
+            )}
+          </>
         )}
       </div>
       {/* ── Team membership (edit mode, internal roles only) ──────────── */}

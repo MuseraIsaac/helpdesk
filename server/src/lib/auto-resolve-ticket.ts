@@ -113,6 +113,10 @@ export async function registerAutoResolveWorker(boss: PgBoss): Promise<void> {
               status: "resolved",
               // Stamp both milestones — AI resolves in one shot
               ...(!currentTicket?.firstRespondedAt && { firstRespondedAt: now }),
+              // Stamp lastAgentReplyAt so agent-reply-direction signals
+              // (time-since-last-reply, "Customer Responded" badge logic)
+              // see the AI reply the same as a human agent reply.
+              lastAgentReplyAt: now,
               resolvedAt: now,
               ...((breachedFirstResponse || breachedResolution) && { slaBreached: true }),
             },

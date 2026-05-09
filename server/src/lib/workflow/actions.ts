@@ -6,6 +6,59 @@ import prisma from "../../db";
 import { escalateTicket } from "../escalation";
 import { computeSlaDeadlines } from "../sla";
 
+// ── Settable ticket-field allowlist ───────────────────────────────────────────
+//
+// `update_field` accepts a free-form `field` string (so custom_* fields work
+// without code changes), but we restrict native ticket columns to this map so
+// no caller can write into sensitive columns (deletedAt, slaBreached, …) or
+// pass strings into integer columns and crash Prisma.
+//
+// `kind` controls how the inbound string `value` is coerced.
+type FieldKind = "text" | "enum" | "int" | "bool";
+const TICKET_FIELD_ALLOWLIST: Record<string, FieldKind> = {
+  // Free-text
+  subject:        "text",
+  affectedSystem: "text",
+  mailboxAlias:   "text",
+
+  // Enums (string columns; Prisma validates the enum value)
+  status:     "enum",
+  priority:   "enum",
+  severity:   "enum",
+  impact:     "enum",
+  urgency:    "enum",
+  category:   "enum",
+  ticketType: "enum",
+  source:     "enum",
+
+  // Foreign keys (integers)
+  customStatusId:     "int",
+  customTicketTypeId: "int",
+  organizationId:     "int",
+  teamId:             "int",
+
+  // Booleans — flags that admins legitimately flip
+  isAutoReply:   "bool",
+  isBounce:      "bool",
+  isSpam:        "bool",
+  isQuarantined: "bool",
+};
+
+function coerceFieldValue(field: string, value: string, kind: FieldKind): unknown {
+  switch (kind) {
+    case "text":
+    case "enum":
+      return value;
+    case "int": {
+      const n = parseInt(value, 10);
+      if (Number.isNaN(n)) throw new Error(`Invalid number for field "${field}": "${value}"`);
+      return n;
+    }
+    case "bool":
+      return value === "true";
+  }
+}
+
 /**
  * Execute a list of workflow actions against a ticket snapshot, in order.
  * Each action is idempotent — it inspects current state and skips if the desired
@@ -100,18 +153,53 @@ async function executeWorkflowAction(
         return { type: action.type, applied: true };
       }
 
-      // Standard ticket field
+      // Standard ticket field — must be in the allowlist (rejects anything
+      // not explicitly safe to set, including system columns like deletedAt
+      // or slaBreached).
+      const kind = TICKET_FIELD_ALLOWLIST[field];
+      if (!kind) {
+        return { type: action.type, applied: false, skippedReason: `field_not_allowed:${field}` };
+      }
+
+      const coerced = coerceFieldValue(field, value, kind);
+
       const current = (ticket as unknown as Record<string, unknown>)[field];
-      if (current === value) {
+      if (current === coerced) {
         return { type: action.type, applied: false, skippedReason: "field_unchanged" };
       }
 
-      const data: Prisma.TicketUpdateInput = { [field]: value };
+      const data: Prisma.TicketUpdateInput = { [field]: coerced } as Prisma.TicketUpdateInput;
 
       if (field === "priority") {
-        const deadlines = computeSlaDeadlines(value as TicketPriority, ticket.createdAt);
+        const deadlines = computeSlaDeadlines(coerced as TicketPriority, ticket.createdAt);
         data.firstResponseDueAt = deadlines.firstResponseDueAt;
         data.resolutionDueAt = deadlines.resolutionDueAt;
+      }
+
+      // Setting a custom status or custom ticket type also syncs the canonical
+      // `status` / `ticketType` enum to the workflow state of the chosen
+      // config row, so downstream consumers (filters, reports, SLA pause)
+      // see consistent state.
+      if (field === "customStatusId") {
+        const cfg = await prisma.ticketStatusConfig.findUnique({
+          where: { id: coerced as number },
+          select: { workflowState: true },
+        });
+        if (!cfg) {
+          return { type: action.type, applied: false, skippedReason: "custom_status_not_found" };
+        }
+        // workflowState is "open" | "in_progress" | "resolved" | "closed";
+        // map to TicketStatus enum (which uses the same names).
+        (data as Prisma.TicketUpdateInput).status = cfg.workflowState as never;
+      }
+      if (field === "customTicketTypeId") {
+        const cfg = await prisma.ticketTypeConfig.findUnique({
+          where: { id: coerced as number },
+          select: { slug: true },
+        });
+        if (!cfg) {
+          return { type: action.type, applied: false, skippedReason: "custom_ticket_type_not_found" };
+        }
       }
 
       await prisma.ticket.update({ where: { id: ticket.id }, data });

@@ -276,6 +276,14 @@ export default function ReplyForm({ ticket, replyType, quote, onSent }: ReplyFor
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["replies", ticketId] });
       queryClient.invalidateQueries({ queryKey: ["conversation", ticketId] });
+      // Refresh anything that derives from `lastReply`. The ticket detail
+      // query carries `lastReply` (drives the "Customer Responded" badge in
+      // the header), and the tickets list carries it on every row (drives
+      // the same badge under the subject + the conversation hover preview).
+      // Prefix-invalidate so both string-keyed and number-keyed variants
+      // (["ticket", "42"] and ["ticket", 42]) get caught.
+      queryClient.invalidateQueries({ queryKey: ["ticket"] });
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
       setBodyHtml("");
       setBodyText("");
       setEditorContent("");

@@ -15,6 +15,10 @@ import { useBranding } from "../lib/useBranding";
 import ProfileMenu from "./ProfileMenu";
 import NotificationBell from "./NotificationBell";
 import GlobalSearch from "./GlobalSearch";
+import KeyboardShortcutsOverlay from "./KeyboardShortcutsOverlay";
+import LiveTicketUpdatesBanner from "./LiveTicketUpdatesBanner";
+import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
+import { TicketListLiveCountsProvider } from "@/hooks/useTicketListLiveCounts";
 import { Settings, ChevronLeft, ChevronRight, ChevronDown, Menu, X, Search, LogOut } from "lucide-react";
 import SidebarRail from "./SidebarRail";
 
@@ -453,6 +457,9 @@ export default function Layout() {
   const name  = session?.user?.name  ?? "";
   const email = session?.user?.email ?? "";
 
+  // Register the application-wide keyboard shortcuts (chord nav, `n`, `?`, `/`).
+  useGlobalShortcuts();
+
   // Fetch demo_data setting only for admins — determines sidebar section visibility.
   // staleTime is generous (5 min) since this rarely changes during a session.
   const { data: demoSettings } = useQuery({
@@ -476,6 +483,7 @@ export default function Layout() {
   const sharedProps: SidebarContentProps = { collapsed, role, name, email, showDemoData, onSignOut: handleSignOut };
 
   return (
+    <TicketListLiveCountsProvider>
     <div className="min-h-screen flex bg-muted/20">
 
       {/* ── Desktop sidebar ── */}
@@ -549,6 +557,9 @@ export default function Layout() {
       </div>
 
       <GlobalSearch />
+      <KeyboardShortcutsOverlay />
+      <LiveTicketUpdatesBanner />
     </div>
+    </TicketListLiveCountsProvider>
   );
 }

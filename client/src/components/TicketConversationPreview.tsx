@@ -32,9 +32,23 @@ interface LastNote {
   createdAt:  string;
 }
 
+/**
+ * The ticket's original message — the customer's first contact, persisted on
+ * the ticket itself rather than as a Reply row. Used as a fallback when the
+ * ticket has no replies or notes yet, so brand-new tickets still preview the
+ * incoming message instead of nothing.
+ */
+interface OriginalMessage {
+  body:       string;
+  senderName: string | null;
+  createdAt:  string;
+}
+
 interface Props {
   lastReply: LastReply | null | undefined;
   lastNote:  LastNote  | null | undefined;
+  /** Original customer message — shown only when there is no reply or note. */
+  original?: OriginalMessage | null;
   children:  ReactNode;
 }
 
@@ -139,7 +153,7 @@ function PreviewCard({ entry }: { entry: Entry }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function TicketConversationPreview({ lastReply, lastNote, children }: Props) {
+export default function TicketConversationPreview({ lastReply, lastNote, original, children }: Props) {
   const [pos,     setPos]     = useState({ x: 0, y: 0 });
   const [visible, setVisible] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -163,9 +177,18 @@ export default function TicketConversationPreview({ lastReply, lastNote, childre
       body:       lastNote.body,
       createdAt:  lastNote.createdAt,
     };
+  } else if (original && original.body) {
+    // No replies or notes yet — fall back to the customer's original message
+    // so freshly created tickets still preview *something* useful on hover.
+    entry = {
+      kind:       "reply-customer",
+      authorName: original.senderName,
+      body:       original.body,
+      createdAt:  original.createdAt,
+    };
   }
 
-  // No conversation at all — skip wrapper entirely
+  // No conversation and no original body — skip wrapper entirely
   if (!entry) return <>{children}</>;
 
   function handleMouseEnter(e: React.MouseEvent) {

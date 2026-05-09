@@ -19,6 +19,7 @@ import {
   Wrench,
   ScrollText,
   Package,
+  Activity,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -117,6 +118,14 @@ export const ADMIN_TABS: AdminTab[] = [
   },
 
   // ── System ────────────────────────────────────────────────────────────────
+  {
+    id: "monitoring",
+    label: "Monitoring",
+    to: "/admin/monitoring",
+    icon: Activity,
+    group: "System",
+    description: "Live health of the server, database, replicas, and background jobs.",
+  },
   {
     id: "audit-log",
     label: "Audit Log",

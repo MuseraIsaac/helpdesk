@@ -39,6 +39,7 @@ import ticketViewsRouter from "./routes/ticket-views";
 import workflowsRouter from "./routes/workflows";
 import scenariosRouter from "./routes/scenarios";
 import automationsRouter from "./routes/automations";
+import adminHealthRouter from "./routes/admin-health";
 import outboundWebhooksRouter from "./routes/outbound-webhooks";
 import routingRouter from "./routes/routing";
 import dutyPlansRouter from "./routes/duty-plans";
@@ -263,6 +264,36 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// ── Internal per-replica health probe ────────────────────────────────────────
+// Used by /api/admin/health to fan out across all systemd-managed API replicas
+// on this host. Only answers requests that originate from loopback so the rich
+// process-level info (pid, memory, event-loop lag) is never exposed publicly.
+app.get("/api/health/replica", (req, res) => {
+  const ip = (req.ip ?? "").replace(/^::ffff:/, "");
+  if (ip !== "127.0.0.1" && ip !== "::1" && ip !== "localhost") {
+    res.status(403).json({ error: "loopback only" });
+    return;
+  }
+  const mem = process.memoryUsage();
+  const start = Date.now();
+  setImmediate(() => {
+    const lagMs = Date.now() - start;
+    res.json({
+      status: "ok",
+      pid: process.pid,
+      port: Number(process.env.PORT) || null,
+      uptimeSeconds: Math.round(process.uptime()),
+      nodeVersion: process.version,
+      memory: {
+        rssMb:       Math.round((mem.rss        / 1024 / 1024) * 10) / 10,
+        heapUsedMb:  Math.round((mem.heapUsed   / 1024 / 1024) * 10) / 10,
+        heapTotalMb: Math.round((mem.heapTotal  / 1024 / 1024) * 10) / 10,
+      },
+      eventLoopLagMs: lagMs,
+    });
+  });
+});
+
 // Maintenance-mode gate: when an update is mid-flight, returns 503 to all
 // non-admin /api/* traffic. Allowlists auth, /api/updates, /api/sse and
 // /api/me so admins can monitor and toggle the flag.
@@ -274,6 +305,7 @@ app.use("/api/ticket-views", ticketViewsRouter);
 app.use("/api/workflows", workflowsRouter);
 app.use("/api/scenarios", scenariosRouter);
 app.use("/api/automations", automationsRouter);
+app.use("/api/admin/health", adminHealthRouter);
 app.use("/api/webhooks/outbound", outboundWebhooksRouter);
 app.use("/api/routing", routingRouter);
 app.use("/api/duty-plans", dutyPlansRouter);

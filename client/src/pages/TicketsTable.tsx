@@ -23,6 +23,7 @@ import {
 } from "core/schemas/ticket-view.ts";
 import ErrorAlert from "@/components/ErrorAlert";
 import TicketConversationPreview from "@/components/TicketConversationPreview";
+import CustomerRespondedBadge from "@/components/CustomerRespondedBadge";
 import StatusBadge from "@/components/StatusBadge";
 import TicketTypeBadge from "@/components/TicketTypeBadge";
 import { PriorityBadge, SeverityBadge } from "@/components/TriageBadge";
@@ -50,7 +51,24 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  ChevronDown,
+  CheckSquare,
+  Square,
+  UserMinus,
+  UserCheck,
+  AlertTriangle,
+  TimerOff,
+  Flame,
+  CircleDot,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { TicketFilters } from "./TicketsPage";
 
 interface TicketsResponse {
@@ -87,24 +105,42 @@ const ALL_COLUMN_DEFS: Record<ColumnId, ColumnDef<Ticket>> = {
       <TicketConversationPreview
         lastReply={row.original.lastReply}
         lastNote={row.original.lastNote}
+        original={{
+          body:       row.original.body,
+          senderName: row.original.senderName,
+          createdAt:  row.original.createdAt,
+        }}
       >
-        <div className="flex items-center gap-1.5 min-w-0 max-w-[28rem]">
-          <Link
-            to={`/tickets/${row.original.ticketNumber}`}
-            title={row.original.subject}
-            className="link font-medium truncate min-w-0"
-          >
-            {row.original.subject}
-          </Link>
-          {row.original.isEscalated && (
-            <EscalationIcon
-              title={
-                row.original.escalationReason
-                  ? escalationReasonLabel[row.original.escalationReason]
-                  : "Escalated"
-              }
-            />
-          )}
+        <div className="min-w-0 max-w-[28rem] space-y-1">
+          {/* Subject line — link + escalation icon stay on a single row. */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Link
+              to={`/tickets/${row.original.ticketNumber}`}
+              title={row.original.subject}
+              className="link font-medium truncate min-w-0"
+            >
+              {row.original.subject}
+            </Link>
+            {row.original.isEscalated && (
+              <EscalationIcon
+                title={
+                  row.original.escalationReason
+                    ? escalationReasonLabel[row.original.escalationReason]
+                    : "Escalated"
+                }
+              />
+            )}
+          </div>
+          {/* "Customer Responded" badge sits on its own line below the subject
+           *  so it stays visible even when the subject is long enough to
+           *  truncate. The component self-suppresses (returns null) when the
+           *  customer is not the most recent responder, so this slot is empty
+           *  on most rows. */}
+          <CustomerRespondedBadge
+            lastReply={row.original.lastReply}
+            status={row.original.status}
+            size="compact"
+          />
         </div>
       </TicketConversationPreview>
     ),
@@ -276,22 +312,98 @@ export default function TicketsTable({ filters, viewConfig, onSelectionChange, s
     if (selectionResetKey !== undefined) setRowSelection({});
   }, [selectionResetKey]);
 
-  // Checkbox column prepended to every view
+  // Checkbox column prepended to every view.
+  //
+  // The header doubles as a Gmail-style multi-select menu: clicking the
+  // checkbox toggles all rows on the current page, while the chevron next
+  // to it opens a dropdown of high-signal ITSM quick-selects (Unassigned,
+  // Assigned to me, Escalated, SLA breached, …). Each option computes the
+  // matching subset from the rows the table already has in memory, so the
+  // operation never round-trips to the server.
+  const myUserId = meData?.user?.id ?? null;
   const checkboxColumn = useMemo<ColumnDef<Ticket>>(() => ({
     id: "__select__",
     enableSorting: false,
-    header: ({ table }) => (
-      <input
-        type="checkbox"
-        className="accent-primary h-3.5 w-3.5 cursor-pointer"
-        checked={table.getIsAllPageRowsSelected()}
-        ref={(el) => {
-          if (el) el.indeterminate = table.getIsSomePageRowsSelected();
-        }}
-        onChange={table.getToggleAllPageRowsSelectedHandler()}
-        aria-label="Select all on this page"
-      />
-    ),
+    header: ({ table }) => {
+      function selectMatching(predicate: (t: Ticket) => boolean) {
+        const next: RowSelectionState = {};
+        for (const row of table.getRowModel().rows) {
+          if (predicate(row.original)) next[row.id] = true;
+        }
+        table.setRowSelection(next);
+      }
+
+      return (
+        <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            className="accent-primary h-3.5 w-3.5 cursor-pointer"
+            checked={table.getIsAllPageRowsSelected()}
+            ref={(el) => {
+              if (el) el.indeterminate = table.getIsSomePageRowsSelected();
+            }}
+            onChange={table.getToggleAllPageRowsSelectedHandler()}
+            aria-label="Select all on this page"
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="ml-0.5 flex h-5 w-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                aria-label="Selection options"
+                title="Selection options"
+              >
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-52">
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-mono">
+                On this page
+              </DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => table.toggleAllPageRowsSelected(true)}>
+                <CheckSquare className="size-3.5 mr-2 text-muted-foreground" />
+                All
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => table.toggleAllPageRowsSelected(false)}>
+                <Square className="size-3.5 mr-2 text-muted-foreground" />
+                None
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-mono">
+                Quick filters
+              </DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => selectMatching((t) => !t.assignedTo)}>
+                <UserMinus className="size-3.5 mr-2 text-muted-foreground" />
+                Unassigned
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => selectMatching((t) => !!myUserId && t.assignedTo?.id === myUserId)}
+                disabled={!myUserId}
+              >
+                <UserCheck className="size-3.5 mr-2 text-muted-foreground" />
+                Assigned to me
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => selectMatching((t) => t.isEscalated)}>
+                <AlertTriangle className="size-3.5 mr-2 text-amber-500" />
+                Escalated
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => selectMatching((t) => t.slaBreached || t.slaStatus === "breached")}>
+                <TimerOff className="size-3.5 mr-2 text-rose-500" />
+                SLA breached
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => selectMatching((t) => t.priority === "high" || t.priority === "urgent")}>
+                <Flame className="size-3.5 mr-2 text-orange-500" />
+                High priority
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => selectMatching((t) => t.status === "open" || t.status === "in_progress")}>
+                <CircleDot className="size-3.5 mr-2 text-emerald-500" />
+                Open / In progress
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      );
+    },
     cell: ({ row }) => (
       <input
         type="checkbox"
@@ -302,8 +414,8 @@ export default function TicketsTable({ filters, viewConfig, onSelectionChange, s
         aria-label="Select row"
       />
     ),
-    size: 36,
-  }), []);
+    size: 56,
+  }), [myUserId]);
 
   // Build the active column list from viewConfig
   const columns = useMemo<ColumnDef<Ticket>[]>(() => {

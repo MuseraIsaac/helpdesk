@@ -389,44 +389,12 @@ export default function TicketsPage() {
     staleTime: 60_000,
   });
 
-  // ── New-ticket realtime banner ──────────────────────────────────────────
-  // Subscribe to the global ticket-list SSE channel; when a new ticket is
-  // created (email, portal, or by another agent) surface a top-center toast
-  // with a Load action that refetches the visible page. Self-authored
-  // tickets are suppressed so the agent doesn't get notified about their
-  // own work.
-  const { data: session } = useSession();
-  const sessionUserId = session?.user?.id ?? null;
-  const newTicketCountRef = useRef(0);
-  const handleTicketCreated = useCallback((ev: TicketCreatedEvent) => {
-    if (ev.authorUserId && ev.authorUserId === sessionUserId) return;
-
-    newTicketCountRef.current += 1;
-    const count = newTicketCountRef.current;
-    const channel = ev.source ? ` · ${ev.source}` : "";
-    const who     = ev.senderName?.trim() || "Unknown sender";
-    const title = count === 1
-      ? `New ticket ${ev.ticketNumber} from ${who}${channel}`
-      : `${count} new tickets received`;
-
-    toast(title, {
-      id:          "tickets-list-new",
-      description: count === 1 ? ev.subject : "Click Load to refresh the list.",
-      duration:    Infinity,
-      position:    "top-center",
-      action: {
-        label: "Load",
-        onClick: () => {
-          newTicketCountRef.current = 0;
-          void qc.invalidateQueries({ queryKey: ["tickets"] });
-        },
-      },
-      onDismiss:   () => { newTicketCountRef.current = 0; },
-      onAutoClose: () => { newTicketCountRef.current = 0; },
-    });
-  }, [qc, sessionUserId]);
-
-  useTicketListEvents(handleTicketCreated);
+  // Live updates UX — see <LiveTicketUpdatesBanner /> mounted in Layout.
+  // The banner is fed by a single, persistent SSE subscription owned by
+  // TicketListLiveCountsProvider, which keeps the connection open across
+  // route changes so events fired while the agent is on a ticket detail
+  // page aren't dropped. Mounting another `useTicketListEvents` here would
+  // open a duplicate EventSource and cause reconnect noise.
 
   const {
     viewList, activeConfig,
@@ -522,6 +490,11 @@ export default function TicketsPage() {
 
   return (
     <div className="lg:pr-[20.5rem]">
+      {/* The "new tickets / new updates" floating pill is mounted at the
+          Layout level via TicketListLiveCountsProvider — it survives
+          navigation between /tickets and ticket detail pages, so events
+          fired while the agent is mid-action aren't dropped. */}
+
       {/* ── Page header ── */}
       <div className="flex items-start justify-between gap-4 mb-5">
         <div className="flex items-start gap-3.5 min-w-0">

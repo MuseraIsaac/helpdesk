@@ -701,6 +701,10 @@ Environment=HOME=$APP_HOME
 Environment=PATH=/usr/local/bun/bin:/usr/local/bin:/usr/bin:/bin
 Environment=NODE_ENV=production
 Environment=PORT=%i
+# Topology hints — let each replica advertise the cluster size so the admin
+# monitoring dashboard can fan out a localhost probe to every peer port.
+Environment=REPLICAS=$REPLICAS
+Environment=APP_BASE_PORT=$APP_BASE_PORT
 EnvironmentFile=$APP_DIR/server/.env
 ExecStart=/usr/local/bin/bun run server/src/index.ts
 Restart=always

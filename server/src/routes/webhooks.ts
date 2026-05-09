@@ -170,6 +170,17 @@ router.post("/inbound-email", requireWebhookSecret, upload.any(), async (req, re
       createdAt:    reply.createdAt.toISOString(),
     });
 
+    // Push to agents currently viewing the Tickets list — drives the live
+    // "new updates" banner so they see the inbound reply without refreshing.
+    emitTicketListEvent({
+      type:         "ticket.updated",
+      ticketId:     existingTicket.id,
+      ticketNumber: existingTicket.ticketNumber,
+      change:       "reply",
+      authorUserId: null,
+      updatedAt:    reply.createdAt.toISOString(),
+    });
+
     res.status(200).json({ ticket: existingTicket });
     return;
   }

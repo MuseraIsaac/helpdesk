@@ -311,6 +311,14 @@ export const ticketsSettingsSchema = z.object({
    * off to hide the panel (e.g. orgs restricting AI features by policy).
    */
   copilotEnabled:               z.boolean().default(true),
+  /**
+   * "Customer Responded" badge — shown on the tickets list and detail page
+   * when a customer replied after the most recent agent reply (i.e. the
+   * customer is awaiting a response from the team). Helps agents triage
+   * inbound activity at a glance. Defaults on; switch off to hide the badge
+   * organisation-wide.
+   */
+  customerRespondedBadgeEnabled: z.boolean().default(true),
 
   // ── Resolution / closure field-completion enforcement ──────────────────────
   //

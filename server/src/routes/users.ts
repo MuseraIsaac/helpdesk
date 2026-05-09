@@ -263,6 +263,17 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
         },
       });
     }
+
+    // Admin-issued passwords bypass the customer email-verification gate.
+    // Rationale: when an admin manually sets a password (e.g. onboarding a
+    // customer who's having trouble with the verification email), the admin
+    // has already verified the user's identity out-of-band. Flipping
+    // emailVerified=true here lets that user sign in to the portal
+    // immediately instead of being blocked by the unverified-email banner.
+    await prisma.user.update({
+      where: { id },
+      data:  { emailVerified: true, updatedAt: new Date() },
+    });
   }
 
   const user = await prisma.user.findUnique({

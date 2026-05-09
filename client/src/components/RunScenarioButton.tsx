@@ -10,7 +10,9 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import axios from "axios";
+import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
@@ -45,6 +47,8 @@ interface RunResult {
     skippedReason?: string;
     errorMessage?: string;
   }>;
+  /** Authoritative post-run ticket snapshot — same shape as GET /api/tickets/:id. */
+  ticket?: unknown;
 }
 
 interface RunScenarioButtonProps {
@@ -64,6 +68,8 @@ export default function RunScenarioButton({
   const [search, setSearch] = useState("");
   const [lastResult, setLastResult] = useState<RunResult | null>(null);
   const [runningId, setRunningId] = useState<number | null>(null);
+  /** When true, the success overlay is showing and a hard reload is queued. */
+  const [reloading, setReloading] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const isHeader = variant === "header";
 
@@ -93,14 +99,68 @@ export default function RunScenarioButton({
       );
       return data;
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       setLastResult(result);
       setRunningId(null);
       setOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ["ticket", String(ticketId)] });
+
+      // ── Optimistic write: paint the new field values instantly using
+      // the authoritative ticket snapshot the server returned.
+      const idStr = String(ticketId);
+      try {
+        if (result?.ticket) {
+          queryClient.setQueryData(["ticket", idStr], result.ticket);
+          queryClient.setQueryData(["ticket", ticketId], result.ticket);
+          const tn = (result.ticket as { ticketNumber?: string }).ticketNumber;
+          if (tn) queryClient.setQueryData(["ticket", tn], result.ticket);
+        }
+      } catch (e) {
+        console.error("[scenarios] cache write failed", e);
+      }
+
+      // ── Show the polished overlay while we force-refetch every per-
+      // ticket query so timeline / audit / notes all rehydrate too. We
+      // use refetchQueries (not invalidate) so the fetch fires now, not
+      // lazily, regardless of staleTime or focus state.
+      setReloading(true);
+      try {
+        await queryClient.refetchQueries({
+          type: "all",
+          predicate: (q) => {
+            const k = q.queryKey;
+            if (!Array.isArray(k) || k.length < 2) return false;
+            const [head, arg] = k as [unknown, unknown];
+            if (head === "scenarios") return true;
+            if (head === "tickets")   return true;
+            return arg === ticketId || arg === idStr;
+          },
+        });
+      } finally {
+        // Brief beat so the overlay isn't a flicker on fast networks.
+        window.setTimeout(() => setReloading(false), 250);
+      }
+
+      const applied = result?.results?.filter((r) => r.applied).length ?? 0;
+      const hasErrors = result?.results?.some((r) => r.errorMessage) ?? false;
+      if (hasErrors) {
+        toast.error("Scenario completed with errors", {
+          description: "Ticket refreshed to authoritative state",
+          duration: 2000,
+        });
+      } else {
+        toast.success(
+          applied > 0
+            ? `${applied} action${applied !== 1 ? "s" : ""} applied`
+            : "Scenario complete",
+          { description: "Ticket refreshed", duration: 1500 },
+        );
+      }
     },
-    onError: () => {
+    onError: (err) => {
       setRunningId(null);
+      toast.error("Scenario failed", {
+        description: err instanceof Error ? err.message : "Unexpected error",
+      });
     },
   });
 
@@ -123,6 +183,55 @@ export default function RunScenarioButton({
   const hasError = lastResult?.results.some((r) => r.errorMessage);
 
   return (
+    <>
+      {/* ── Refreshing overlay ────────────────────────────────────────────
+          Full-screen, fixed-position so it stays visible regardless of
+          where this button is rendered (header or sidebar) until the hard
+          reload fires. */}
+      {reloading && (
+        <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center gap-5 bg-background/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative flex h-20 w-20 items-center justify-center">
+            <span className="absolute inset-0 rounded-full bg-amber-400/30 animate-ping" />
+            <span
+              className="absolute inset-2 rounded-full"
+              style={{
+                background: "radial-gradient(circle, rgba(251,191,36,0.55) 0%, rgba(251,191,36,0) 70%)",
+              }}
+            />
+            <span
+              className="absolute inset-0 rounded-full animate-spin"
+              style={{
+                background:
+                  "conic-gradient(from 0deg, transparent 0%, rgba(251,191,36,0.9) 35%, transparent 70%)",
+                WebkitMask:
+                  "radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px))",
+                mask:
+                  "radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px))",
+              }}
+            />
+            <div className="relative h-12 w-12 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-500 shadow-lg shadow-amber-500/40 flex items-center justify-center">
+              <Sparkles className="h-6 w-6 text-white drop-shadow" />
+            </div>
+          </div>
+          <div className="text-center space-y-1.5 px-6">
+            <p className="text-base font-semibold tracking-tight">Scenario applied</p>
+            <p className="text-xs text-muted-foreground">Refreshing ticket fields…</p>
+          </div>
+          <div className="h-[3px] w-32 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full w-1/3 rounded-full bg-gradient-to-r from-amber-400 via-amber-500 to-amber-400"
+              style={{ animation: "scenario-loader-rsb 0.9s ease-in-out infinite" }}
+            />
+          </div>
+          <style>{`
+            @keyframes scenario-loader-rsb {
+              0%   { transform: translateX(-120%); }
+              100% { transform: translateX(420%); }
+            }
+          `}</style>
+        </div>
+      )}
+
     <div className={cn(isHeader ? "flex flex-col items-end gap-1.5" : "space-y-2")}>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -349,5 +458,6 @@ export default function RunScenarioButton({
         </div>
       )}
     </div>
+    </>
   );
 }

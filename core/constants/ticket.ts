@@ -106,6 +106,11 @@ export interface Ticket {
   /** Agent this ticket was manually escalated to */
   escalatedToUser?: { id: string; name: string } | null;
 
+  /** Most recent agent reply timestamp — drives the "Customer Responded" badge */
+  lastAgentReplyAt?: string | null;
+  /** Most recent customer reply timestamp — drives the "Customer Responded" badge */
+  lastCustomerReplyAt?: string | null;
+
   /** Last reply on this ticket — present in list responses for conversation preview */
   lastReply?: {
     body:        string;

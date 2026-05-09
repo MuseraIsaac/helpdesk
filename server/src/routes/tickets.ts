@@ -35,11 +35,16 @@ interface TicketStatsRow {
   avgResolutionTime: number;
 }
 
-// Fields projected for the list endpoint — no body/bodyHtml for performance
+// Fields projected for the list endpoint. We include `body` (the original
+// customer message) so the conversation hover preview can fall back to it
+// when a ticket has no replies or notes yet — but we truncate it before
+// shipping (see PREVIEW_LEN below) so a single huge inbound email body can't
+// bloat the list response.
 const LIST_SELECT = {
   id: true,
   ticketNumber: true,
   subject: true,
+  body: true,
   status: true,
   ticketType: true,
   affectedSystem: true,
@@ -72,6 +77,11 @@ const LIST_SELECT = {
   customTicketType: { select: { id: true, name: true, slug: true, color: true } },
   slaPausedAt: true,
   slaPausedMinutes: true,
+  // Reply-direction timestamps — used client-side to render the
+  // "Customer Responded" badge (when lastCustomerReplyAt is more recent than
+  // lastAgentReplyAt the customer is waiting on the team).
+  lastAgentReplyAt: true,
+  lastCustomerReplyAt: true,
   // Last reply preview for hover card
   replies: {
     select: { body: true, senderType: true, user: { select: { name: true } }, createdAt: true },
@@ -346,7 +356,11 @@ router.get("/", requireAuth, async (req, res) => {
     } else if (statusClauses.length > 1) {
       where.OR = ([] as Prisma.TicketWhereInput[]).concat(where.OR ?? []).concat(statusClauses);
     } else {
-      where.status = { in: ["open", "in_progress", "resolved", "closed"] };
+      // Default status filter — include every agent-visible status. "new" and
+      // "processing" are system-managed and intentionally excluded; "escalated"
+      // is a normal, agent-actionable status and MUST be included so that
+      // quick-views like ?escalated=true return rows.
+      where.status = { in: ["open", "in_progress", "escalated", "resolved", "closed"] };
     }
 
     // Ticket type: built-in types OR custom type IDs combined via OR
@@ -484,6 +498,10 @@ router.get("/", requireAuth, async (req, res) => {
 
       return {
         ...withSlaInfo(t),
+        // Replace the full body with a truncated preview — the hover card
+        // only shows ~160 chars, so 280 is more than enough and keeps the
+        // list payload bounded for tickets with megabyte-sized email HTML.
+        body:         truncate(t.body ?? ""),
         organization: t.customer?.organization?.name ?? null,
         customer:     undefined,
         replies:      undefined,
@@ -549,7 +567,7 @@ router.get("/search", requireAuth, async (req, res) => {
  * `linkedIncident`, `csatRating`, etc. — the UI then re-rendered against the
  * pruned cache and fields that read those relations appeared to "revert".
  */
-function ticketDetailInclude(id: number) {
+export function ticketDetailInclude(id: number) {
   return {
     assignedTo: { select: { id: true, name: true } },
     team: { select: { id: true, name: true, color: true } },
@@ -647,7 +665,58 @@ function ticketDetailInclude(id: number) {
         },
       },
     },
+    // Most recent reply — surfaces the same `lastReply` shape the list
+    // endpoint already returns. Used by the agent UI to derive the
+    // "Customer Responded" badge directly from the reply thread, so the
+    // signal is always accurate regardless of whether per-ticket reply
+    // timestamp columns happen to be populated.
+    replies: {
+      select: { body: true, senderType: true, user: { select: { name: true } }, createdAt: true },
+      orderBy: { createdAt: "desc" as const },
+      take: 1,
+    },
   } satisfies Prisma.TicketInclude;
+}
+
+/**
+ * Loads a ticket with the full detail-include + shaping the GET endpoint
+ * applies. Exported so other routes (notably scenarios.run) can return the
+ * exact same shape after they mutate a ticket — letting the client write
+ * the response straight into its TanStack Query cache via setQueryData.
+ */
+export async function loadTicketDetail(id: number) {
+  const ticket = await prisma.ticket.findFirst({
+    where: { id, deletedAt: null },
+    include: ticketDetailInclude(id),
+  });
+  if (!ticket) return null;
+
+  const { customer, auditEvents, replies, ...rest } = ticket;
+
+  // Collapse the take-1 replies relation into the same `lastReply` shape
+  // the list endpoint returns, and truncate the body so the detail
+  // payload doesn't carry the full message twice (it's already in the
+  // dedicated /replies feed).
+  const PREVIEW_LEN = 280;
+  const truncate = (s: string) =>
+    s.length > PREVIEW_LEN ? s.slice(0, PREVIEW_LEN) + "…" : s;
+  const lastReplyRow = replies?.[0] ?? null;
+  const lastReply = lastReplyRow ? {
+    body:       truncate(lastReplyRow.body),
+    senderType: lastReplyRow.senderType as "agent" | "customer",
+    authorName: lastReplyRow.user?.name ?? null,
+    createdAt:  lastReplyRow.createdAt.toISOString(),
+  } : null;
+
+  const shaped = {
+    ...rest,
+    auditEvents: auditEvents.slice().reverse(),
+    customer: customer
+      ? { ...customer, recentTickets: customer.tickets, tickets: undefined }
+      : null,
+    lastReply,
+  };
+  return withSlaInfo(shaped);
 }
 
 router.get("/:id", requireAuth, async (req, res) => {
@@ -657,28 +726,12 @@ router.get("/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  const ticket = await prisma.ticket.findFirst({
-    where: { id, deletedAt: null },
-    include: ticketDetailInclude(id),
-  });
-
-  if (!ticket) {
+  const detail = await loadTicketDetail(id);
+  if (!detail) {
     res.status(404).json({ error: "Ticket not found" });
     return;
   }
-
-  // Rename customer.tickets → customer.recentTickets to match the CustomerSummary type.
-  // Reverse audit events so they're returned oldest-first (DB query is desc + take).
-  const { customer, auditEvents, ...rest } = ticket;
-  const shaped = {
-    ...rest,
-    auditEvents: auditEvents.slice().reverse(),
-    customer: customer
-      ? { ...customer, recentTickets: customer.tickets, tickets: undefined }
-      : null,
-  };
-
-  res.json(withSlaInfo(shaped));
+  res.json(detail);
 });
 
 // ─── Update ────────────────────────────────────────────────────────────────
@@ -1040,6 +1093,27 @@ router.patch("/:id", requireAuth, requirePermission("tickets.update"), async (re
     }
   }
   await Promise.all(auditLogs);
+
+  // ── Notify any agent currently watching the tickets list ──────────────────
+  // Pick the most user-visible change as the badge type so the live banner
+  // can colour-code appropriately. Order matters — escalation > assignee >
+  // status > priority > generic.
+  {
+    let change: "escalated" | "assignee" | "status" | "priority" | "other" = "other";
+    if (data.escalate === true)                                         change = "escalated";
+    else if ("assignedToId" in data && data.assignedToId !== ticket.assignedToId) change = "assignee";
+    else if ("status"       in data && data.status       !== ticket.status)       change = "status";
+    else if ("priority"     in data && data.priority     !== ticket.priority)     change = "priority";
+
+    emitTicketListEvent({
+      type:         "ticket.updated",
+      ticketId:     id,
+      ticketNumber: updated.ticketNumber,
+      change,
+      authorUserId: req.user.id,
+      updatedAt:    new Date().toISOString(),
+    });
+  }
 
   // ── Fire event_workflow events for each field that changed ────────────────
   // previousValues are captured before the DB update; each specific trigger

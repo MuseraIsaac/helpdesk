@@ -23,9 +23,8 @@ import AddChildTicketDialog from "@/components/AddChildTicketDialog";
 import TicketCopilotDrawer from "@/components/TicketCopilotDrawer";
 import StatusBadge from "@/components/StatusBadge";
 import TicketTypeBadge from "@/components/TicketTypeBadge";
-import { EscalationBadge } from "@/components/EscalationBadge";
 import { PriorityBadge } from "@/components/TriageBadge";
-import { SlaBadge } from "@/components/SlaBadge";
+import CustomerRespondedBadge from "@/components/CustomerRespondedBadge";
 import { useSettings } from "@/hooks/useSettings";
 import { usePresence } from "@/hooks/usePresence";
 import { useSession } from "@/lib/auth-client";
@@ -746,9 +745,8 @@ export default function TicketDetailPage() {
               {ticket.ticketType && (
                 <TicketTypeBadge type={ticket.ticketType} customType={ticket.customTicketType} />
               )}
-              {ticket.isEscalated && (
-                <EscalationBadge reason={ticket.escalationReason} />
-              )}
+              {/* Escalation reason chip removed — duplicated by the dedicated
+                  Escalation section in the sidebar / body below. */}
             </div>
 
             <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
@@ -917,11 +915,20 @@ export default function TicketDetailPage() {
 
           {/* Status + key metadata chips */}
           <div className="mt-3 flex items-center gap-2 flex-wrap">
-            <StatusBadge status={ticket.status} customStatus={ticket.customStatus} />
-            {ticket.priority && <PriorityBadge priority={ticket.priority} />}
-            {ticket.slaStatus && ticket.slaStatus !== "completed" && (
-              <SlaBadge status={ticket.slaStatus} />
+            {/* Hide the system status chip when it would just say "Escalated" —
+                the Escalation section below already conveys that prominently.
+                Custom statuses are kept (they carry information not shown
+                elsewhere). */}
+            {!(ticket.status === "escalated" && !ticket.customStatus) && (
+              <StatusBadge status={ticket.status} customStatus={ticket.customStatus} />
             )}
+            {ticket.priority && <PriorityBadge priority={ticket.priority} />}
+            {/* SLA status chip removed — duplicated by the dedicated SLA card below. */}
+            <CustomerRespondedBadge
+              lastReply={ticket.lastReply}
+              status={ticket.status}
+              size="full"
+            />
             <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-[11px] text-muted-foreground bg-muted/30">
               <UserCircle className="h-3 w-3" />
               {ticket.senderName}

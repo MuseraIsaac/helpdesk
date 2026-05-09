@@ -16,6 +16,8 @@ import {
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
 import RichTextEditor from "@/components/RichTextEditor";
+import { ShortcutBoard } from "@/components/ShortcutBoard";
+import { User, Sliders, ShieldCheck, Keyboard, Sparkles, Mail, BadgeCheck } from "lucide-react";
 import { useMe, useUpdateProfile, useUpdatePreferences, useChangePassword } from "@/hooks/useMe";
 import { useTheme } from "@/lib/theme";
 import {
@@ -48,11 +50,34 @@ function getInitials(name: string) {
     .join("");
 }
 
+/**
+ * Deterministic gradient class derived from the user's name, so the avatar
+ * always lands on the same visual identity across sessions and screens.
+ */
+function avatarGradient(name: string): string {
+  const palettes = [
+    "from-violet-500 to-fuchsia-500",
+    "from-sky-500 to-cyan-500",
+    "from-emerald-500 to-teal-500",
+    "from-amber-500 to-orange-500",
+    "from-rose-500 to-pink-500",
+    "from-indigo-500 to-blue-500",
+    "from-lime-500 to-emerald-500",
+    "from-purple-500 to-pink-500",
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return palettes[hash % palettes.length] ?? palettes[0]!;
+}
+
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-3">
-      {children}
-    </p>
+    <div className="flex items-center gap-2 mb-3">
+      <span className="h-[2px] w-4 rounded-full bg-gradient-to-r from-primary to-primary/0" />
+      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70 font-mono">
+        {children}
+      </p>
+    </div>
   );
 }
 
@@ -116,19 +141,28 @@ function ProfileTab() {
         <p className="text-sm text-green-600">Profile saved.</p>
       )}
 
-      {/* Avatar */}
-      <div className="flex items-center gap-4">
-        <div className="h-14 w-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-semibold shrink-0">
-          {getInitials(user?.name ?? "")}
+      {/* Identity strip — gradient avatar + name / email / role chip */}
+      <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
+        <div
+          className={`relative h-14 w-14 rounded-full bg-gradient-to-br ${avatarGradient(user?.name ?? "?")} text-white flex items-center justify-center text-xl font-semibold shrink-0 shadow-md ring-2 ring-background`}
+        >
+          {getInitials(user?.name ?? "?")}
+          <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-500 ring-2 ring-background" />
         </div>
-        <div>
-          <p className="text-sm font-medium">{user?.name}</p>
-          <p className="text-xs text-muted-foreground">{user?.email}</p>
-          <p className="text-xs text-muted-foreground mt-0.5 capitalize">{user?.role}</p>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold truncate">{user?.name}</p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <Mail className="h-3 w-3 text-muted-foreground/70 shrink-0" />
+            <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+          </div>
+          {user?.role && (
+            <span className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary uppercase tracking-wider">
+              <BadgeCheck className="h-2.5 w-2.5" />
+              {user.role}
+            </span>
+          )}
         </div>
       </div>
-
-      <div className="border-t" />
 
       <SectionTitle>Identity</SectionTitle>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -158,7 +192,7 @@ function ProfileTab() {
         </div>
       </div>
 
-      <div className="border-t" />
+      <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" />
 
       <div>
         <SectionTitle>Reply Signature</SectionTitle>
@@ -349,7 +383,7 @@ function PreferencesTab() {
         </div>
       </div>
 
-      <div className="border-t" />
+      <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" />
 
       {/* UI */}
       <div>
@@ -494,58 +528,165 @@ function SecurityTab() {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
+  const { data } = useMe();
+  const user = data?.user;
+  const initials = getInitials(user?.name ?? "?");
+  const gradient = avatarGradient(user?.name ?? "?");
+
   return (
-    <div className="max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Profile & Preferences</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Manage your personal profile, regional settings, and interface preferences.
-        </p>
+    <div className="max-w-3xl space-y-6">
+      {/* ── Hero ─────────────────────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent">
+        {/* Subtle grid texture */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.10] [background-image:linear-gradient(currentColor_1px,transparent_1px),linear-gradient(90deg,currentColor_1px,transparent_1px)] [background-size:24px_24px]"
+          aria-hidden="true"
+        />
+        {/* Glow accent */}
+        <div
+          className={`pointer-events-none absolute -top-16 -right-16 h-44 w-44 rounded-full bg-gradient-to-br ${gradient} opacity-20 blur-3xl`}
+          aria-hidden="true"
+        />
+        <div className="relative px-6 py-6 flex items-start gap-5">
+          {user && (
+            <div
+              className={`relative h-16 w-16 shrink-0 rounded-2xl bg-gradient-to-br ${gradient} text-white flex items-center justify-center text-2xl font-semibold shadow-lg ring-2 ring-background`}
+            >
+              {initials}
+              <span className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full bg-emerald-500 ring-2 ring-background" />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary font-mono">
+                Account · Profile
+              </span>
+            </div>
+            <h1 className="mt-1.5 text-2xl font-bold tracking-tight">
+              {user?.name ?? "Profile & Preferences"}
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+              Manage your personal profile, regional settings, security, and interface preferences — all in one place.
+            </p>
+            {user && (
+              <div className="mt-3 flex items-center flex-wrap gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background/60 px-2.5 py-0.5 text-[11px] text-muted-foreground">
+                  <Mail className="h-3 w-3" />
+                  {user.email}
+                </span>
+                {user.role && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-0.5 text-[11px] font-medium text-primary uppercase tracking-wider">
+                    <BadgeCheck className="h-2.5 w-2.5" />
+                    {user.role}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
+      {/* ── Tabs ─────────────────────────────────────────────────────────── */}
       <Tabs defaultValue="profile">
-        <TabsList className="mb-4">
-          <TabsTrigger value="profile">Profile</TabsTrigger>
-          <TabsTrigger value="preferences">Preferences</TabsTrigger>
-          <TabsTrigger value="security">Security</TabsTrigger>
+        <TabsList className="mb-4 h-auto p-1 bg-muted/40 rounded-xl border border-border/60">
+          <TabsTrigger value="profile"     className="gap-1.5 px-3 py-1.5 rounded-lg data-[state=active]:shadow-sm">
+            <User className="h-3.5 w-3.5" />
+            Profile
+          </TabsTrigger>
+          <TabsTrigger value="preferences" className="gap-1.5 px-3 py-1.5 rounded-lg data-[state=active]:shadow-sm">
+            <Sliders className="h-3.5 w-3.5" />
+            Preferences
+          </TabsTrigger>
+          <TabsTrigger value="security"    className="gap-1.5 px-3 py-1.5 rounded-lg data-[state=active]:shadow-sm">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Security
+          </TabsTrigger>
+          <TabsTrigger value="shortcuts"   className="gap-1.5 px-3 py-1.5 rounded-lg data-[state=active]:shadow-sm">
+            <Keyboard className="h-3.5 w-3.5" />
+            Shortcuts
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="profile">
-          <Card>
-            <CardHeader>
-              <CardTitle>Profile</CardTitle>
-              <CardDescription>Your name, job title, and contact details.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ProfileTab />
-            </CardContent>
-          </Card>
+          <TabCard
+            icon={User}
+            title="Profile"
+            description="Your name, job title, and contact details."
+          >
+            <ProfileTab />
+          </TabCard>
         </TabsContent>
 
         <TabsContent value="preferences">
-          <Card>
-            <CardHeader>
-              <CardTitle>Preferences</CardTitle>
-              <CardDescription>Language, timezone, display format, and interface defaults.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <PreferencesTab />
-            </CardContent>
-          </Card>
+          <TabCard
+            icon={Sliders}
+            title="Preferences"
+            description="Language, timezone, display format, and interface defaults."
+          >
+            <PreferencesTab />
+          </TabCard>
         </TabsContent>
 
         <TabsContent value="security">
-          <Card>
-            <CardHeader>
-              <CardTitle>Security</CardTitle>
-              <CardDescription>Change your password.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <SecurityTab />
-            </CardContent>
-          </Card>
+          <TabCard
+            icon={ShieldCheck}
+            title="Security"
+            description="Change your password and manage account safety."
+          >
+            <SecurityTab />
+          </TabCard>
+        </TabsContent>
+
+        <TabsContent value="shortcuts">
+          <TabCard
+            icon={Keyboard}
+            title="Keyboard shortcuts"
+            description={
+              <>
+                Every shortcut available across the platform. Search to filter, or press{" "}
+                <kbd className="font-mono text-[11px] rounded-sm border border-border bg-muted px-1.5 py-0.5 align-middle">?</kbd>{" "}
+                anywhere in the app to summon this list as an overlay.
+              </>
+            }
+          >
+            <ShortcutBoard />
+          </TabCard>
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/**
+ * Tabbed card chrome — adds a status-coloured top accent line and an
+ * icon-led header so each tab feels like a distinct surface rather than
+ * an undifferentiated panel.
+ */
+function TabCard({
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  icon: React.ElementType;
+  title: string;
+  description: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className="relative overflow-hidden border-border/60">
+      <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" aria-hidden="true" />
+      <CardHeader className="flex flex-row items-start gap-3 space-y-0">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 border border-primary/20 text-primary">
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <CardTitle className="text-base">{title}</CardTitle>
+          <CardDescription className="mt-1">{description}</CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   );
 }

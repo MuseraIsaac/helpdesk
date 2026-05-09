@@ -123,6 +123,7 @@ const InsightsReport            = lazy(() => import("./pages/reports/InsightsRep
 const DemoDataPage              = lazy(() => import("./pages/DemoDataPage"));
 const AdminHubLayout            = lazy(() => import("./pages/admin/AdminHubLayout"));
 const AdminOverviewPage         = lazy(() => import("./pages/admin/AdminOverviewPage"));
+const AdminMonitoringPage       = lazy(() => import("./pages/admin/AdminMonitoringPage"));
 const TrashPage                 = lazy(() => import("./pages/TrashPage"));
 const AuditLogPage              = lazy(() => import("./pages/AuditLogPage"));
 const UpdatesPage               = lazy(() => import("./pages/UpdatesPage"));
@@ -268,6 +269,7 @@ function App() {
               <Route path="/admin/cab-groups" element={<CabGroupsPage />} />
               <Route path="/admin/ticket-types" element={<TicketTypesPage />} />
               <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
+              <Route path="/admin/monitoring" element={<AdminMonitoringPage />} />
               <Route path="/admin/audit-log" element={<AuditLogPage />} />
               <Route path="/admin/updates"   element={<UpdatesPage />} />
               <Route path="/admin/roles" element={<RolesPage />} />

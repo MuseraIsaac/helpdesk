@@ -12,6 +12,7 @@ import { logAudit } from "../lib/audit";
 import { notifyMentions, extractMentionedEmails } from "../lib/mentions";
 import { fireTicketEvent } from "../lib/event-bus";
 import { emitTicketEvent } from "../lib/ticket-events";
+import { emitTicketListEvent } from "../lib/ticket-list-events";
 import { getSection } from "../lib/settings";
 
 const router = Router({ mergeParams: true });
@@ -315,6 +316,18 @@ router.post("/", requireAuth, async (req, res) => {
     authorName:   req.user.name,
     channel:      reply.channel ?? "agent",
     createdAt:    reply.createdAt.toISOString(),
+  });
+
+  // Push to agents currently viewing the Tickets list — drives the live
+  // "new updates" banner so colleagues see the reply landed without
+  // refreshing the list.
+  emitTicketListEvent({
+    type:         "ticket.updated",
+    ticketId,
+    ticketNumber: ticket.ticketNumber,
+    change:       "reply",
+    authorUserId: req.user.id,
+    updatedAt:    reply.createdAt.toISOString(),
   });
 
   res.status(201).json(reply);

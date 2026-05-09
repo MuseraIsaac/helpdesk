@@ -1,24 +1,96 @@
+import { useState } from "react";
 import { type Ticket } from "core/constants/ticket.ts";
 import { PriorityBadge, SeverityBadge, ImpactBadge, UrgencyBadge } from "@/components/TriageBadge";
 import { SlaBadge, SlaDeadlineRow } from "@/components/SlaBadge";
 import { EscalationBadge } from "@/components/EscalationBadge";
 import EscalationHistory from "@/components/EscalationHistory";
-import { Server, Clock, AlertTriangle, Users, User } from "lucide-react";
+import { Server, Clock, AlertTriangle, Users, User, ChevronDown } from "lucide-react";
 
+/**
+ * SectionCard
+ *
+ * Lightweight panel with an icon + title header. When `collapsible` is set,
+ * the header becomes a button that toggles the body open/closed. A `summary`
+ * slot lets callers render a one-line status preview (e.g. "Breached",
+ * "Escalated · Sev1") that stays visible while the section is collapsed —
+ * so users never lose context for sections that hide their content by default.
+ */
 function SectionCard({
-  icon: Icon, title, children, className = "",
+  icon: Icon,
+  title,
+  children,
+  className = "",
+  headerClassName,
+  borderClassName,
+  collapsible = false,
+  defaultOpen = true,
+  summary,
 }: {
-  icon?: React.ElementType; title?: string; children: React.ReactNode; className?: string;
+  icon?: React.ElementType;
+  title?: string;
+  children: React.ReactNode;
+  className?: string;
+  /** Extra classes for the header bar — used by the destructive-tinted Escalation card. */
+  headerClassName?: string;
+  /** Extra classes for the outer border — used to tint the whole card. */
+  borderClassName?: string;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  /** Inline status preview rendered on the right of the header (always visible). */
+  summary?: React.ReactNode;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const isOpen = !collapsible || open;
+
+  const headerInner = (
+    <>
+      <div className="flex items-center gap-2 min-w-0">
+        {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+        {title && (
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+            {title}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-2 min-w-0">
+        {summary && <div className="flex items-center gap-2 min-w-0">{summary}</div>}
+        {collapsible && (
+          <ChevronDown
+            className={`h-3.5 w-3.5 text-muted-foreground/70 shrink-0 transition-transform duration-200 ${isOpen ? "" : "-rotate-90"}`}
+          />
+        )}
+      </div>
+    </>
+  );
+
   return (
-    <div className={`rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden ${className}`}>
-      {title && (
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/50 bg-muted/20">
-          {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-          <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">{title}</span>
-        </div>
+    <div
+      className={`rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden ${borderClassName ?? ""} ${className}`}
+    >
+      {title !== undefined && (
+        collapsible ? (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className={`w-full flex items-center justify-between gap-2 px-4 py-2.5 border-b border-border/50 bg-muted/20 hover:bg-muted/40 transition-colors text-left ${isOpen ? "" : "border-b-0"} ${headerClassName ?? ""}`}
+            aria-expanded={isOpen}
+          >
+            {headerInner}
+          </button>
+        ) : (
+          <div className={`flex items-center justify-between gap-2 px-4 py-2.5 border-b border-border/50 bg-muted/20 ${headerClassName ?? ""}`}>
+            {headerInner}
+          </div>
+        )
       )}
-      <div className="p-4">{children}</div>
+      {/* Smooth height transition via CSS grid trick — avoids JS measurement. */}
+      <div
+        className={`grid transition-all duration-200 ease-out ${isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+      >
+        <div className="overflow-hidden">
+          <div className="p-4">{children}</div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -75,12 +147,15 @@ export default function TicketDetail({ ticket }: TicketDetailProps) {
         </SectionCard>
       )}
 
-      {/* SLA strip */}
+      {/* SLA strip — collapsed by default; status badge stays visible in header */}
       {hasSla && ticket.slaStatus && (
-        <SectionCard icon={Clock} title="SLA">
-          <div className="flex items-center justify-between mb-3">
-            <SlaBadge status={ticket.slaStatus} />
-          </div>
+        <SectionCard
+          icon={Clock}
+          title="SLA"
+          collapsible
+          defaultOpen={false}
+          summary={<SlaBadge status={ticket.slaStatus} />}
+        >
           <div className="space-y-2">
             <SlaDeadlineRow
               label="First Response"
@@ -96,21 +171,20 @@ export default function TicketDetail({ ticket }: TicketDetailProps) {
         </SectionCard>
       )}
 
-      {/* Escalation strip */}
+      {/* Escalation strip — collapsed by default; status pill stays visible in header */}
       {hasEscalation && (
-        <div className="rounded-xl border border-destructive/20 bg-destructive/5 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-destructive/15 bg-destructive/5">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-3.5 w-3.5 text-destructive/70 shrink-0" />
-              <span className="text-[11px] font-semibold uppercase tracking-widest text-destructive/60">Escalation</span>
-            </div>
-            {ticket.isEscalated ? (
-              <EscalationBadge reason={null} />
-            ) : (
-              <span className="text-xs text-muted-foreground">De-escalated</span>
-            )}
-          </div>
-          <div className="p-4 space-y-2">
+        <SectionCard
+          icon={AlertTriangle}
+          title="Escalation"
+          collapsible
+          defaultOpen={false}
+          borderClassName="border-destructive/20 bg-destructive/5"
+          headerClassName="border-destructive/15 bg-destructive/5 hover:bg-destructive/10"
+          summary={ticket.isEscalated
+            ? <EscalationBadge reason={null} />
+            : <span className="text-xs text-muted-foreground">De-escalated</span>}
+        >
+          <div className="space-y-2">
             {ticket.escalatedAt && (
               <p className="text-xs text-muted-foreground">
                 First escalated:{" "}
@@ -152,7 +226,7 @@ export default function TicketDetail({ ticket }: TicketDetailProps) {
               escalatedToUser={ticket.escalatedToUser}
             />
           </div>
-        </div>
+        </SectionCard>
       )}
     </div>
   );

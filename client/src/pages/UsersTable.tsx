@@ -122,6 +122,7 @@ export default function UsersTable({ search = "", roleFilter = "all", onEdit, on
             ))
           : filtered.map((user) => {
               const isElevated = user.role === Role.admin || user.role === Role.supervisor;
+              const isCustomer = user.role === Role.customer;
               return (
                 <TableRow key={user.id} className="group">
                   <TableCell className="font-medium">
@@ -147,6 +148,19 @@ export default function UsersTable({ search = "", roleFilter = "all", onEdit, on
                       >
                         Always on
                       </span>
+                    ) : isCustomer ? (
+                      <div
+                        className="flex items-center gap-2 opacity-60"
+                        title="Global ticket view does not apply to customer accounts — customers only see their own tickets via the portal."
+                      >
+                        <Switch
+                          checked={false}
+                          disabled
+                          className="scale-90 cursor-not-allowed"
+                          aria-label="Global view not applicable for customers"
+                        />
+                        <span className="text-xs text-muted-foreground italic">N/A</span>
+                      </div>
                     ) : (
                       <div
                         className="flex items-center gap-2"
