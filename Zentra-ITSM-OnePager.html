@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Zentra ITSM — Executive One-Pager</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  @page { size: A4; margin: 14mm 14mm; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    a { color: inherit; text-decoration: none; }
+  }
+  :root {
+    --ink: #0f172a; --ink-soft: #334155; --muted: #64748b;
+    --line: #e2e8f0; --bg-soft: #f8fafc;
+    --brand: #4f46e5; --brand-deep: #3730a3; --brand-tint: #eef2ff;
+    --accent: #10b981;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink); background: #fff;
+    font-size: 9.5pt; line-height: 1.45;
+  }
+  .page {
+    width: 100%; max-width: 760px; margin: 0 auto;
+    padding: 18px 22px;
+  }
+  /* Header strip */
+  .head {
+    position: relative; overflow: hidden;
+    padding: 18px 22px; margin-bottom: 14px;
+    background:
+      radial-gradient(circle at 90% 10%, rgba(79,70,229,0.20), transparent 60%),
+      linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    border: 1px solid var(--line); border-radius: 12px;
+  }
+  .head::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(15,23,42,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(15,23,42,0.05) 1px, transparent 1px);
+    background-size: 22px 22px;
+    mask-image: linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0.3) 100%);
+    -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0.3) 100%);
+    pointer-events: none;
+  }
+  .head > * { position: relative; }
+  .brand-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .mark {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-deep));
+    color: #fff; font-weight: 800; font-size: 12pt;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .brand-name { font-weight: 700; font-size: 11pt; }
+  .brand-sub  { color: var(--muted); font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.14em; }
+  h1.title {
+    margin: 0; font-size: 22pt; font-weight: 800; line-height: 1.08; letter-spacing: -0.01em;
+  }
+  h1.title .accent {
+    background: linear-gradient(90deg, var(--brand-deep), var(--brand), var(--accent));
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+  }
+  .head .lede {
+    margin-top: 6px; color: var(--ink-soft); font-size: 10pt; max-width: 640px;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: 999px;
+    background: #fff; border: 1px solid var(--line);
+    font-size: 7.5pt; color: var(--ink-soft); font-weight: 500;
+  }
+  .pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+
+  /* Layout */
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .col h3, .row h3 {
+    font-size: 8.5pt; color: var(--brand-deep); font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.16em;
+    margin: 0 0 6px 0; padding-bottom: 4px;
+    border-bottom: 2px solid var(--brand-tint);
+  }
+
+  .card {
+    border: 1px solid var(--line); border-radius: 9px;
+    padding: 10px 12px; background: #fff;
+    margin-bottom: 8px;
+  }
+  .card .lbl { font-size: 7.5pt; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--brand); }
+  .card .name { font-weight: 700; font-size: 9.5pt; margin-top: 2px; }
+  .card .desc { color: var(--ink-soft); margin-top: 2px; font-size: 8.5pt; line-height: 1.4; }
+
+  /* Module list grouped */
+  .mods { list-style: none; margin: 0; padding: 0; }
+  .mods li {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 5px 0; border-bottom: 1px dashed var(--line);
+    font-size: 8.5pt; color: var(--ink-soft); line-height: 1.4;
+  }
+  .mods li:last-child { border-bottom: none; }
+  .mods li::before {
+    content: ""; flex-shrink: 0;
+    width: 9px; height: 9px; margin-top: 4px; border-radius: 2px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-deep));
+  }
+  .mods b { color: var(--ink); font-weight: 700; }
+
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0 14px 0; }
+  .stat {
+    border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; background: #fff;
+  }
+  .stat .v { font-size: 14pt; font-weight: 800; color: var(--brand-deep); letter-spacing: -0.02em; line-height: 1.1; }
+  .stat .k { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); font-weight: 700; }
+
+  /* Footer */
+  .foot {
+    margin-top: 12px; padding: 12px 14px;
+    background: linear-gradient(135deg, #1e1b4b, #3730a3, #4f46e5);
+    color: #fff; border-radius: 10px;
+    display: flex; justify-content: space-between; align-items: center; gap: 14px;
+    font-size: 9pt;
+  }
+  .foot .lhs strong { font-size: 10.5pt; display: block; margin-bottom: 2px; }
+  .foot .cta-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 999px;
+    background: #fff; color: var(--brand-deep); font-weight: 600; font-size: 8.5pt;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- Header / hero strip -->
+  <div class="head">
+    <div class="brand-row">
+      <div class="mark">Z</div>
+      <div>
+        <div class="brand-name">Zentra ITSM</div>
+        <div class="brand-sub">Service management platform · zentraitsm.com</div>
+      </div>
+    </div>
+    <h1 class="title">
+      Enterprise ITSM,
+      <span class="accent">built for service teams that own outcomes.</span>
+    </h1>
+    <p class="lede">
+      One platform for the full ITIL service lifecycle — incidents, requests, problems,
+      changes, assets, and knowledge — on a single record of truth, with the automation,
+      governance, and visibility a modern operation depends on.
+    </p>
+    <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;">
+      <span class="pill">ITIL 4 practices</span>
+      <span class="pill">AI-assisted intake</span>
+      <span class="pill">Audit-grade automation</span>
+      <span class="pill">Real CMDB</span>
+      <span class="pill">Self-host or managed</span>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat"><div class="k">ITIL practices</div><div class="v">12</div></div>
+    <div class="stat"><div class="k">Built-in reports</div><div class="v">30+</div></div>
+    <div class="stat"><div class="k">Permissions</div><div class="v">100+</div></div>
+    <div class="stat"><div class="k">Integrated modules</div><div class="v">15+</div></div>
+  </div>
+
+  <!-- Two columns: WHAT IT DOES + BUSINESS VALUE -->
+  <div class="row">
+    <div class="col">
+      <h3>What Zentra is</h3>
+      <p style="margin:0 0 8px 0;color:var(--ink-soft);font-size:8.5pt;">
+        A unified IT service management platform that handles the full lifecycle —
+        capture, triage, resolve, govern, learn — on one data model, one modern interface,
+        with audit-grade traceability throughout.
+      </p>
+      <ul class="mods">
+        <li><span><b>Service Desk</b> — multi-channel intake, SLA tracking, escalation, watchers, bulk &amp; merge.</span></li>
+        <li><span><b>Incidents</b> — sev grades, commander, bridge calls, presence, post-incident.</span></li>
+        <li><span><b>Service Requests</b> — catalog, approvals, fulfillment.</span></li>
+        <li><span><b>Problems &amp; Changes</b> — root cause, CAB, conflict detection, rollback plans.</span></li>
+        <li><span><b>Assets &amp; CMDB</b> — hardware, software, SaaS, licenses, real CI relationships, renewals.</span></li>
+        <li><span><b>Automation</b> — rules engine, AI classification, escalations, outbound webhooks.</span></li>
+        <li><span><b>Reports &amp; Dashboards</b> — Ops, SLA, Agent, Manager + custom views.</span></li>
+        <li><span><b>Governance</b> — append-only audit log, 100+ scoped permissions, custom roles.</span></li>
+      </ul>
+    </div>
+
+    <div class="col">
+      <h3>Why it matters</h3>
+      <div class="card">
+        <span class="lbl">01 · Faster resolution</span>
+        <div class="name">AI-assisted triage, knowledge in the agent console</div>
+        <div class="desc">Cut routine work; agents focus on the cases that need human judgement.</div>
+      </div>
+      <div class="card">
+        <span class="lbl">02 · Breach prevention</span>
+        <div class="name">SLA risk surfaced before it breaches</div>
+        <div class="desc">Live ops console, business-calendar SLAs, escalation matrices.</div>
+      </div>
+      <div class="card">
+        <span class="lbl">03 · Audit-grade governance</span>
+        <div class="name">Every action recorded; every approval traceable</div>
+        <div class="desc">Append-only audit log + rule execution log + approval events.</div>
+      </div>
+      <div class="card">
+        <span class="lbl">04 · Asset control</span>
+        <div class="name">CMDB that reflects operational reality</div>
+        <div class="desc">Every change knows what it touches; every incident knows what it depends on.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Three columns: differentiation, audiences, deploy -->
+  <div class="row-3" style="margin-top:10px;">
+    <div class="col">
+      <h3>What's different</h3>
+      <ul class="mods">
+        <li><span><b>Integrated lifecycle</b> on a single data model.</span></li>
+        <li><span><b>Real-time</b> server-sent events across the agent console.</span></li>
+        <li><span><b>Configuration-as-data</b> — custom roles, fields, statuses, ticket types.</span></li>
+        <li><span><b>Audit-grade</b> automation &amp; approvals.</span></li>
+        <li><span><b>Self-host or managed</b> — your infra, your data.</span></li>
+      </ul>
+    </div>
+
+    <div class="col">
+      <h3>Built for</h3>
+      <ul class="mods">
+        <li><span><b>Internal IT</b> support teams scaling beyond a shared inbox.</span></li>
+        <li><span><b>IT Ops &amp; SRE</b> running changes, incidents, and on-call rigorously.</span></li>
+        <li><span><b>Managed Service Providers</b> serving multiple clients.</span></li>
+        <li><span><b>Asset &amp; procurement</b> owners chasing SaaS sprawl and renewals.</span></li>
+        <li><span><b>Process owners</b> who need governance, not stories.</span></li>
+      </ul>
+    </div>
+
+    <div class="col">
+      <h3>Deployment</h3>
+      <ul class="mods">
+        <li><span><b>One-script install</b> on CentOS / RHEL with PostgreSQL, systemd, and Caddy.</span></li>
+        <li><span><b>Multi-replica</b> API with least-conn load balancing.</span></li>
+        <li><span><b>Automatic TLS</b> via Let's Encrypt; HTTP/2.</span></li>
+        <li><span><b>Built-in monitoring</b> for API, DB, queue, and providers.</span></li>
+        <li><span><b>Sentry-ready</b> error tracking out of the box.</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Footer / CTA -->
+  <div class="foot">
+    <div class="lhs">
+      <strong>Let's run Zentra against your operation.</strong>
+      A guided demo, a proof-of-concept, or a structured pilot — your call.
+    </div>
+    <div>
+      <span class="cta-pill">→ zentraitsm.com</span>
+    </div>
+  </div>
+
+  <div style="margin-top:8px;color:var(--muted);font-size:7.5pt;text-align:center;">
+    Zentra ITSM · Product summary · Confidential — for the intended recipient.
+  </div>
+
+</div>
+
+</body>
+</html>

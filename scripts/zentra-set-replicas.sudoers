@@ -1,0 +1,16 @@
+# /etc/sudoers.d/zentra-set-replicas
+#
+# Allows the unprivileged Zentra helpdesk process to scale API replicas
+# without a password prompt. Scope is intentionally minimal:
+#   • only the zentra user
+#   • only this exact binary
+#   • only with a single argument (the target count, validated by the script)
+#
+# Sudo passes args literally — there is no shell expansion. The script
+# itself validates the target is an integer in [1, MAX_REPLICAS] before
+# doing any privileged work.
+
+Defaults!/usr/local/sbin/zentra-set-replicas !env_reset, env_keep="SERVICE_PREFIX APP_BASE_PORT MAX_REPLICAS HEALTH_WAIT_SECS"
+Defaults!/usr/local/sbin/zentra-set-replicas secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+
+zentra ALL=(root) NOPASSWD: /usr/local/sbin/zentra-set-replicas *

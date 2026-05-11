@@ -51,6 +51,11 @@ interface ServerHealth {
     rssMb: number;
     heapUsedMb: number;
     heapTotalMb: number;
+    /** Total physical RAM on the host, in MB. Used as the denominator for
+     *  the memory-pressure bar — RSS / totalSystem is portable across
+     *  Node and Bun, unlike heapUsed / heapTotal which JavaScriptCore
+     *  routinely reports >100% under Bun. */
+    totalSystemMb: number;
   };
   eventLoopLagMs: number;
   loadAvg: { one: number; five: number; fifteen: number } | null; // null on Windows
@@ -114,6 +119,8 @@ interface CronHeartbeat {
     jobStatus: Status;
     /** Expected max age in minutes — used by the UI for tooltips. */
     maxAgeMinutes: number;
+    /** True when this job's staleness rolls up to the system-wide status. */
+    critical: boolean;
   }>;
 }
 
@@ -126,6 +133,13 @@ interface ProviderHealth {
 interface HealthSnapshot {
   generatedAt: string;
   overall: Status;
+  /**
+   * Human-readable explanation of why `overall` is degraded/down. Empty
+   * when the system is healthy. Surfaced as a tooltip + inline note on
+   * the dashboard banner so admins can immediately see the trigger
+   * without hunting through five expandable cards.
+   */
+  reasons: string[];
   server: ServerHealth;
   database: DatabaseHealth;
   replica: ReplicaHealth;
@@ -211,12 +225,23 @@ async function probeServer(): Promise<ServerHealth> {
     loadAvg = { one: one ?? 0, five: five ?? 0, fifteen: fifteen ?? 0 };
   }
 
+  // Memory pressure: RSS / totalSystem. We deliberately do *not* compare
+  // heapUsed / heapTotal — under Bun (JavaScriptCore) heapUsed routinely
+  // exceeds heapTotal because it includes native allocations the JS heap
+  // doesn't track, producing nonsense ratios like 132% on a healthy
+  // process. RSS / totalSystem reflects actual host memory pressure and is
+  // identical in meaning across Node and Bun.
+  const totalSystemMb = bytesToMb(os.totalmem());
+  const rssMb         = bytesToMb(mem.rss);
+  const memPressure   = totalSystemMb > 0 ? rssMb / totalSystemMb : 0;
+
   // Status thresholds: heuristic, deliberately forgiving so the dashboard
   // doesn't cry wolf on a normal GC pause.
   let status: Status = "healthy";
-  if (lag > 200)                               status = "degraded";
-  if (lag > 1000)                              status = "down";
-  if (mem.heapUsed / mem.heapTotal > 0.95)     status = "degraded";
+  if (lag > 200)            status = "degraded";
+  if (lag > 1000)           status = "down";
+  if (memPressure > 0.85)   status = "degraded";
+  if (memPressure > 0.95)   status = "down";
 
   return {
     status,
@@ -224,9 +249,10 @@ async function probeServer(): Promise<ServerHealth> {
     nodeVersion: process.version,
     platform: `${process.platform}-${process.arch}`,
     memory: {
-      rssMb:       bytesToMb(mem.rss),
-      heapUsedMb:  bytesToMb(mem.heapUsed),
-      heapTotalMb: bytesToMb(mem.heapTotal),
+      rssMb,
+      heapUsedMb:    bytesToMb(mem.heapUsed),
+      heapTotalMb:   bytesToMb(mem.heapTotal),
+      totalSystemMb,
     },
     eventLoopLagMs: lag,
     loadAvg,
@@ -427,23 +453,34 @@ async function probeQueue(): Promise<QueueHealth> {
 
 // Expected max-age (minutes) per known cron job, derived from each job's
 // scheduling cadence. A job whose last success is older than this is flagged
-// "degraded"; older than 4× this it's "down". Jobs not listed here are treated
-// as informational-only and never degrade the rollup.
-const CRON_MAX_AGE_MIN: Record<string, number> = {
-  // High-frequency: every few minutes
-  "check-sla":                 15,
-  "check-automation":          15,
-  "check-time-supervisor":     15,
-  "check-inbound-email":       10,
-  "check-report-schedules":    15,
-  // Medium-frequency: hourly-ish
-  "refresh-materialized-views": 60 * 2,
-  "check-discovery-schedules":  60 * 2,
-  // Daily maintenance — generous window
-  "check-asset-renewals":       60 * 26,
-  "purge-trash":                60 * 26,
-  "purge-audit-log":            60 * 26,
+// "degraded"; older than 4× this it's "down". Jobs not listed here are
+// surfaced in the table but never affect the rollup.
+//
+// `critical: true` means a stale heartbeat for this job rolls up to the
+// system-wide status — these are the jobs that directly drive customer-facing
+// behaviour (SLA tracking, automations, inbound email). Non-critical jobs
+// (daily maintenance, view refreshes) are shown on the dashboard for
+// observability but a brief delay on them is not "the system is degraded".
+const CRON_JOBS: Record<string, { maxAgeMin: number; critical: boolean }> = {
+  // High-frequency, customer-facing — stale = real problem
+  "check-sla":                  { maxAgeMin: 15,      critical: true  },
+  "check-automation":           { maxAgeMin: 15,      critical: true  },
+  "check-time-supervisor":      { maxAgeMin: 15,      critical: true  },
+  "check-inbound-email":        { maxAgeMin: 10,      critical: true  },
+  "check-report-schedules":     { maxAgeMin: 15,      critical: true  },
+  // Medium-frequency — observability only
+  "refresh-materialized-views": { maxAgeMin: 60 * 2,  critical: false },
+  "check-discovery-schedules":  { maxAgeMin: 60 * 2,  critical: false },
+  // Daily maintenance — observability only, generous window
+  "check-asset-renewals":       { maxAgeMin: 60 * 26, critical: false },
+  "purge-trash":                { maxAgeMin: 60 * 26, critical: false },
+  "purge-audit-log":            { maxAgeMin: 60 * 26, critical: false },
 };
+
+// Back-compat alias for existing callers reading just max-age numbers.
+const CRON_MAX_AGE_MIN: Record<string, number> = Object.fromEntries(
+  Object.entries(CRON_JOBS).map(([k, v]) => [k, v.maxAgeMin]),
+);
 
 async function probeCron(): Promise<CronHeartbeat> {
   try {
@@ -485,7 +522,9 @@ async function probeCron(): Promise<CronHeartbeat> {
 
     const jobs = allRows
       .map((r) => {
-        const maxAge = CRON_MAX_AGE_MIN[r.name] ?? Infinity;
+        const meta     = CRON_JOBS[r.name];
+        const maxAge   = meta?.maxAgeMin ?? Infinity;
+        const critical = meta?.critical  ?? false;
         let jobStatus: Status = "healthy";
         if (!r.last_success_at) {
           // Never run — only worry once we're past the expected cadence; otherwise it just hasn't fired yet.
@@ -503,18 +542,24 @@ async function probeCron(): Promise<CronHeartbeat> {
           avgDurationMs: r.avg_duration_ms != null ? Math.round(r.avg_duration_ms) : null,
           jobStatus,
           maxAgeMinutes: Number.isFinite(maxAge) ? maxAge : 0,
+          critical,
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // Roll-up: only "down" if every known critical job is stuck. Otherwise
-    // pick the worst non-unknown status, but cap at "degraded".
-    const trackedStatuses = jobs.map((j) => j.jobStatus).filter((s) => s !== "unknown");
-    const allDown = trackedStatuses.length > 0 && trackedStatuses.every((s) => s === "down");
+    // Roll-up: only *critical* job staleness counts toward the system-wide
+    // rollup. A daily purge job that's a couple minutes late should not
+    // turn the whole monitoring banner amber — it just shows on its own
+    // row in the cron table for observability.
+    const criticalStatuses = jobs
+      .filter((j) => j.critical)
+      .map((j) => j.jobStatus)
+      .filter((s) => s !== "unknown");
+    const allDown = criticalStatuses.length > 0 && criticalStatuses.every((s) => s === "down");
     let status: Status;
-    if (allDown)                                          status = "down";
-    else if (trackedStatuses.some((s) => s !== "healthy")) status = "degraded";
-    else                                                  status = "healthy";
+    if (allDown)                                                status = "down";
+    else if (criticalStatuses.some((s) => s !== "healthy"))     status = "degraded";
+    else                                                        status = "healthy";
 
     return { status, jobs };
   } catch {
@@ -561,9 +606,97 @@ async function buildSnapshot(): Promise<HealthSnapshot> {
     ...(providers.ai.configured   ? [providers.ai.status]   : []),
   ];
 
+  const overall = rollUp(...liveStatuses);
+
+  // Build a punch-list of *why* the rollup isn't healthy. Each entry is a
+  // concrete trigger — the specific probe + the specific threshold that
+  // tripped — so the admin can act on it without expanding every card.
+  const reasons: string[] = [];
+  if (overall !== "healthy") {
+    if (server.status !== "healthy") {
+      if (server.eventLoopLagMs > 1000) {
+        reasons.push(`Event-loop lag is ${server.eventLoopLagMs} ms (down threshold 1000 ms)`);
+      } else if (server.eventLoopLagMs > 200) {
+        reasons.push(`Event-loop lag is ${server.eventLoopLagMs} ms (degrade threshold 200 ms)`);
+      }
+      const totalMb = server.memory.totalSystemMb || 0;
+      if (totalMb > 0) {
+        const pct = server.memory.rssMb / totalMb;
+        if (pct > 0.85) {
+          reasons.push(
+            `Process memory at ${Math.round(pct * 100)}% of host RAM ` +
+            `(${server.memory.rssMb} / ${totalMb} MB; degrade threshold 85%)`,
+          );
+        }
+      }
+    }
+    if (database.status !== "healthy") {
+      if ((database.pingMs ?? 0) > 1000) {
+        reasons.push(`Database ping is ${database.pingMs} ms (down threshold 1000 ms)`);
+      } else if ((database.pingMs ?? 0) > 200) {
+        reasons.push(`Database ping is ${database.pingMs} ms (degrade threshold 200 ms)`);
+      }
+      if (database.maxConnections && database.activeConnections != null) {
+        const pct = database.activeConnections / database.maxConnections;
+        if (pct > 0.85) {
+          reasons.push(
+            `Database at ${database.activeConnections}/${database.maxConnections} active ` +
+            `connections (${Math.round(pct * 100)}%; degrade threshold 85%)`,
+          );
+        }
+      }
+      if (database.status === "down" && database.pingMs == null) {
+        reasons.push("Database probe failed or timed out");
+      }
+    }
+    if (replica.status !== "healthy") {
+      if (replica.reachable < replica.expected) {
+        reasons.push(
+          `Only ${replica.reachable} of ${replica.expected} expected API replicas are reachable`,
+        );
+      }
+      const degraded = replica.replicas.filter((r) => r.status === "degraded").map((r) => r.port);
+      if (degraded.length > 0) {
+        reasons.push(`Replica(s) reporting degraded: ${degraded.join(", ")}`);
+      }
+    }
+    if (queue.status !== "healthy") {
+      if (queue.totalCreated > 5000) {
+        reasons.push(`Job queue backlog at ${queue.totalCreated} waiting (down threshold 5000)`);
+      } else if (queue.totalCreated > 500) {
+        reasons.push(`Job queue backlog at ${queue.totalCreated} waiting (degrade threshold 500)`);
+      }
+      if (queue.totalFailedLast24h > 50) {
+        reasons.push(`${queue.totalFailedLast24h} job failures in the last 24h (threshold 50)`);
+      }
+    }
+    if (cron.status !== "healthy") {
+      const stale = cron.jobs.filter((j) => j.critical && j.jobStatus !== "healthy" && j.jobStatus !== "unknown");
+      for (const j of stale) {
+        reasons.push(
+          `Cron job '${j.name}' is ${j.jobStatus} ` +
+          `(expected every ${j.maxAgeMinutes} min)`,
+        );
+      }
+    }
+    if (providers.mail.configured && providers.mail.status !== "healthy") {
+      reasons.push(`Mail provider: ${providers.mail.detail}`);
+    }
+    if (providers.ai.configured && providers.ai.status !== "healthy") {
+      reasons.push(`AI provider: ${providers.ai.detail}`);
+    }
+    // Fallback so the banner never says "Degraded" with no explanation —
+    // if the rollup tripped but no specific threshold matched above, the
+    // dashboard still gets *something* to display.
+    if (reasons.length === 0) {
+      reasons.push("One of the subsystems is reporting a non-healthy status (see cards below)");
+    }
+  }
+
   return {
     generatedAt: new Date().toISOString(),
-    overall: rollUp(...liveStatuses),
+    overall,
+    reasons,
     server,
     database,
     replica,

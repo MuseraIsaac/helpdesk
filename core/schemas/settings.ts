@@ -15,6 +15,7 @@ export const settingsSections = [
   "appearance",
   "integrations",
   "advanced",
+  "infrastructure",
   // ── Enterprise ITSM sections ──
   "incidents",
   "requests",
@@ -107,6 +108,11 @@ export const settingsSectionMeta: Record<SettingsSection, SettingsSectionMeta> =
     label: "Advanced",
     description: "Maintenance mode, session timeouts, file uploads, and debug settings",
     keywords: ["maintenance", "debug", "upload", "file", "session", "timeout", "log"],
+  },
+  infrastructure: {
+    label: "Infrastructure",
+    description: "Scale API replicas, inspect runtime topology, and tune backend capacity",
+    keywords: ["replica", "scale", "capacity", "systemd", "topology", "horizontal", "instances", "process", "cluster", "node"],
   },
   incidents: {
     label: "Incidents",
@@ -882,6 +888,15 @@ export const businessHoursSettingsSchema = z.object({
   showHoursInPortal:           z.boolean().default(true),
 });
 
+// ── Infrastructure ───────────────────────────────────────────────────────────
+// The infrastructure section is runtime-only — it manipulates systemd
+// replicas via /api/admin/replicas rather than persisting fields in DB
+// settings. We still expose an (empty) schema so the section satisfies
+// `Record<SettingsSection, ZodObject>` and the generic settings GET/PATCH
+// routes don't have to special-case it.
+
+export const infrastructureSettingsSchema = z.object({});
+
 // ── Master map ────────────────────────────────────────────────────────────────
 
 export const sectionSchemas = {
@@ -897,6 +912,7 @@ export const sectionSchemas = {
   appearance:       appearanceSettingsSchema,
   integrations:     integrationsSettingsSchema,
   advanced:         advancedSettingsSchema,
+  infrastructure:   infrastructureSettingsSchema,
   incidents:        incidentsSettingsSchema,
   requests:         requestsSettingsSchema,
   problems:         problemsSettingsSchema,

@@ -10,7 +10,26 @@
       "Bash(grep -rn \"ticketsUrl\\\\|navigateToTicket\\\\|/tickets/\\\\${\" client/src --include='*.tsx' --include='*.ts')",
       "Bash(grep -rn \"to:.*\\\\`/tickets/\\\\|\\\\`/tickets/\\\\${\" client/src/lib --include='*.ts' --include='*.tsx')",
       "Bash(grep -rn \"tickets/\\\\${ticket\\\\.\" client/src)",
-      "Bash(grep -n \"navigate.*tickets\\\\|ticket.ticketNumber\\\\|navigate.*\\\\`\" client/src/pages/TicketsPage.tsx)"
+      "Bash(grep -n \"navigate.*tickets\\\\|ticket.ticketNumber\\\\|navigate.*\\\\`\" client/src/pages/TicketsPage.tsx)",
+      "Bash(Get-ChildItem -Path 'c:\\\\Users\\\\IMusera\\\\OneDrive - CopyCat Group\\\\Desktop\\\\ITSM\\\\helpdesk' -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(Format-Table)",
+      "Bash(bunx playwright *)",
+      "Bash(ssh-keygen -R 138.199.153.57)",
+      "Bash(rm -f proposal-screenshots/*.png)",
+      "Bash(BASE_URL=http://138.199.153.57 ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD='Zentr@2026' npx tsx scripts/capture-screenshots.ts)",
+      "Bash(BASE_URL=http://138.199.153.57 ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD=Zentr@2026 npx tsx -e ' *)",
+      "Bash(mkdir -p light dark)",
+      "Bash(mv *.png light/)",
+      "Bash(xargs -I N echo \"light/: N files\")",
+      "Bash(xargs -I N echo \"dark/: N files\")",
+      "Bash(THEME=dark BASE_URL=http://138.199.153.57 ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD='Zentr@2026' npx tsx scripts/capture-screenshots.ts)",
+      "Bash(awk '{printf \"  %-30s %s\\\\n\", $NF, $5}')",
+      "Bash(bash -n install.sh)",
+      "Bash(bash -n ../install.sh)",
+      "Bash(bash -n ../scripts/zentra-set-replicas.sh)",
+      "Bash(bash -n scripts/zentra-set-replicas.sh)",
+      "Bash(bash -n scripts/enable-update-orchestrator.sh)"
     ]
   }
 }

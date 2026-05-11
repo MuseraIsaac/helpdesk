@@ -4,7 +4,7 @@ import {
   Settings, Palette, Ticket, Hash, Clock, BookOpen, FileText,
   Zap, Users, Monitor, Plug, Wrench, Search, Siren, PackageCheck,
   GitBranch, CheckSquare, ClipboardList, Database, Bell, ShieldCheck,
-  ScrollText, CalendarDays, FlaskConical, Trash2, X,
+  ScrollText, CalendarDays, FlaskConical, Trash2, X, Network,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -23,12 +23,13 @@ import {
   ApprovalsSection, CmdbSection, NotificationsSection, SecuritySection,
   AuditSection, BusinessHoursSection, DemoDataSection, TrashSection,
 } from "./settings/sections";
+import InfrastructureSection from "./settings/InfrastructureSection";
 import { cn } from "@/lib/utils";
 
 // ── Section groups ─────────────────────────────────────────────────────────────
 
 const SECTION_GROUPS: { label: string; sections: SettingsSection[]; color?: string }[] = [
-  { label: "Platform",       sections: ["general", "branding", "appearance", "users_roles", "advanced"] },
+  { label: "Platform",       sections: ["general", "branding", "appearance", "users_roles", "advanced", "infrastructure"] },
   { label: "Tickets & SLA",  sections: ["tickets", "ticket_numbering", "sla", "business_hours", "automations", "templates"] },
   { label: "Knowledge Base", sections: ["knowledge_base"] },
   { label: "ITSM Modules",   sections: ["incidents", "requests", "problems", "changes", "approvals", "cmdb"] },
@@ -52,6 +53,7 @@ const SECTION_ICONS: Record<SettingsSection, React.ReactNode> = {
   appearance:       <Monitor className="size-3.5" />,
   integrations:     <Plug className="size-3.5" />,
   advanced:         <Wrench className="size-3.5" />,
+  infrastructure:   <Network className="size-3.5" />,
   incidents:        <Siren className="size-3.5" />,
   requests:         <PackageCheck className="size-3.5" />,
   problems:         <GitBranch className="size-3.5" />,
@@ -73,6 +75,7 @@ const SECTION_COMPONENTS: Record<SettingsSection, React.FC> = {
   templates: TemplatesSection, automations: AutomationsSection,
   users_roles: UsersRolesSection, appearance: AppearanceSection,
   integrations: IntegrationsSection, advanced: AdvancedSection,
+  infrastructure: InfrastructureSection,
   incidents: IncidentsSection, requests: RequestsSection,
   problems: ProblemsSection, changes: ChangesSection,
   approvals: ApprovalsSection, cmdb: CmdbSection,

@@ -293,15 +293,14 @@ async function installDeps(runId: number, stagingDir: string): Promise<void> {
 
   // Pre-create bun's cache dir so it doesn't try to mkdir under HOME.
   await fs.mkdir(env.HOME!, { recursive: true });
+  await announceCacheStrategy(runId, "install_deps", env);
 
   await logEvent(runId, "info", "install_deps",
     `Running ${bun} install --frozen-lockfile (cache: ${env.BUN_INSTALL_CACHE_DIR})`);
-  const { stdout, stderr } = await execAsync(bun, ["install", "--frozen-lockfile"], {
+  await streamExec(runId, "install_deps", bun, ["install", "--frozen-lockfile"], {
     cwd: stagingDir,
     env,
-  });
-  await logEvent(runId, "info", "install_deps", "bun install output", {
-    stdout: stdout.slice(-2000), stderr: stderr.slice(-2000),
+    timeoutMs: numEnv("UPDATE_INSTALL_TIMEOUT_MS", 15 * 60_000),
   });
 }
 
@@ -333,19 +332,50 @@ async function buildClient(runId: number, stagingDir: string): Promise<void> {
     await logEvent(runId, "info", "build", "No client/ directory in artifact — skipping build");
     return;
   }
+  // If the artifact already ships a built dist/, skip rebuilding. This lets
+  // CI bake the bundle once and removes vite from the customer's hot path
+  // entirely — the single biggest source of "stuck at build" failures.
+  const prebuiltIndex = path.join(clientDir, "dist", "index.html");
+  try {
+    await fs.access(prebuiltIndex);
+    await logEvent(runId, "info", "build",
+      `Pre-built client/dist found at ${prebuiltIndex} — skipping vite build`);
+    return;
+  } catch { /* no pre-built bundle; proceed to vite */ }
+
   // vite uses several ~/.cache scratch paths that aren't writable under our
   // hardened systemd unit. Same env redirection as installDeps.
   const env = buildBuildEnv(stagingDir);
   await fs.mkdir(env.HOME!, { recursive: true });
+  await announceCacheStrategy(runId, "build", env);
 
-  await logEvent(runId, "info", "build", `Building SPA in ${clientDir}`);
-  const { stdout, stderr } = await execAsync(bun, ["x", "vite", "build"], {
-    cwd: clientDir,
-    env,
-  });
-  await logEvent(runId, "info", "build", "vite build output", {
-    stdout: stdout.slice(-2000), stderr: stderr.slice(-2000),
-  });
+  // Cap Node's heap. Vite 5/6 can spike to 1.5–2 GB on medium-large SPAs;
+  // without a cap, V8 grows past the cgroup limit and the kernel OOM-killer
+  // reaps bun mid-build (symptom: silent hang, then exit 137 / SIGKILL).
+  const heapMb = numEnv("UPDATE_BUILD_NODE_MAX_MB", 2048);
+  env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --max-old-space-size=${heapMb}`.trim();
+
+  await logEvent(runId, "info", "build", `Building SPA in ${clientDir} (heap=${heapMb}MB)`);
+  try {
+    await streamExec(runId, "build", bun, ["x", "vite", "build", "--logLevel", "warn"], {
+      cwd: clientDir,
+      env,
+      timeoutMs: numEnv("UPDATE_BUILD_TIMEOUT_MS", 20 * 60_000),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Re-throw with operator guidance attached. The orchestrator's catch block
+    // will surface this to the UI and the failed-step copy explains the
+    // common remediations without requiring a doc lookup.
+    throw new Error(
+      `${msg}\n\nRemediation options:\n` +
+      `  • If the build OOMed, raise UPDATE_BUILD_NODE_MAX_MB (currently ${heapMb}) ` +
+      `in /opt/zentra/app/server/.env, or give the host more RAM.\n` +
+      `  • If the build timed out, raise UPDATE_BUILD_TIMEOUT_MS.\n` +
+      `  • To skip the on-box build entirely, ship client/dist in the release ` +
+      `tarball or set UPDATE_SKIP_BUILD=true.`
+    );
+  }
 }
 
 // ── Finalize ─────────────────────────────────────────────────────────────────
@@ -449,12 +479,16 @@ async function runFinalize(runId: number, stagingDir: string, manifest: ReleaseM
 async function runMigrations(runId: number, stagingDir: string) {
   const schemaPath = path.join(stagingDir, "server", "prisma", "schema.prisma");
   await logEvent(runId, "info", "migrate", `Running prisma migrate deploy --schema ${schemaPath}`);
-  const { stdout, stderr } = await execAsync(
+  await streamExec(
+    runId,
+    "migrate",
     "bunx",
     ["prisma", "migrate", "deploy", "--schema", schemaPath],
-    { cwd: path.resolve(process.cwd(), "server") },
+    {
+      cwd: path.resolve(process.cwd(), "server"),
+      timeoutMs: numEnv("UPDATE_MIGRATE_TIMEOUT_MS", 10 * 60_000),
+    },
   );
-  await logEvent(runId, "info", "migrate", "prisma output", { stdout, stderr });
 }
 
 /**
@@ -705,4 +739,194 @@ function buildBuildEnv(stagingDir: string): NodeJS.ProcessEnv {
     TMP:                   tmpDir,
     TEMP:                  tmpDir,
   };
+}
+
+/** Parse an env var as a positive integer, falling back to `fallback`. */
+function numEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * Emit one event noting whether the bun/vite cache is persistent across
+ * updates or thrown away with the staging dir. Operators chasing slow
+ * builds need this visibility — a fresh cache adds ~30-60s per update
+ * because esbuild/rollup native binaries get re-fetched.
+ */
+async function announceCacheStrategy(runId: number, step: string, env: NodeJS.ProcessEnv) {
+  const persistent = !!process.env.UPDATE_BUN_CACHE_DIR;
+  if (persistent) {
+    await logEvent(runId, "info", step, `Using persistent bun cache at ${env.BUN_INSTALL_CACHE_DIR}`);
+  } else {
+    await logEvent(runId, "info", step,
+      `Using throwaway bun cache at ${env.BUN_INSTALL_CACHE_DIR} ` +
+      `(set UPDATE_BUN_CACHE_DIR + add it to systemd ReadWritePaths for faster updates)`);
+  }
+}
+
+/**
+ * Spawn a long-running child process with proper visibility:
+ *   • streams stdout/stderr line-by-line, throttled to ≤1 event every 2s
+ *     so we don't hammer the DB on chatty builds (vite emits ~1 line per chunk)
+ *   • heartbeats every 15s with elapsed seconds, so the UI never looks dead
+ *     even during phases where the child is silent (e.g. tarball download
+ *     inside `bun install`, or vite's transform pass before output)
+ *   • enforces `timeoutMs` (kills the process group with SIGTERM, then SIGKILL
+ *     after a 5s grace) and surfaces a clear timeout error
+ *   • classifies SIGKILL exits as "likely OOM" — the most common silent
+ *     failure mode on memory-constrained hosts — with actionable remediation
+ *   • retains a tail of the last 50 stdout + 50 stderr lines and includes
+ *     them in the failure error message
+ *
+ * Drop-in replacement for execAsync() in cases where the child can run for
+ * minutes and/or produce more than a few MB of output.
+ */
+function streamExec(
+  runId: number,
+  step: string,
+  cmd: string,
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const child = spawn(cmd, args, {
+      cwd: options.cwd,
+      env: options.env,
+      // Detached + own process group so SIGTERM/SIGKILL on timeout reaps any
+      // grandchildren (vite spawns esbuild workers, bun spawns network procs).
+      detached: process.platform !== "win32",
+    });
+
+    const stdoutTail: string[] = [];
+    const stderrTail: string[] = [];
+    const TAIL_MAX = 50;
+    let pendingLines: string[] = [];
+    let lastFlush = 0;
+    let flushTimer: NodeJS.Timeout | null = null;
+    const FLUSH_INTERVAL = 2_000;
+
+    const flush = () => {
+      if (pendingLines.length === 0) {
+        if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+        return;
+      }
+      const chunk = pendingLines.join("\n");
+      pendingLines = [];
+      lastFlush = Date.now();
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      // Best-effort: don't reject the whole exec just because a log write
+      // hit a transient DB blip; swallow per-line logging errors.
+      logEvent(runId, "info", step, chunk).catch(() => {});
+    };
+
+    const onLine = (line: string, tail: string[]) => {
+      if (!line) return;
+      tail.push(line);
+      while (tail.length > TAIL_MAX) tail.shift();
+      pendingLines.push(line);
+      const now = Date.now();
+      if (now - lastFlush >= FLUSH_INTERVAL) {
+        flush();
+      } else if (!flushTimer) {
+        flushTimer = setTimeout(flush, FLUSH_INTERVAL - (now - lastFlush));
+      }
+    };
+
+    // Line-buffer each stream — children rarely flush on line boundaries so
+    // we maintain a small carry-over buffer and split on '\n'.
+    let outBuf = "";
+    let errBuf = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      outBuf += chunk.toString("utf8");
+      const lines = outBuf.split("\n");
+      outBuf = lines.pop() ?? "";
+      for (const line of lines) onLine(line, stdoutTail);
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      errBuf += chunk.toString("utf8");
+      const lines = errBuf.split("\n");
+      errBuf = lines.pop() ?? "";
+      for (const line of lines) onLine(line, stderrTail);
+    });
+
+    // Heartbeat: emit "still running, Ns elapsed" so the UI shows liveness
+    // even during long silent phases. Suppressed when we just flushed output.
+    const heartbeat = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - start) / 1000);
+      if (Date.now() - lastFlush > 10_000) {
+        logEvent(runId, "info", step, `${cmd} still running (${elapsed}s elapsed)`).catch(() => {});
+        lastFlush = Date.now();
+      }
+    }, 15_000);
+
+    // Timeout: SIGTERM → 5s grace → SIGKILL the whole process group.
+    let timedOut = false;
+    const timeoutMs = options.timeoutMs ?? 0;
+    const timeoutTimer = timeoutMs > 0 ? setTimeout(() => {
+      timedOut = true;
+      try {
+        if (process.platform !== "win32" && child.pid) {
+          process.kill(-child.pid, "SIGTERM");
+          setTimeout(() => {
+            try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { /* already dead */ }
+          }, 5_000).unref();
+        } else {
+          child.kill("SIGTERM");
+        }
+      } catch { /* already dead */ }
+    }, timeoutMs) : null;
+    timeoutTimer?.unref();
+
+    const cleanup = () => {
+      clearInterval(heartbeat);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (flushTimer)   clearTimeout(flushTimer);
+      // Flush any straggler bytes left in the line buffers.
+      if (outBuf) { stdoutTail.push(outBuf); pendingLines.push(outBuf); outBuf = ""; }
+      if (errBuf) { stderrTail.push(errBuf); pendingLines.push(errBuf); errBuf = ""; }
+      flush();
+    };
+
+    child.on("error", (err) => {
+      cleanup();
+      reject(new Error(`Failed to spawn ${cmd}: ${err.message}`));
+    });
+
+    child.on("close", (code, signal) => {
+      cleanup();
+      const elapsed = Math.floor((Date.now() - start) / 1000);
+
+      if (timedOut) {
+        reject(new Error(
+          `${cmd} ${args.join(" ")} timed out after ${elapsed}s ` +
+          `(limit ${Math.floor(timeoutMs / 1000)}s). ` +
+          `Last stderr:\n${stderrTail.slice(-10).join("\n") || "(empty)"}`
+        ));
+        return;
+      }
+
+      if (code === 0) {
+        logEvent(runId, "info", step, `${cmd} completed in ${elapsed}s`).catch(() => {});
+        resolve();
+        return;
+      }
+
+      // SIGKILL / exit 137 on Linux almost always means the kernel
+      // OOM-killer reaped the process. Surface that explicitly because the
+      // child usually produces no error output before dying.
+      const oomLikely = signal === "SIGKILL" || code === 137;
+      const tail = stderrTail.slice(-20).join("\n") || stdoutTail.slice(-20).join("\n") || "(no output captured)";
+      const hint = oomLikely
+        ? ` — likely killed by the kernel OOM-killer (signal=${signal ?? "SIGKILL"}). ` +
+          `Lower UPDATE_BUILD_NODE_MAX_MB or give the host more RAM.`
+        : "";
+      reject(new Error(
+        `${cmd} exited with code=${code} signal=${signal ?? "none"} after ${elapsed}s${hint}\n` +
+        `Last output:\n${tail}`
+      ));
+    });
+  });
 }

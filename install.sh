@@ -16,7 +16,10 @@
 #        - serves the React SPA from client/dist
 #        - reverse-proxies /api/* across the API replicas (least-conn LB)
 #   9.  Opens firewalld for SSH / HTTP / HTTPS.
-#   10. Health-checks every replica.
+#   10. Installs privileged NOPASSWD helpers so admins can run in-tool
+#       releases (Settings → Updates) AND scale API replicas live
+#       (Settings → Platform → Infrastructure) without SSH access.
+#   11. Health-checks every replica.
 #
 # Re-running the script is safe: existing users, repos, services, and DBs are
 # detected and updated in place rather than recreated.
@@ -987,33 +990,70 @@ EOF
 # from the UI without anyone SSHing in. See:
 #   scripts/zentra-finalize-update.sh
 #   scripts/zentra-finalize-update.sudoers
-phase_finalize_helper() {
-  local helper_src="$APP_DIR/scripts/zentra-finalize-update.sh"
-  local helper_dst="/usr/local/sbin/zentra-finalize-update"
-  local sudoers_src="$APP_DIR/scripts/zentra-finalize-update.sudoers"
-  local sudoers_dst="/etc/sudoers.d/zentra-finalize-update"
+phase_privileged_helpers() {
+  # Installs every sudo-NOPASSWD helper the unprivileged $APP_USER process
+  # needs to perform privileged ops from the UI without an SSH session:
+  #
+  #   • zentra-finalize-update — swaps a staged release into $APP_DIR and
+  #                              restarts replicas (used by Settings → Updates).
+  #   • zentra-set-replicas    — enables/disables systemd template instances
+  #                              between 1 and MAX_REPLICAS (used by
+  #                              Settings → Platform → Infrastructure).
+  #
+  # Each helper is installed in the same way:
+  #   1. copy script → /usr/local/sbin (root:root 0755)
+  #   2. visudo-validate the sudoers drop-in, then install to
+  #      /etc/sudoers.d/ (root:root 0440)
+  #   3. create the helper's append-only log file
+  #
+  # All three of these steps are idempotent — re-running install.sh on an
+  # existing host just refreshes them.
 
-  if [[ ! -f "$helper_src" ]]; then
-    warn "Skipping finalize helper: $helper_src not found in this checkout"
-    return 0
-  fi
+  _install_helper() {
+    # _install_helper <name> <log_path>
+    #   <name> matches both the script (scripts/<name>.sh) and the sudoers
+    #   filename (scripts/<name>.sudoers); the installed binary lives at
+    #   /usr/local/sbin/<name>.
+    local name="$1" log_path="$2"
+    local helper_src="$APP_DIR/scripts/${name}.sh"
+    local helper_dst="/usr/local/sbin/${name}"
+    local sudoers_src="$APP_DIR/scripts/${name}.sudoers"
+    local sudoers_dst="/etc/sudoers.d/${name}"
 
-  log "Installing privileged finalize helper at $helper_dst"
-  install -o root -g root -m 0755 "$helper_src" "$helper_dst"
+    if [[ ! -f "$helper_src" ]]; then
+      warn "Skipping $name: $helper_src not found in this checkout"
+      return 0
+    fi
+    if [[ ! -f "$sudoers_src" ]]; then
+      warn "Skipping $name: $sudoers_src not found in this checkout"
+      return 0
+    fi
 
-  log "Installing sudoers rule at $sudoers_dst"
-  # Use visudo -cf to validate before installing so a bad file can't lock us out.
-  if visudo -cf "$sudoers_src" >/dev/null 2>&1; then
-    install -o root -g root -m 0440 "$sudoers_src" "$sudoers_dst"
-  else
-    die "Refusing to install $sudoers_dst — visudo rejected $sudoers_src"
-  fi
+    log "Installing privileged helper $name → $helper_dst"
+    install -o root -g root -m 0755 "$helper_src" "$helper_dst"
 
-  # Touch the log file with the right perms so the helper's append works
-  # even before its first run.
-  install -o root -g root -m 0644 /dev/null /var/log/zentra-finalize.log
+    log "Installing sudoers rule → $sudoers_dst"
+    # visudo -cf validates BEFORE we drop the file in /etc/sudoers.d/ so a
+    # broken rule can't lock the operator out of sudo entirely.
+    if visudo -cf "$sudoers_src" >/dev/null 2>&1; then
+      install -o root -g root -m 0440 "$sudoers_src" "$sudoers_dst"
+    else
+      die "Refusing to install $sudoers_dst — visudo rejected $sudoers_src"
+    fi
 
-  ok "Finalize helper ready (sudo zentra runs $helper_dst with NOPASSWD)"
+    # Pre-create the helper's append-only log so the first invocation
+    # doesn't have to create the file (the helpers run as root so they
+    # could anyway, but explicit ownership/mode beats whatever umask said).
+    install -o root -g root -m 0644 /dev/null "$log_path"
+
+    ok "$name ready (sudo $APP_USER runs $helper_dst with NOPASSWD)"
+  }
+
+  # 1. Update finalize helper (in-tool releases, "Apply update" button)
+  _install_helper "zentra-finalize-update" "/var/log/zentra-finalize.log"
+
+  # 2. Replica scaling helper (Settings → Infrastructure)
+  _install_helper "zentra-set-replicas" "/var/log/zentra-replicas.log"
 }
 
 # ── 3.14 Update helper script ──────────────────────────────────────────────
@@ -1194,7 +1234,7 @@ main() {
   phase_firewall
   phase_health
   phase_cert_watchdog
-  phase_finalize_helper
+  phase_privileged_helpers
   phase_update_script
   phase_sanity_check
   phase_summary

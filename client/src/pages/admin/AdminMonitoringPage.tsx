@@ -28,12 +28,21 @@ type Status = "healthy" | "degraded" | "down" | "unknown" | "not_configured";
 interface HealthSnapshot {
   generatedAt: string;
   overall: Status;
+  /** Concrete triggers behind a non-healthy `overall`. Empty when healthy. */
+  reasons: string[];
   server: {
     status: Status;
     uptimeSeconds: number;
     nodeVersion: string;
     platform: string;
-    memory: { rssMb: number; heapUsedMb: number; heapTotalMb: number };
+    memory: {
+      rssMb:         number;
+      heapUsedMb:    number;
+      heapTotalMb:   number;
+      /** Total physical RAM on the host, MB — denominator for the
+       *  memory-pressure bar. */
+      totalSystemMb: number;
+    };
     eventLoopLagMs: number;
     loadAvg: { one: number; five: number; fifteen: number } | null;
     cpuCount: number;
@@ -110,13 +119,16 @@ const STATUS_TONE: Record<Status, {
   not_configured: { label: "Not configured", text: "text-muted-foreground",                  bg: "bg-muted/30",            border: "border-border/50",           dot: "bg-muted-foreground/40", icon: MinusCircle },
 };
 
-function StatusPill({ status, size = "md" }: { status: Status; size?: "sm" | "md" }) {
+function StatusPill({
+  status, size = "md", tooltip,
+}: { status: Status; size?: "sm" | "md"; tooltip?: string }) {
   const t = STATUS_TONE[status];
   const Icon = t.icon;
   const dotPulse = status === "healthy" ? "animate-pulse" : "";
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border ${t.border} ${t.bg} ${t.text} ${size === "sm" ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-1 text-[11px]"} font-medium`}
+      title={tooltip}
     >
       <span className={`relative inline-block ${size === "sm" ? "h-1.5 w-1.5" : "h-2 w-2"} rounded-full ${t.dot}`}>
         {status === "healthy" && (
@@ -212,13 +224,21 @@ function Card({
 // ── Cards ────────────────────────────────────────────────────────────────────
 
 function ServerCard({ data }: { data: HealthSnapshot["server"] }) {
-  const heapPctRaw = data.memory.heapUsedMb / Math.max(1, data.memory.heapTotalMb);
-  const heapPctDisplay = Math.round(heapPctRaw * 100);
-  const heapTone: "ok" | "warn" | "danger" =
-    heapPctRaw > 0.9 ? "danger" : heapPctRaw > 0.75 ? "warn" : "ok";
+  // Memory pressure: RSS vs total host RAM. This is portable across
+  // runtimes — unlike heapUsed / heapTotal, which under Bun routinely
+  // exceeds 100% because JavaScriptCore accounts for native allocations
+  // in heapUsed but only JS-managed heap in heapTotal.
+  const totalSystemMb = Math.max(1, data.memory.totalSystemMb || 0);
+  const memPctRaw     = data.memory.rssMb / totalSystemMb;
+  const memPctDisplay = Math.round(memPctRaw * 100);
+  const memTone: "ok" | "warn" | "danger" =
+    memPctRaw > 0.85 ? "danger" : memPctRaw > 0.65 ? "warn" : "ok";
   const lagTone: "ok" | "warn" | "danger" =
     data.eventLoopLagMs > 1000 ? "danger" : data.eventLoopLagMs > 200 ? "warn" : "ok";
 
+  // Heap is shown as an informational value (no percent, no bar) — the
+  // numerator/denominator only compares meaningfully on Node, and the
+  // visible "X / Y MB" framing kept causing alarm on Bun installs.
   return (
     <Card icon={Server} title="Server (Node.js)" status={data.status}>
       <div className="space-y-0">
@@ -234,12 +254,16 @@ function ServerCard({ data }: { data: HealthSnapshot["server"] }) {
         ) : (
           <MetricRow label="Load avg" value="n/a" hint="not exposed by Windows" />
         )}
-        <MetricRow label="RSS memory"       value={`${data.memory.rssMb} MB`} />
         <MetricRow
-          label="Heap"
-          value={`${data.memory.heapUsedMb} / ${data.memory.heapTotalMb} MB`}
-          hint={`${heapPctDisplay}%`}
-          bar={{ pct: Math.min(1, heapPctRaw), tone: heapTone }}
+          label="Memory (RSS)"
+          value={`${data.memory.rssMb} / ${data.memory.totalSystemMb} MB`}
+          hint={`${memPctDisplay}% of host RAM`}
+          bar={{ pct: Math.min(1, memPctRaw), tone: memTone }}
+        />
+        <MetricRow
+          label="Heap (JS)"
+          value={`${data.memory.heapUsedMb} MB`}
+          hint={`used · ${data.memory.heapTotalMb} MB allocated`}
         />
         <MetricRow
           label="Event-loop lag"
@@ -512,7 +536,10 @@ export default function AdminMonitoringPage() {
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            <StatusPill status={overall} />
+            <StatusPill
+              status={overall}
+              tooltip={data?.reasons && data.reasons.length > 0 ? data.reasons.join("\n") : undefined}
+            />
             <span className="text-[11px] text-muted-foreground tabular-nums font-mono">
               {data ? formatRelative(new Date(dataUpdatedAt).toISOString()) : "—"}
             </span>
@@ -528,6 +555,27 @@ export default function AdminMonitoringPage() {
             </Button>
           </div>
         </div>
+
+        {/* Reason strip — visible inline whenever the rollup is non-healthy,
+         *  so admins see *why* the system is degraded without having to
+         *  expand the individual cards or hover for a tooltip. */}
+        {data?.reasons && data.reasons.length > 0 && (
+          <div className={`relative border-t ${tone.border} ${tone.bg} px-5 py-2.5`}>
+            <div className="flex items-start gap-2 text-[12px] leading-snug">
+              <AlertTriangle className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${tone.text}`} />
+              <div className="min-w-0 flex-1">
+                <div className={`text-[10px] font-semibold uppercase tracking-[0.15em] mb-0.5 ${tone.text}`}>
+                  Why {overall === "down" ? "down" : "degraded"}
+                </div>
+                <ul className="space-y-0.5 list-disc pl-4 text-foreground/85">
+                  {data.reasons.map((r, i) => (
+                    <li key={i} className="font-mono text-[11.5px]">{r}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {error && <ErrorAlert error={error} fallback="Failed to load monitoring data" />}

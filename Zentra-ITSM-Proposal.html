@@ -1,0 +1,1184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Zentra ITSM — Product Proposal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* ─── Page setup for print/PDF ───────────────────────────────────────────── */
+  @page { size: A4; margin: 18mm 16mm; }
+  @media print {
+    body            { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page-break     { break-before: page; }
+    .avoid-break    { break-inside: avoid; }
+    a               { color: inherit; text-decoration: none; }
+    .no-print       { display: none !important; }
+  }
+
+  /* ─── Typography & base ──────────────────────────────────────────────────── */
+  :root {
+    --ink:        #0f172a;   /* slate-900   */
+    --ink-soft:   #334155;   /* slate-700   */
+    --muted:      #64748b;   /* slate-500   */
+    --line:       #e2e8f0;   /* slate-200   */
+    --bg-soft:    #f8fafc;   /* slate-50    */
+    --brand:      #4f46e5;   /* indigo-600  */
+    --brand-deep: #3730a3;   /* indigo-800  */
+    --brand-tint: #eef2ff;   /* indigo-50   */
+    --accent:     #10b981;   /* emerald-500 */
+    --warn:       #f59e0b;   /* amber-500   */
+    --danger:     #e11d48;   /* rose-600    */
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: #fff;
+    font-size: 11pt;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .doc { max-width: 760px; margin: 0 auto; padding: 32px 28px; }
+
+  h1, h2, h3, h4 { color: var(--ink); margin: 0 0 .5em 0; line-height: 1.2; letter-spacing: -0.01em; }
+  h1 { font-size: 34pt; font-weight: 800; }
+  h2 { font-size: 18pt; font-weight: 700; margin-top: 1.8em; }
+  h3 { font-size: 13pt; font-weight: 700; margin-top: 1.4em; color: var(--brand-deep); }
+  h4 { font-size: 11pt; font-weight: 700; margin-top: 1.2em; }
+  p  { margin: 0 0 .7em 0; }
+  ul, ol { margin: .2em 0 .8em 1.1em; padding: 0; }
+  li { margin: .25em 0; }
+  strong { color: var(--ink); }
+
+  /* ─── Cover page ─────────────────────────────────────────────────────────── */
+  .cover {
+    position: relative;
+    min-height: 260mm;
+    padding: 70px 60px;
+    background:
+      radial-gradient(circle at 85% 15%, rgba(79,70,229,0.18), transparent 55%),
+      radial-gradient(circle at 15% 95%, rgba(16,185,129,0.12), transparent 55%),
+      linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    border-radius: 4px;
+    overflow: hidden;
+    break-after: page;
+  }
+  .cover::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(15,23,42,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(15,23,42,0.05) 1px, transparent 1px);
+    background-size: 28px 28px;
+    mask-image: linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0.4) 100%);
+    -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0.4) 100%);
+    pointer-events: none;
+  }
+  .cover > * { position: relative; }
+  .brand-row { display: flex; align-items: center; gap: 12px; margin-bottom: 64px; }
+  .brand-mark {
+    width: 36px; height: 36px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 800; font-size: 16pt;
+    box-shadow: 0 8px 20px -8px rgba(79,70,229,0.55);
+  }
+  .brand-name { font-weight: 700; font-size: 13pt; letter-spacing: 0.02em; }
+  .brand-sub  { color: var(--muted); font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.16em; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--brand-deep); font-size: 10pt; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.16em;
+    padding: 6px 12px; border-radius: 999px;
+    background: var(--brand-tint); border: 1px solid rgba(79,70,229,0.18);
+  }
+  .cover-title  {
+    font-size: 44pt; line-height: 1.04; font-weight: 800;
+    margin-top: 18px;
+  }
+  .cover-title .accent {
+    background: linear-gradient(90deg, var(--brand-deep) 0%, var(--brand) 60%, var(--accent) 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+  }
+  .cover-tagline {
+    margin-top: 24px; max-width: 540px;
+    font-size: 14pt; color: var(--ink-soft); line-height: 1.45;
+  }
+  .cover-pills {
+    margin-top: 36px; display: flex; flex-wrap: wrap; gap: 10px;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 6px 12px; border-radius: 999px;
+    background: #fff; border: 1px solid var(--line);
+    font-size: 9.5pt; color: var(--ink-soft); font-weight: 500;
+  }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .cover-foot {
+    position: absolute; left: 60px; right: 60px; bottom: 50px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+    color: var(--muted); font-size: 9pt;
+  }
+  .cover-foot .meta-block { display: flex; gap: 36px; }
+  .cover-foot .meta-block dt { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); margin-bottom: 2px; }
+  .cover-foot .meta-block dd { font-size: 10pt; color: var(--ink); margin: 0; font-weight: 600; }
+
+  /* ─── Content blocks ─────────────────────────────────────────────────────── */
+  .lede {
+    font-size: 12pt; color: var(--ink-soft); line-height: 1.6;
+    border-left: 3px solid var(--brand); padding: 4px 0 4px 16px; margin: 18px 0 24px 0;
+  }
+  .section-rule {
+    height: 2px; width: 38px; border-radius: 2px;
+    background: linear-gradient(90deg, var(--brand) 0%, var(--brand) 60%, transparent 100%);
+    margin: 0 0 10px 0;
+  }
+  .section-kicker {
+    color: var(--brand-deep); font-size: 9pt; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.18em; margin-bottom: 4px;
+  }
+
+  /* Callout boxes */
+  .callout {
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; margin: 14px 0;
+    background: #fff;
+  }
+  .callout.callout--brand {
+    background: linear-gradient(180deg, var(--brand-tint) 0%, #fff 100%);
+    border-color: rgba(79,70,229,0.20);
+  }
+  .callout.callout--accent {
+    background: linear-gradient(180deg, #ecfdf5 0%, #fff 100%);
+    border-color: rgba(16,185,129,0.25);
+  }
+  .callout h4 { margin: 0 0 6px 0; font-size: 10.5pt; color: var(--brand-deep); }
+  .callout p  { margin: 0; color: var(--ink-soft); }
+
+  /* Two-column grid for value pillars / modules */
+  .grid-2 {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    margin: 12px 0;
+  }
+  .card {
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; background: #fff;
+    break-inside: avoid;
+  }
+  .card .tag {
+    display: inline-block;
+    font-size: 8.5pt; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--brand);
+    margin-bottom: 6px;
+  }
+  .card h4 { margin: 0 0 6px 0; font-size: 11pt; }
+  .card p  { margin: 0; font-size: 10pt; color: var(--ink-soft); line-height: 1.5; }
+
+  /* Module section heading */
+  .module {
+    border-left: 3px solid var(--brand); padding: 4px 0 4px 16px;
+    margin: 18px 0; break-inside: avoid;
+  }
+  .module h3 { margin: 0 0 4px 0; color: var(--ink); }
+  .module .sub { color: var(--muted); font-size: 9.5pt; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px; }
+  .module p  { margin: 6px 0 0 0; color: var(--ink-soft); }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 18px 0; font-size: 10pt; }
+  table th, table td { text-align: left; padding: 9px 10px; vertical-align: top; }
+  table th {
+    background: var(--bg-soft); color: var(--ink);
+    font-size: 9pt; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    border-bottom: 1px solid var(--line);
+  }
+  table td { border-bottom: 1px solid var(--line); color: var(--ink-soft); }
+  table tr:last-child td { border-bottom: none; }
+
+  /* Comparison table — Legacy vs Zentra */
+  table.compare {
+    border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--line);
+    box-shadow: 0 1px 0 rgba(15,23,42,0.02);
+    font-size: 9.5pt;
+  }
+  table.compare th {
+    background: linear-gradient(180deg, var(--brand-tint) 0%, #fff 100%);
+    color: var(--brand-deep);
+    font-size: 8.5pt; letter-spacing: 0.14em;
+    border-bottom: 1px solid rgba(79,70,229,0.20);
+    padding: 11px 12px;
+  }
+  table.compare th:nth-child(3) {
+    background: linear-gradient(180deg, #ecfdf5 0%, #fff 100%);
+    color: #047857;
+    border-bottom-color: rgba(16,185,129,0.25);
+  }
+  table.compare td { padding: 10px 12px; }
+  table.compare td:nth-child(1) {
+    font-weight: 700; color: var(--ink);
+    background: var(--bg-soft);
+    width: 25%;
+  }
+  table.compare td:nth-child(2) { color: var(--muted); }
+  table.compare td:nth-child(3) {
+    color: var(--ink);
+    background: linear-gradient(180deg, rgba(16,185,129,0.04) 0%, rgba(255,255,255,0.6) 100%);
+    border-left: 1px solid rgba(16,185,129,0.12);
+  }
+  table.compare .hl {
+    color: var(--brand-deep); font-weight: 700;
+  }
+  table.compare tr:hover td:nth-child(3) {
+    background: linear-gradient(180deg, rgba(16,185,129,0.08) 0%, rgba(255,255,255,0.7) 100%);
+  }
+
+  /* Quote / pull */
+  .pull {
+    margin: 18px 0; padding: 18px 20px;
+    background: linear-gradient(180deg, var(--brand-tint) 0%, #fff 100%);
+    border-left: 4px solid var(--brand);
+    border-radius: 0 10px 10px 0;
+    font-size: 12pt; color: var(--ink); font-weight: 500; line-height: 1.45;
+  }
+
+  /* Stats strip */
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+    margin: 16px 0;
+  }
+  .stat {
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+    background: #fff;
+  }
+  .stat .v { font-size: 18pt; font-weight: 800; color: var(--brand-deep); letter-spacing: -0.02em; }
+  .stat .k { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); font-weight: 700; }
+
+  /* Section footer / closing */
+  .closing {
+    margin-top: 32px; padding: 28px 28px;
+    background: linear-gradient(135deg, #1e1b4b 0%, #3730a3 50%, #4f46e5 100%);
+    color: #fff; border-radius: 12px;
+  }
+  .closing h2 { color: #fff; margin-top: 0; }
+  .closing p  { color: rgba(255,255,255,0.85); }
+  .closing .cta-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 16px; }
+  .closing .cta {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 18px; border-radius: 999px;
+    background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.25);
+    color: #fff; font-weight: 600; font-size: 10.5pt;
+  }
+  .closing .cta--solid { background: #fff; color: var(--brand-deep); border-color: #fff; }
+
+  /* Footer on each page */
+  .pagefoot {
+    margin: 30px 0 0 0; padding-top: 14px;
+    border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 9pt;
+    display: flex; justify-content: space-between;
+  }
+
+  /* Misc */
+  .checks li {
+    list-style: none; position: relative; padding-left: 22px;
+  }
+  .checks li::before {
+    content: ""; position: absolute; left: 0; top: 7px;
+    width: 12px; height: 6px;
+    border-left: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
+    transform: rotate(-45deg);
+  }
+</style>
+</head>
+<body>
+
+<!-- ╔════════════════════════════════════════════════════════════════════════╗
+     ║   COVER PAGE                                                          ║
+     ╚════════════════════════════════════════════════════════════════════════╝ -->
+<section class="cover">
+  <div class="brand-row">
+    <div class="brand-mark">Z</div>
+    <div>
+      <div class="brand-name">Zentra ITSM</div>
+      <div class="brand-sub">Service management platform</div>
+    </div>
+  </div>
+
+  <span class="eyebrow">
+    <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--brand);"></span>
+    Product proposal · 2026
+  </span>
+
+  <h1 class="cover-title">
+    Enterprise ITSM,<br/>
+    <span class="accent">built for service teams<br/>that own outcomes.</span>
+  </h1>
+
+  <p class="cover-tagline">
+    One platform for the full ITIL service lifecycle — incidents, requests, problems,
+    changes, assets, and knowledge — on a single record of truth, with the automation,
+    governance, and visibility a modern operation depends on.
+  </p>
+
+  <div class="cover-pills">
+    <span class="pill">ITIL 4 practices</span>
+    <span class="pill">AI-assisted intake</span>
+    <span class="pill">Audit-grade automation</span>
+    <span class="pill">Real CMDB</span>
+    <span class="pill">Self-host or managed</span>
+  </div>
+
+  <div class="cover-foot">
+    <dl class="meta-block">
+      <div><dt>Prepared for</dt><dd>Decision-makers &amp; stakeholders</dd></div>
+      <div><dt>Document</dt><dd>Product proposal</dd></div>
+      <div><dt>Status</dt><dd>For review</dd></div>
+    </dl>
+    <div style="text-align:right;">
+      <div style="font-weight:600;color:var(--ink);">zentraitsm.com</div>
+      <div>Sales · Demo · Pilot</div>
+    </div>
+  </div>
+</section>
+
+<!-- ╔════════════════════════════════════════════════════════════════════════╗
+     ║   BODY                                                                ║
+     ╚════════════════════════════════════════════════════════════════════════╝ -->
+<div class="doc">
+
+  <!-- ─── Executive summary ─── -->
+  <div class="section-kicker">01 · Executive summary</div>
+  <div class="section-rule"></div>
+  <h2 style="margin-top:0;">A single platform for the full IT service lifecycle.</h2>
+
+  <p class="lede">
+    Zentra ITSM is an enterprise-grade service management platform that gives IT, operations,
+    and service teams everything they need to run their day — and prove the outcome at the end
+    of it. Tickets, incidents, requests, problems, changes, assets, knowledge, automation,
+    and reporting are integrated on one data model, on one modern interface, with audit-grade
+    traceability throughout.
+  </p>
+
+  <p>
+    Built for organisations that take service quality seriously, Zentra eliminates the
+    sprawl of disconnected helpdesk tools and brings the entire service motion — capture,
+    triage, resolve, govern, learn — into a single, configurable environment. The result
+    is faster resolution, fewer breaches, stronger control, and a service organisation
+    that scales without losing visibility.
+  </p>
+
+  <div class="stats avoid-break">
+    <div class="stat"><div class="k">ITIL practices</div><div class="v">12</div></div>
+    <div class="stat"><div class="k">Built-in reports</div><div class="v">30+</div></div>
+    <div class="stat"><div class="k">Permissions</div><div class="v">100+</div></div>
+    <div class="stat"><div class="k">Integrated modules</div><div class="v">15+</div></div>
+  </div>
+
+  <div class="callout callout--brand avoid-break">
+    <h4>Who this is for</h4>
+    <p>
+      Internal IT organisations, shared-service operations teams, managed service providers,
+      and any business whose service quality is a competitive asset. Zentra is built to
+      handle the depth of an enterprise — and the speed of a modern support team.
+    </p>
+  </div>
+
+  <!-- ─── Product overview ─── -->
+  <div class="section-kicker" style="margin-top:32px;">02 · Product overview</div>
+  <div class="section-rule"></div>
+  <h2 style="margin-top:0;">What Zentra does, and the problems it solves.</h2>
+
+  <p>
+    Zentra is a unified IT service management platform that handles every stage of the
+    service lifecycle on the same record of truth. Where many organisations stitch together
+    a ticketing tool, a CMDB, a change-board spreadsheet, an asset register, a knowledge
+    wiki, and a manual approvals chain, Zentra brings all of these into one coherent
+    operation — without forcing teams to compromise on depth.
+  </p>
+
+  <h3>The problems Zentra solves</h3>
+  <ul class="checks">
+    <li><strong>Slow, inconsistent ticket handling</strong> — agents lose time switching tools, re-typing context, and chasing approvals.</li>
+    <li><strong>Lack of visibility into SLA risk</strong> — breaches are noticed after the fact, not before.</li>
+    <li><strong>Disconnected assets and operations</strong> — incidents reference systems no one can trace; changes touch infrastructure no one mapped.</li>
+    <li><strong>Manual approval and routing</strong> — change boards, escalation matrices, and intake rules live in people's heads or in unreviewed spreadsheets.</li>
+    <li><strong>Reporting that can't keep up</strong> — leadership reaches for monthly counts, not real-time operational signal.</li>
+    <li><strong>Governance without evidence</strong> — audit trails are reconstructed in retrospect, not captured by the system.</li>
+  </ul>
+
+  <p>
+    Zentra is designed around these gaps. Every feature in the platform exists to either
+    capture work faster, route it more intelligently, resolve it with less friction, or
+    govern it with stronger evidence — and to make leadership's view of service quality
+    something they can trust at a glance.
+  </p>
+
+  <!-- ─── Key business value ─── -->
+  <div class="page-break"></div>
+  <div class="section-kicker">03 · Key business value</div>
+  <div class="section-rule"></div>
+  <h2 style="margin-top:0;">What the business gets in return.</h2>
+
+  <div class="grid-2">
+    <div class="card">
+      <span class="tag">01 · Service delivery</span>
+      <h4>Faster, more consistent resolution</h4>
+      <p>AI-assisted intake, knowledge surfacing, saved replies, and a keyboard-first agent
+        console push every minute back into customer-facing work.</p>
+    </div>
+    <div class="card">
+      <span class="tag">02 · SLA &amp; control</span>
+      <h4>Breach risk surfaced before it breaches</h4>
+      <p>Per-priority SLAs with business calendars, pause/resume on hold states, and a live
+        operations console give floor leads minutes — not days — to intervene.</p>
+    </div>
+    <div class="card">
+      <span class="tag">03 · Governance</span>
+      <h4>Audit-grade automation and approvals</h4>
+      <p>Every rule, every approval, every state change is captured in an append-only audit
+        log — turning your service motion into evidence regulators and auditors will accept.</p>
+    </div>
+    <div class="card">
+      <span class="tag">04 · Asset control</span>
+      <h4>Assets that earn their keep</h4>
+      <p>Hardware, software, SaaS, and licenses on one ledger with real relationships —
+        so every change knows what it touches and every incident knows what it depends on.</p>
+    </div>
+    <div class="card">
+      <span class="tag">05 · Workflow efficiency</span>
+      <h4>Automation that removes the busywork</h4>
+      <p>Intake routing, escalations, approvals, and integration actions run automatically —
+        with every step recorded and every override traceable.</p>
+    </div>
+    <div class="card">
+      <span class="tag">06 · Visibility</span>
+      <h4>Reporting leaders can actually trust</h4>
+      <p>Live dashboards, scheduled exports, leaderboards, and a curated report library
+        replace the weekly spreadsheet ritual with operational signal.</p>
+    </div>
+    <div class="card">
+      <span class="tag">07 · Accountability</span>
+      <h4>Process maturity, by default</h4>
+      <p>ITIL 4 practices ship configured — incident, request, problem, change, and KB on
+        the same record-of-truth, with role-based access mapped to real organisational reality.</p>
+    </div>
+    <div class="card">
+      <span class="tag">08 · Scale</span>
+      <h4>A platform that grows with the operation</h4>
+      <p>Multi-team routing, custom roles, custom fields, custom statuses, and outbound
+        webhooks let Zentra adapt to the shape of any service organisation.</p>
+    </div>
+  </div>
+
+  <!-- ─── Core features ─── -->
+  <div class="page-break"></div>
+  <div class="section-kicker">04 · Core features &amp; modules</div>
+  <div class="section-rule"></div>
+  <h2 style="margin-top:0;">Everything an enterprise service operation needs, integrated.</h2>
+
+  <p class="lede">
+    Zentra ships with the full ITIL practice set out of the box. Every module is
+    integrated against a common data model — so a change knows its CIs, an incident
+    knows its problem, and a request knows its catalog item.
+  </p>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Service Desk</div>
+    <h3>Service Desk &amp; Ticketing</h3>
+    <p>
+      A modern, keyboard-first ticketing experience with multi-channel intake (email,
+      portal, agent UI, API), saved filtered views, bulk actions, ticket merging, watchers,
+      internal notes, AI-generated summaries, customer history, and a full conversation
+      timeline. Every ticket carries triage controls (priority, severity, impact, urgency),
+      SLA deadlines, and escalation history.
+    </p>
+    <p><strong>Why it matters:</strong> agents spend their time resolving — not navigating,
+      reformatting, or re-typing. The result is faster first response, higher first-touch
+      resolution, and a quieter inbox by Friday.</p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Incidents</div>
+    <h3>Incident Management</h3>
+    <p>
+      A dedicated incident track with severity grades (sev1–sev4), assignable incident
+      commander, real-time presence, video bridge integration (Zoom · Teams · Google Meet
+      · Webex), structured post-incident updates, and a major-incident command room.
+      Incidents link to problems, changes, assets, configuration items, and the source
+      ticket — full context, one click away.
+    </p>
+    <p><strong>Why it matters:</strong> when something is on fire, coordination is the
+      bottleneck — not effort. Zentra turns major incidents from chaotic phone trees
+      into a controlled, recorded operation with clear ownership.</p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Service requests</div>
+    <h3>Service Request Management</h3>
+    <p>
+      A configurable service catalog with category groupings, visibility rules (public /
+      internal), per-item approval requirements, and a complete request-to-fulfillment
+      workflow including fulfillment tasks, approvals, and status history. Requests can
+      be raised from the customer portal or by agents on behalf of users.
+    </p>
+    <p><strong>Why it matters:</strong> standard work — onboarding, access requests,
+      software installs, equipment moves — becomes a documented, repeatable, auditable
+      service rather than a thread of emails.</p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Problems</div>
+    <h3>Problem Management</h3>
+    <p>
+      Structured problem records with root-cause fields, workaround documentation, and
+      explicit links to the recurring incidents and tickets they explain. Problem status
+      moves from open to under-investigation to resolved with full audit history.
+    </p>
+    <p><strong>Why it matters:</strong> stop solving the same incident twenty times.
+      Zentra connects symptoms to causes and gives engineering teams a real surface
+      to invest in permanent fixes.</p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Changes</div>
+    <h3>Change Management</h3>
+    <p>
+      Standard, normal, and emergency change types with structured rollback plans, real
+      Change Advisory Board (CAB) groups, multi-step approvals, schedule conflict detection
+      against other planned changes, and a rollback-used flag for post-implementation review.
+      Every change links to its affected CIs and to the assets they sit on.
+    </p>
+    <p><strong>Why it matters:</strong> change is the most common source of unplanned
+      downtime. Zentra puts a governance perimeter around every change — without
+      slowing the routine ones down.</p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Assets &amp; CMDB</div>
+    <h3>Asset Management and CMDB</h3>
+    <p>
+      Hardware, software, configuration items, SaaS subscriptions, software licenses, and
+      contracts — all with real configuration-item relationships, lifecycle states (received,
+      deployed, in-use, retired, disposed), inventory locations, financial details, and
+      renewal tracking. Includes a discovery-sync framework, CSV import, and renewal alerts.
+    </p>
+    <p><strong>Why it matters:</strong> incidents reference real systems, changes reference
+      real CIs, procurement decisions reference real usage. The CMDB turns from a stale
+      inventory into operational truth.</p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Approvals</div>
+    <h3>Approval Engine</h3>
+    <p>
+      A flexible multi-step approval engine with parallel and sequential modes, configurable
+      minimum-approver quorums, expiration windows, escalation chains, and full
+      ApprovalEvent audit history. Used by Changes, Service Requests, and any record that
+      benefits from a structured sign-off.
+    </p>
+    <p><strong>Why it matters:</strong> approvals stop being chased over Slack and start
+      being captured as governance evidence — with clear ownership and clear deadlines.</p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Knowledge</div>
+    <h3>Knowledge Base</h3>
+    <p>
+      A first-class knowledge base with categories, draft / in-review / approved workflow,
+      public / internal visibility, version control, and a separate public search endpoint
+      for customer-facing portals. Articles surface inside the agent console at the moment
+      of work.
+    </p>
+    <p><strong>Why it matters:</strong> the second time a ticket is solved is faster than
+      the first — but only if the answer is captured. Zentra makes that capture an
+      explicit part of the workflow.</p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Automation</div>
+    <h3>Automation Platform</h3>
+    <p>
+      A no-code rule engine with structured triggers (ticket events, schedule, lifecycle
+      transitions), AND/OR conditions over any ticket field or computed property, and a
+      rich action catalog (assignment, status changes, notifications, tags, approvals,
+      outbound webhooks, linked-record creation, custom-field updates, and more). Every
+      run is recorded with applied / skipped / failed state per action for full traceability.
+    </p>
+    <p><strong>Why it matters:</strong> rules that previously lived in shift handovers
+      are now captured, testable, and audited — and the team can change them without
+      a vendor consultant.</p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · AI</div>
+    <h3>AI and Intelligence</h3>
+    <p>
+      OpenAI-powered intake classification, AI auto-resolution for high-confidence tickets,
+      reply polishing for agent drafts, AI-generated ticket summaries, and a copilot
+      surface on the ticket detail page. AI usage is governed and auditable — never a
+      black box.
+    </p>
+    <p><strong>Why it matters:</strong> AI handles the repetitive and the obvious so the
+      team can focus on the work that genuinely needs human judgement.</p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Reports</div>
+    <h3>Reporting and Analytics</h3>
+    <p>
+      Thirty-plus curated reports across SLA compliance, agent leaderboards, ticket aging,
+      first-contact resolution, channel mix, and trend analysis. Custom report views,
+      scheduled exports, and Excel / CSV export are built in. Insight dashboards surface
+      service-health, asset-health, and ticket-volume signal at a glance.
+    </p>
+    <p><strong>Why it matters:</strong> service quality becomes a metric you can defend
+      to the board — not a feeling you have on Monday mornings.</p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Dashboards</div>
+    <h3>Operations Dashboards</h3>
+    <p>
+      Pre-built dashboards for Ops Command Center, Quality &amp; SLA Monitor, Agent
+      Performance, and Manager Summary — with a customizer that lets every leader build
+      their own. Real-time updates over a live event stream mean numbers are current,
+      not yesterday's.
+    </p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Notifications</div>
+    <h3>Notifications</h3>
+    <p>
+      A unified template-driven notification system across email and in-app channels,
+      with per-event templates, follower / watcher subscriptions, and configurable
+      defaults for assignments, escalations, SLA breaches, renewals, and approvals.
+    </p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Routing</div>
+    <h3>Teams and Intelligent Routing</h3>
+    <p>
+      Teams, queues, and policy-driven routing — round-robin, least-loaded, skill-based,
+      and "smart" (combining workload, expertise, and SLA risk) — with per-team
+      configuration and shift-aware availability.
+    </p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Customers</div>
+    <h3>Customers, Organizations, and Entitlements</h3>
+    <p>
+      A CRM-grade view of every requester: customer entity, parent organisation, support
+      tier, VIP flag, contract scope, and full history. Service entitlements drive SLA,
+      priority caps, and routing scope per organisation.
+    </p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Customization</div>
+    <h3>Admin, Customization, and Configuration</h3>
+    <p>
+      Custom ticket types, custom statuses, custom fields, a visual form builder, custom
+      roles, and a one-hundred-plus permission catalog — all editable by admins at
+      runtime, no engineering team required.
+    </p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Governance</div>
+    <h3>Audit Log and Governance</h3>
+    <p>
+      Every privileged action — every assignment, every status change, every rule
+      execution, every approval response — is captured in an append-only audit log with
+      actor, target, before/after values, and timestamp. Exportable to JSON or CSV.
+    </p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Email intake</div>
+    <h3>Email Integration</h3>
+    <p>
+      Inbound email via SendGrid Inbound Parse or IMAP, with full attachment handling,
+      thread reconstruction by Message-ID, spam scoring, quarantine workflow, and intake
+      routing rules. Outbound replies are threaded back to the original conversation.
+    </p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Customer portal</div>
+    <h3>Customer Self-Service Portal</h3>
+    <p>
+      A polished portal where end-users can register, raise tickets and requests, track
+      progress, exchange messages with agents, browse the public knowledge base, and
+      view their own SLA status — keeping low-effort questions out of the agent inbox.
+    </p>
+  </div>
+
+  <div class="module avoid-break">
+    <div class="sub">Module · Monitoring</div>
+    <h3>System Monitoring</h3>
+    <p>
+      A built-in admin monitoring console that surfaces the health of the API replicas,
+      database, job queue, scheduled background workers, and upstream providers —
+      so operations teams can verify the platform itself is healthy before they pick up
+      the next ticket.
+    </p>
+  </div>
+
+  <!-- ─── Automation deep dive ─── -->
+  <div class="page-break"></div>
+  <div class="section-kicker">05 · Automation &amp; intelligence</div>
+  <div class="section-rule"></div>
+  <h2 style="margin-top:0;">Work that runs itself, with the audit trail to prove it.</h2>
+
+  <p>
+    Zentra treats automation as a first-class part of the operation — not a side panel.
+    Every routine action a team currently does by hand can be encoded as a rule, governed
+    by conditions, and recorded in an audit log. The result is a service operation that
+    scales without adding headcount in proportion to volume.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Capability</th><th>What it does</th><th>Business outcome</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Intake routing</strong></td>
+        <td>Categorises and routes inbound tickets by keyword, domain, mailbox, requester profile, support tier, and channel.</td>
+        <td>Right team, right priority, in seconds — not after the first read.</td>
+      </tr>
+      <tr>
+        <td><strong>AI classification</strong></td>
+        <td>OpenAI-driven category and priority prediction on every inbound ticket.</td>
+        <td>Faster triage, fewer mis-routes, more consistent SLA assignment.</td>
+      </tr>
+      <tr>
+        <td><strong>AI auto-resolution</strong></td>
+        <td>For high-confidence tickets, AI drafts and (optionally) sends a complete resolution.</td>
+        <td>Tier-zero deflection on low-effort, repetitive questions.</td>
+      </tr>
+      <tr>
+        <td><strong>Workflow rules</strong></td>
+        <td>Trigger / condition / action chains across ticket, incident, change, and request events.</td>
+        <td>Standard work runs itself; humans focus on judgement calls.</td>
+      </tr>
+      <tr>
+        <td><strong>Escalation engine</strong></td>
+        <td>Time-based escalations, severity escalations, SLA-breach escalations, and approval-overdue escalations.</td>
+        <td>Nothing falls through the cracks — even on the worst shift.</td>
+      </tr>
+      <tr>
+        <td><strong>Approval automation</strong></td>
+        <td>Multi-step, parallel, sequential, and quorum-based approvals with expiry and escalation chains.</td>
+        <td>Change boards stop being calendar bottlenecks.</td>
+      </tr>
+      <tr>
+        <td><strong>Outbound webhooks</strong></td>
+        <td>HMAC-signed event delivery to Slack, Teams, PagerDuty, Jira, data lakes, and custom systems.</td>
+        <td>One source of truth, many destinations — without integration work.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout--accent avoid-break">
+    <h4>Every rule, every run, fully recorded</h4>
+    <p>Zentra captures every rule execution with applied / skipped / failed state per action,
+      the trigger that fired it, and the entity it ran against. Automation becomes evidence,
+      not magic.</p>
+  </div>
+
+  <!-- ─── Reporting & visibility ─── -->
+  <div class="section-kicker" style="margin-top:32px;">06 · Reporting &amp; visibility</div>
+  <div class="section-rule"></div>
+  <h2 style="margin-top:0;">Operational signal, not weekly spreadsheets.</h2>
+
+  <p>
+    Service quality is only as real as the leadership team's view of it. Zentra ships with
+    curated dashboards for front-line operations, SLA governance, agent performance, and
+    executive summary — and a custom report builder for everything else.
+  </p>
+
+  <div class="grid-2">
+    <div class="card">
+      <span class="tag">Operations</span>
+      <h4>Ops Command Center</h4>
+      <p>Real-time queue depth, breach-risk alerts, team load, and unassigned-urgent counts in one console.</p>
+    </div>
+    <div class="card">
+      <span class="tag">SLA &amp; quality</span>
+      <h4>SLA Monitor</h4>
+      <p>Compliance by priority, category, team, and channel. Breach counts, at-risk volume, and trend analysis.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Performance</span>
+      <h4>Agent Leaderboard</h4>
+      <p>Resolve volume, average time-to-resolve, first-touch resolution rate, and CSAT-ready data per agent.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Executive</span>
+      <h4>Manager Summary</h4>
+      <p>One-screen executive view of service health, productivity trends, satisfaction signals, and asset state.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Insights</span>
+      <h4>Service-health analytics</h4>
+      <p>Linked-asset health, problem hotspots, recurring-incident clusters, and root-cause visibility.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Export</span>
+      <h4>Scheduled &amp; on-demand exports</h4>
+      <p>Every report exports to Excel or CSV; schedules deliver them to inboxes on the cadence leadership wants.</p>
+    </div>
+  </div>
+
+  <!-- ─── Asset & operational control ─── -->
+  <div class="page-break"></div>
+  <div class="section-kicker">07 · Asset &amp; operational control</div>
+  <div class="section-rule"></div>
+  <h2 style="margin-top:0;">Knowing what you own — and what it depends on.</h2>
+
+  <p>
+    Most ITSM tools treat assets as an afterthought. Zentra treats them as the substrate
+    of every operation. Hardware, software, SaaS subscriptions, licenses, and contracts are
+    all first-class records, with real configuration-item relationships and lifecycle states.
+  </p>
+
+  <h3>What you get</h3>
+  <ul>
+    <li><strong>Asset lifecycle visibility</strong> — pending receipt, received, deployed, in use, retired, returned, disposed. Every stage is captured; every transition is logged.</li>
+    <li><strong>Real CMDB relationships</strong> — assets and configuration items link to each other and to the changes, incidents, problems, and requests that touch them.</li>
+    <li><strong>Ownership, location, and financials</strong> — every asset carries its owner, location, cost, vendor, warranty, and renewal date.</li>
+    <li><strong>Software license and SaaS subscription tracking</strong> — seat counts, expiry dates, renewal alerts, and over-utilisation warnings keep procurement honest and budgets clean.</li>
+    <li><strong>Discovery sync</strong> — assets can be synced from external discovery connectors or imported by CSV, with validation and a re-runnable job framework.</li>
+    <li><strong>Change conflict detection</strong> — when a change is planned against a CI, Zentra surfaces overlapping changes and dependent systems before approval.</li>
+  </ul>
+
+  <div class="pull avoid-break">
+    Every change knows what it touches. Every incident knows what it depends on.
+    Every renewal lands on the right calendar.
+  </div>
+
+  <!-- ─── Differentiators ─── -->
+  <div class="section-kicker" style="margin-top:32px;">08 · Why Zentra stands out</div>
+  <div class="section-rule"></div>
+  <h2 style="margin-top:0;">Built for the depth and the speed of a real service operation.</h2>
+
+  <div class="grid-2">
+    <div class="card">
+      <span class="tag">Integrated, not stitched</span>
+      <h4>One platform, one data model</h4>
+      <p>Incident, request, problem, change, asset, and knowledge on a single record of truth — not separate apps connected by integrations.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Modern stack</span>
+      <h4>Enterprise-grade architecture</h4>
+      <p>Bun + TypeScript backend, React + shadcn UI, PostgreSQL with Prisma, pg-boss for jobs, multi-replica Caddy load balancing. Built for scale, observability, and operability.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Live</span>
+      <h4>Real-time operations</h4>
+      <p>Server-sent events push every meaningful change to every open agent screen — no refresh, no stale data, no surprises.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Configurable</span>
+      <h4>Configuration-as-data</h4>
+      <p>Custom ticket types, statuses, fields, roles, and permissions — all editable at runtime. No vendor consultancy lock-in.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Audit-grade</span>
+      <h4>Governance built in</h4>
+      <p>Append-only audit log on every privileged action; full execution log on every automation rule; full event log on every approval.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Deployable anywhere</span>
+      <h4>Self-host or managed</h4>
+      <p>One-script deploy on CentOS/RHEL with systemd-managed replicas behind Caddy, automatic TLS, and graceful zero-downtime restarts.</p>
+    </div>
+  </div>
+
+  <!-- ─── Comparison table ─── -->
+  <h3 style="margin-top:32px;">Zentra against the traditional ITSM model</h3>
+  <p style="color:var(--ink-soft);">
+    Legacy ITSM platforms were built for an era of heavyweight implementations and rigid
+    vendor-managed configuration. The table below contrasts that approach with the way
+    Zentra is built — not as a critique of any specific product, but as an honest
+    side-by-side on the dimensions that decide whether the platform will still serve
+    the operation three years from now.
+  </p>
+
+  <table class="compare avoid-break">
+    <thead>
+      <tr>
+        <th style="width:25%;">Dimension</th>
+        <th style="width:37.5%;">Traditional / legacy ITSM</th>
+        <th style="width:37.5%;">Zentra ITSM</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Architecture</strong></td>
+        <td>Multiple bolted-together modules (ticketing, CMDB, change board, KB) with their own data stores and brittle integrations.</td>
+        <td><span class="hl">One data model across the full ITIL lifecycle.</span> Tickets, incidents, requests, problems, changes, assets, and KB on a single record-of-truth.</td>
+      </tr>
+      <tr>
+        <td><strong>Time to first value</strong></td>
+        <td>Three- to twelve-month implementation projects; vendor or partner consultancy required to "go live".</td>
+        <td><span class="hl">Operational in days.</span> One-script installer; ITIL practices configured by default; customisation editable at runtime.</td>
+      </tr>
+      <tr>
+        <td><strong>Customisation</strong></td>
+        <td>Configuration locked behind vendor consultants, expensive change requests, and version-gated upgrade paths.</td>
+        <td><span class="hl">Configuration-as-data.</span> Custom ticket types, statuses, fields, forms, roles, and 100+ permissions — all editable by admins at runtime.</td>
+      </tr>
+      <tr>
+        <td><strong>Total cost of ownership</strong></td>
+        <td>License + per-seat fees + integration vendor + implementation partner + annual customisation hours.</td>
+        <td><span class="hl">Self-host or managed</span> on infrastructure you already run; no integration partner gating; no consultancy lock-in.</td>
+      </tr>
+      <tr>
+        <td><strong>User experience</strong></td>
+        <td>Dated form-and-table UI; full-page refreshes; clunky navigation between modules.</td>
+        <td><span class="hl">Modern keyboard-first console</span> with shadcn-grade UI, live SSE updates, command palette, and a real customer portal.</td>
+      </tr>
+      <tr>
+        <td><strong>Real-time operations</strong></td>
+        <td>Refresh-driven dashboards; data is "true as of an hour ago".</td>
+        <td><span class="hl">Server-sent events</span> push every meaningful change to every open screen — queues, banners, presence — without polling.</td>
+      </tr>
+      <tr>
+        <td><strong>AI capabilities</strong></td>
+        <td>Bolt-on add-on (separately priced) or absent. Generally limited to off-platform chatbots.</td>
+        <td><span class="hl">Native AI in the workflow.</span> Inbound classification, AI auto-resolution, reply polishing, ticket summaries — governed and auditable.</td>
+      </tr>
+      <tr>
+        <td><strong>Automation</strong></td>
+        <td>Opaque rule editors with limited visibility into what fired, when, and why.</td>
+        <td><span class="hl">Audit-grade automation.</span> Trigger / condition / action chains with per-action applied / skipped / failed execution records.</td>
+      </tr>
+      <tr>
+        <td><strong>Approval &amp; change governance</strong></td>
+        <td>Light approval workflow; CAB is usually an external calendar; conflict detection is manual.</td>
+        <td><span class="hl">Real CAB</span> with multi-step approvals, parallel/sequential, quorum &amp; expiry, schedule-conflict detection, rollback plans.</td>
+      </tr>
+      <tr>
+        <td><strong>Asset &amp; CMDB depth</strong></td>
+        <td>Flat asset inventory; "CMDB" often shipped as a separate, paid module.</td>
+        <td><span class="hl">First-class CMDB</span> with real CI relationships, lifecycle states, discovery sync, SaaS &amp; license tracking, renewal alerts.</td>
+      </tr>
+      <tr>
+        <td><strong>Reporting</strong></td>
+        <td>Report builder paywalled or limited; export gated; live dashboards rare.</td>
+        <td><span class="hl">30+ curated reports</span> + custom views + Excel/CSV export + real-time dashboards (Ops, SLA, Agent, Manager).</td>
+      </tr>
+      <tr>
+        <td><strong>Audit &amp; governance</strong></td>
+        <td>Audit trail partial; coverage varies by module; reconstruction in retrospect.</td>
+        <td><span class="hl">Append-only audit log</span> on every privileged action; rule execution log; approval event history; exportable.</td>
+      </tr>
+      <tr>
+        <td><strong>Extensibility</strong></td>
+        <td>Paid connector marketplace; bespoke integrations require vendor SDK and certification.</td>
+        <td><span class="hl">HMAC-signed outbound webhooks</span>, portal APIs, and the automation engine — clean integration paths without bespoke code.</td>
+      </tr>
+      <tr>
+        <td><strong>Data ownership</strong></td>
+        <td>Vendor-hosted only; data residency tied to provider regions; export is a project.</td>
+        <td><span class="hl">Self-host on your infrastructure.</span> Every record inside the organisation's own perimeter; PostgreSQL backups under your control.</td>
+      </tr>
+      <tr>
+        <td><strong>Scalability</strong></td>
+        <td>Vertical scale; restart windows; upgrades are events.</td>
+        <td><span class="hl">Horizontal replicas</span> behind a least-connection load balancer; rolling restarts; live event stream stays consistent.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout--accent avoid-break">
+    <h4>The summary</h4>
+    <p>Zentra is built for organisations that need the depth of an enterprise ITSM
+      platform without the implementation overhead, the vendor lock-in, or the
+      compromised user experience that the older generation made buyers accept.</p>
+  </div>
+
+  <!-- ─── Use cases ─── -->
+  <div class="page-break"></div>
+  <div class="section-kicker">09 · Ideal use cases</div>
+  <div class="section-rule"></div>
+  <h2 style="margin-top:0;">Where Zentra delivers the most value.</h2>
+
+  <table>
+    <thead>
+      <tr><th>Audience</th><th>The pain</th><th>How Zentra answers</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Internal IT support teams</strong></td>
+        <td>Backlog, SLA risk, agent utilisation, knowledge loss.</td>
+        <td>One console, live breach signal, AI-assisted triage, knowledge surfaced in the same view agents already work in.</td>
+      </tr>
+      <tr>
+        <td><strong>IT operations &amp; SRE</strong></td>
+        <td>Change risk, incident coordination, on-call hand-off.</td>
+        <td>CAB groups, conflict detection, rollback plans, a major-incident command room with commander &amp; bridge integration.</td>
+      </tr>
+      <tr>
+        <td><strong>Managed service providers</strong></td>
+        <td>Multi-customer operation, per-client SLAs, billing-ready reporting.</td>
+        <td>Organisations &amp; service entitlements; shared automation libraries; per-organisation analytics; complete audit history.</td>
+      </tr>
+      <tr>
+        <td><strong>Enterprise operations &amp; process owners</strong></td>
+        <td>Process integrity, audit evidence, scope drift.</td>
+        <td>ITIL practices configured by default; append-only audit logs; 100+ scoped permissions; configuration-as-data.</td>
+      </tr>
+      <tr>
+        <td><strong>Asset, procurement &amp; finance</strong></td>
+        <td>SaaS sprawl, missed renewals, over-licensing.</td>
+        <td>A living inventory with contracts, owners, expiry alerts, and seat-utilisation visibility.</td>
+      </tr>
+      <tr>
+        <td><strong>Service-focused organisations</strong></td>
+        <td>Maturing from reactive support to a real service operation.</td>
+        <td>The full ITIL practice set out of the box — without a six-month implementation project.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ─── Why adopt ─── -->
+  <div class="section-kicker" style="margin-top:32px;">10 · Why an organisation should adopt Zentra</div>
+  <div class="section-rule"></div>
+  <h2 style="margin-top:0;">The case for change.</h2>
+
+  <p>
+    The cost of running a service organisation on a stitched-together set of tools is rarely
+    on the invoice. It shows up in slower resolutions, missed SLAs, lost knowledge,
+    silent compliance gaps, and a leadership team that doesn't fully trust the dashboard.
+    Zentra changes that calculus.
+  </p>
+
+  <h3>Business efficiency</h3>
+  <p>
+    Intake routing, AI classification, and automation rules remove the routine work from
+    the agent's plate — typically the same work that consumes the largest share of their day.
+    Time saved goes back into the cases that genuinely need human judgement.
+  </p>
+
+  <h3>Improved accountability</h3>
+  <p>
+    Every action carries an actor, a timestamp, and a before/after state. Approvals carry
+    explicit responses with rationale. Automation carries execution records. The audit
+    question becomes "show me" rather than "let me check".
+  </p>
+
+  <h3>Reduced downtime</h3>
+  <p>
+    Real CMDB relationships, conflict detection on changes, and a major-incident command
+    room shorten the path from event to resolution and reduce the number of self-inflicted
+    incidents introduced by uncontrolled change.
+  </p>
+
+  <h3>Service quality &amp; user experience</h3>
+  <p>
+    A polished customer portal, threaded email conversations, AI-polished responses, and
+    knowledge surfacing inside the agent console raise the perceived quality of service
+    without raising the agent count.
+  </p>
+
+  <h3>Process maturity</h3>
+  <p>
+    ITIL 4 practices ship configured. Custom ticket types, statuses, fields, and roles
+    let the platform mirror the organisation that already exists — without a six-month
+    consultancy engagement.
+  </p>
+
+  <h3>Easier scaling of support operations</h3>
+  <p>
+    Multi-team routing, custom workflows, outbound webhooks, and curated reports mean
+    Zentra scales with the organisation — from a single shared inbox to a multi-region
+    operation with hundreds of agents.
+  </p>
+
+  <!-- ─── Deployment confidence ─── -->
+  <div class="page-break"></div>
+  <div class="section-kicker">11 · Deployment &amp; adoption confidence</div>
+  <div class="section-rule"></div>
+  <h2 style="margin-top:0;">Built to be deployed, operated, and trusted.</h2>
+
+  <p>
+    Zentra is designed for real operational use, not just demos. The platform is structured
+    for production from day one — and is shipped with the tooling, telemetry, and process
+    affordances enterprise IT teams expect.
+  </p>
+
+  <table>
+    <thead><tr><th>Concern</th><th>How Zentra answers</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Deployment</strong></td>
+        <td>A scripted, idempotent installer provisions PostgreSQL, runtime, N API replicas under systemd, and a Caddy reverse proxy with automatic TLS and HTTP/2 — typically in under an hour, on a CentOS / RHEL host.</td>
+      </tr>
+      <tr>
+        <td><strong>High availability</strong></td>
+        <td>API runs as multiple identical replicas behind a least-connection load balancer. Replicas restart automatically; the database is the only stateful tier; the job queue uses PostgreSQL itself.</td>
+      </tr>
+      <tr>
+        <td><strong>Observability</strong></td>
+        <td>Built-in admin monitoring console (API replicas, database, queue depth, scheduled jobs, providers); Sentry integration; full audit log; live SSE event stream.</td>
+      </tr>
+      <tr>
+        <td><strong>Security &amp; access</strong></td>
+        <td>Better Auth session model, role-based access control with 100+ scoped permissions, custom roles, audit logging on every privileged action.</td>
+      </tr>
+      <tr>
+        <td><strong>Customisation</strong></td>
+        <td>Custom ticket types, statuses, fields, roles, and permissions are all editable at runtime by admins. No vendor service engagement to change the shape of the platform.</td>
+      </tr>
+      <tr>
+        <td><strong>Extensibility</strong></td>
+        <td>Outbound webhooks (HMAC-signed), public-facing portal APIs, and a structured automation engine give integrations a clean path — without bespoke code.</td>
+      </tr>
+      <tr>
+        <td><strong>Data ownership</strong></td>
+        <td>Self-hosted deployment keeps every record inside the organisation's own infrastructure. No third-party data dependency for the core platform.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ─── Closing / CTA ─── -->
+  <div class="closing">
+    <div class="section-kicker" style="color:rgba(255,255,255,0.7);">12 · Next step</div>
+    <h2>Let's run Zentra against your operation.</h2>
+    <p>
+      Every service organisation is different. The fastest way to know whether Zentra is
+      the right fit for yours is to put real workloads in front of it — your inbound
+      channels, your team structure, your SLA policies, your change calendar — and see
+      what comes out the other side.
+    </p>
+    <p>
+      We'd welcome the conversation: a guided demo, a proof-of-concept on a single team,
+      or a structured pilot against an existing service. Each is structured to give you
+      decision-grade evidence — not a sales pitch.
+    </p>
+    <div class="cta-row">
+      <span class="cta cta--solid">→ Schedule a demo</span>
+      <span class="cta">→ Run a pilot</span>
+      <span class="cta">→ Talk to the product team</span>
+    </div>
+    <p style="margin-top:20px;color:rgba(255,255,255,0.6);font-size:9.5pt;">
+      Zentra ITSM · zentraitsm.com · A unified service management platform for teams that own outcomes.
+    </p>
+  </div>
+
+  <div class="pagefoot">
+    <span>Zentra ITSM · Product proposal</span>
+    <span>Confidential — for the intended recipient</span>
+  </div>
+
+</div><!-- /.doc -->
+</body>
+</html>

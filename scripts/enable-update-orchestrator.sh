@@ -182,6 +182,39 @@ else
   fi
 fi
 
+# ── 5b. Privileged replica-scaling helper ───────────────────────────────────
+# This is what lets Settings → Infrastructure scale API replicas live without
+# an SSH session. Mirrors the finalize helper pattern exactly.
+log "Installing privileged replica-scaling helper"
+REPL_HELPER_SRC="$APP_DIR/scripts/zentra-set-replicas.sh"
+REPL_HELPER_DST="/usr/local/sbin/zentra-set-replicas"
+REPL_SUDOERS_SRC="$APP_DIR/scripts/zentra-set-replicas.sudoers"
+REPL_SUDOERS_DST="/etc/sudoers.d/zentra-set-replicas"
+
+if [ ! -f "$REPL_HELPER_SRC" ]; then
+  warn "  skipping: $REPL_HELPER_SRC not found in this checkout"
+  warn "  (pull a release that ships the helper, or copy it manually)"
+elif [ -f "$REPL_HELPER_DST" ] && cmp -s "$REPL_HELPER_SRC" "$REPL_HELPER_DST" 2>/dev/null \
+     && [ -f "$REPL_SUDOERS_DST" ] && cmp -s "$REPL_SUDOERS_SRC" "$REPL_SUDOERS_DST" 2>/dev/null; then
+  ok "  already installed & up to date"
+else
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '  \033[1;35m[dry-run]\033[0m would install:\n'
+    printf '             %s -> %s (mode 0755 root:root)\n' "$REPL_HELPER_SRC" "$REPL_HELPER_DST"
+    printf '             %s -> %s (mode 0440 root:root, validated by visudo)\n' "$REPL_SUDOERS_SRC" "$REPL_SUDOERS_DST"
+  else
+    run "install -o root -g root -m 0755 '$REPL_HELPER_SRC' '$REPL_HELPER_DST'"
+    if visudo -cf "$REPL_SUDOERS_SRC" >/dev/null 2>&1; then
+      run "install -o root -g root -m 0440 '$REPL_SUDOERS_SRC' '$REPL_SUDOERS_DST'"
+      run "install -o root -g root -m 0644 /dev/null /var/log/zentra-replicas.log"
+      run "chown $APP_USER:$APP_GROUP /var/log/zentra-replicas.log"
+      ok "  replica-scaling helper + sudoers installed"
+    else
+      die "Refusing: $REPL_SUDOERS_SRC failed visudo validation"
+    fi
+  fi
+fi
+
 # ── 6. Restart (opt-in) ─────────────────────────────────────────────────────
 if [ "$DO_RESTART" -eq 1 ]; then
   log "Restarting replicas: systemctl restart '${SERVICE_PREFIX}@*'"
