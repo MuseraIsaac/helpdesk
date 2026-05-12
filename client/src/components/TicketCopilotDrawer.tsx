@@ -206,17 +206,19 @@ function DraftTab({ ticketId }: { ticketId: number }) {
 
 // ── Articles tab ─────────────────────────────────────────────────────────────
 
-function ArticlesTab({ query }: { query: string }) {
-  const trimmed = query.trim();
+function ArticlesTab({ subject, body }: { subject: string; body: string }) {
+  const trimmedSubject = subject.trim();
+  const trimmedBody    = body.trim();
+  const minLen = (trimmedSubject + " " + trimmedBody).trim().length;
 
   const { data: articles = [], isFetching, error } = useQuery<SuggestedArticle[]>({
-    queryKey:  ["copilot-kb", trimmed],
-    queryFn:   () => fetchSuggestions(trimmed),
-    enabled:   trimmed.length >= 3,
+    queryKey:  ["copilot-kb", trimmedSubject, trimmedBody],
+    queryFn:   () => fetchSuggestions({ subject: trimmedSubject, body: trimmedBody }),
+    enabled:   minLen >= 3,
     staleTime: 60_000,
   });
 
-  if (trimmed.length < 3) {
+  if (minLen < 3) {
     return (
       <p className="text-sm text-muted-foreground py-6 text-center">
         Not enough context to suggest articles yet.
@@ -347,12 +349,11 @@ export default function TicketCopilotDrawer({ ticket, open, onOpenChange }: Tick
   // 403 when the admin has switched off the corresponding feature.
   const summarizeEnabled = ticketSettings?.summarizeEnabled ?? true;
 
-  // Used by the Articles tab — concatenate the subject + first 800 chars of
-  // the body so the keyword search has enough signal without overwhelming.
-  const articleQuery = useMemo(() => {
-    const body = (ticket.body ?? "").slice(0, 800);
-    return `${ticket.subject ?? ""} ${body}`.trim();
-  }, [ticket.subject, ticket.body]);
+  // Used by the Articles tab — kept separate so the server can weight
+  // subject keywords much higher than body keywords (and gate candidate
+  // articles on the subject, which is what makes results topical).
+  const articleSubject = ticket.subject ?? "";
+  const articleBody    = useMemo(() => (ticket.body ?? "").slice(0, 800), [ticket.body]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -411,7 +412,7 @@ export default function TicketCopilotDrawer({ ticket, open, onOpenChange }: Tick
             </TabsContent>
 
             <TabsContent value="articles" className="mt-0">
-              <ArticlesTab query={articleQuery} />
+              <ArticlesTab subject={articleSubject} body={articleBody} />
             </TabsContent>
 
             <TabsContent value="similar" className="mt-0">

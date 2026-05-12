@@ -86,6 +86,12 @@ export interface NavSection {
   collapsible?: boolean;
   /** Initial expanded state when collapsible is true. Default: false. */
   defaultExpanded?: boolean;
+  /**
+   * Accent colour used in dark mode for the section's icons, active bar,
+   * label stripe, and hover edge. Any valid CSS colour (hex, hsl, oklch).
+   * Light mode is unaffected — neutral palette only.
+   */
+  accent?: string;
 }
 
 // ── Navigation structure ───────────────────────────────────────────────────────
@@ -99,6 +105,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: "service-desk",
     label: "Service Desk",
+    accent: "#818cf8", // indigo-400
     items: [
       {
         id: "dashboard",
@@ -121,6 +128,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: "itsm",
     label: "ITSM",
+    accent: "#34d399", // emerald-400
     items: [
       {
         id: "requests",
@@ -213,6 +221,7 @@ export const NAV_SECTIONS: NavSection[] = [
     id: "contacts",
     label: "Contacts",
     permission: "contacts.view",
+    accent: "#fb7185", // rose-400
     items: [
       {
         id: "customers",
@@ -235,6 +244,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: "knowledge",
     label: "Knowledge",
+    accent: "#fbbf24", // amber-400
     items: [
       {
         id: "kb",
@@ -258,6 +268,7 @@ export const NAV_SECTIONS: NavSection[] = [
     id: "analytics",
     label: "Analytics",
     permission: "reports.view",
+    accent: "#38bdf8", // sky-400
     items: [
       {
         id: "reports",
@@ -278,6 +289,7 @@ export const NAV_SECTIONS: NavSection[] = [
     id: "administration",
     label: "Administration",
     roles: ["admin"],
+    accent: "#c084fc", // purple-400
     items: [
       {
         id: "admin-hub",
@@ -295,6 +307,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: "workspace",
     label: "Workspace",
+    accent: "#2dd4bf", // teal-400
     items: [
       {
         id: "trash",
@@ -313,6 +326,7 @@ export const NAV_SECTIONS: NavSection[] = [
     id: "demo-data",
     label: "Developer",
     roles: ["admin"],
+    accent: "#f472b6", // pink-400
     items: [
       {
         id:    "demo-data",

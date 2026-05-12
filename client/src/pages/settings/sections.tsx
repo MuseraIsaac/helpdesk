@@ -2531,7 +2531,41 @@ export function IntegrationsSection() {
   const { handleSubmit, reset, control, register, watch, formState: { isDirty, dirtyFields, errors } } =
     useForm<IntegrationsSettings>({ resolver: zodResolver(integrationsSettingsSchema), defaultValues: integrationsSettingsSchema.parse({}) });
 
-  useEffect(() => { if (data) reset(data); }, [data, reset]);
+  // Re-parse the server payload through the schema before resetting the
+  // form. Per-field `.catch()` on the enum fields in the schema coerces any
+  // stale/legacy/null values (from before the current enum set was
+  // finalised) to safe defaults — so the form is guaranteed to start in a
+  // valid state, even if the stored DB row contains values the current
+  // enum no longer accepts. Without this, a single legacy value (e.g.
+  // `inboundEmailMode: null` from an older install) would silently block
+  // every save with "Invalid option".
+  useEffect(() => {
+    if (!data) return;
+    const safe = integrationsSettingsSchema.safeParse(data);
+    reset(safe.success ? safe.data : data);
+  }, [data, reset]);
+
+  // Flatten the (deeply nested) react-hook-form `errors` tree into a flat
+  // list so the user can scan every blocker at once. Without this, Zod
+  // validation failures (incomplete mailbox row, invalid From email on an
+  // outbound account, etc.) caused `handleSubmit` to silently swallow the
+  // submit and the Save button appeared dead. With this, the user gets a
+  // destructive banner naming the exact field(s) that need attention.
+  const errorList = useMemo(() => {
+    const out: { field: string; message: string }[] = [];
+    const walk = (obj: unknown, path: string[]) => {
+      if (!obj || typeof obj !== "object") return;
+      if ("message" in obj && typeof (obj as { message?: unknown }).message === "string") {
+        out.push({ field: path.join("."), message: (obj as { message: string }).message });
+        return;
+      }
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+        walk(v, [...path, k]);
+      }
+    };
+    walk(errors, []);
+    return out;
+  }, [errors]);
 
   const emailEnabled = watch("emailEnabled");
   const emailProvider = watch("emailProvider");
@@ -2562,24 +2596,46 @@ export function IntegrationsSection() {
     <SettingsFormShell
       title="Integrations"
       description="Connect email providers, Slack, and third-party services. API keys are stored encrypted and never echoed back."
-      onSubmit={handleSubmit((d) => {
-        // Send only fields the user actually edited. Without this, every save
-        // re-submits the whole form — including secret fields whose displayed
-        // value is the redaction placeholder (e.g. `••••••••`). Browser
-        // autofill, focus blur, or even a re-render can subtly mutate that
-        // placeholder, after which the server stops recognising it and
-        // overwrites the real stored secret. By restricting the payload to
-        // dirty fields the password is never touched unless the admin
-        // explicitly retyped it.
-        const diff = pickDirtyFields(d, dirtyFields);
-        if (Object.keys(diff).length === 0) return;
-        update.mutate(diff as typeof d);
-      })}
+      onSubmit={handleSubmit(
+        (d) => {
+          // Send only fields the user actually edited. Without this, every save
+          // re-submits the whole form — including secret fields whose displayed
+          // value is the redaction placeholder (e.g. `••••••••`). Browser
+          // autofill, focus blur, or even a re-render can subtly mutate that
+          // placeholder, after which the server stops recognising it and
+          // overwrites the real stored secret. By restricting the payload to
+          // dirty fields the password is never touched unless the admin
+          // explicitly retyped it.
+          const diff = pickDirtyFields(d, dirtyFields);
+          if (Object.keys(diff).length === 0) return;
+          update.mutate(diff as typeof d);
+        },
+        // onInvalid — bring the validation banner into view so a click on a
+        // blocked Save never feels like a no-op.
+        () => {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        },
+      )}
       isPending={update.isPending}
       isDirty={isDirty}
       error={update.error}
       isSuccess={update.isSuccess}
     >
+      {errorList.length > 0 && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/[0.04] p-3 space-y-1.5">
+          <p className="text-xs font-semibold text-destructive">
+            {errorList.length} field{errorList.length === 1 ? "" : "s"} need{errorList.length === 1 ? "s" : ""} attention before saving:
+          </p>
+          <ul className="space-y-0.5 text-[12px]">
+            {errorList.map((e, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <span className="font-mono text-[10px] text-destructive/80 shrink-0 mt-0.5">{e.field}</span>
+                <span className="text-destructive/90">{e.message}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <SettingsGroup title="Email">
         <SettingsSwitchRow label="Enable email integration" description="Send outbound replies via an email provider.">
           <Controller name="emailEnabled" control={control} render={({ field }) => (

@@ -3,7 +3,7 @@ import { requireAuth } from "../middleware/require-auth";
 import { validate } from "../lib/validate";
 import { parseId } from "../lib/parse-id";
 import { generateText } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { createOpenAI } from "@ai-sdk/openai";
 import { createReplySchema, polishReplySchema } from "core/schemas/replies.ts";
 import { htmlToText } from "../lib/html-to-text";
 import prisma from "../db";
@@ -16,6 +16,23 @@ import { emitTicketListEvent } from "../lib/ticket-list-events";
 import { getSection } from "../lib/settings";
 
 const router = Router({ mergeParams: true });
+
+/**
+ * Build a configured OpenAI model for the in-request AI features
+ * (summarize / polish / draft).
+ *
+ * Uses the API key + model id the admin saved in `/settings/integrations`,
+ * falling back to OPENAI_API_KEY env / "gpt-4o-mini" if the row is empty.
+ * The static `openai` import from `@ai-sdk/openai` only reads the env var,
+ * which is why the saved key was being ignored before this helper existed.
+ */
+async function getConfiguredAIModel() {
+  const integrations = await getSection("integrations");
+  const apiKey  = integrations.openaiApiKey || process.env.OPENAI_API_KEY || "";
+  const modelId = integrations.openaiModel  || "gpt-4o-mini";
+  const openai  = createOpenAI({ apiKey });
+  return { model: openai(modelId), apiKeyConfigured: !!apiKey };
+}
 
 // ── List replies ──────────────────────────────────────────────────────────────
 
@@ -371,8 +388,14 @@ router.post("/summarize", requireAuth, async (req, res) => {
     })
     .join("\n\n");
 
+  const { model, apiKeyConfigured } = await getConfiguredAIModel();
+  if (!apiKeyConfigured) {
+    res.status(400).json({ error: "OpenAI API key not configured. Set it in Settings → Integrations." });
+    return;
+  }
+
   const { text } = await generateText({
-    model: openai("gpt-5-nano"),
+    model,
     system:
       "You are a helpful assistant that summarizes support ticket conversations. " +
       "Provide a clear, concise summary that captures the customer's issue, any actions taken, and the current status. " +
@@ -407,8 +430,14 @@ router.post("/polish", requireAuth, async (req, res) => {
   const agentName = req.user.name;
   const customerName = ticket.senderName.split(" ")[0];
 
+  const { model, apiKeyConfigured } = await getConfiguredAIModel();
+  if (!apiKeyConfigured) {
+    res.status(400).json({ error: "OpenAI API key not configured. Set it in Settings → Integrations." });
+    return;
+  }
+
   const { text } = await generateText({
-    model: openai("gpt-5-nano"),
+    model,
     system:
       "You are a helpful writing assistant for a customer support team. " +
       "Improve the given reply for clarity, professional tone, and grammar. " +
@@ -465,8 +494,14 @@ router.post("/draft", requireAuth, async (req, res) => {
   const agentName = req.user.name;
   const customerName = ticket.senderName.split(" ")[0];
 
+  const { model, apiKeyConfigured } = await getConfiguredAIModel();
+  if (!apiKeyConfigured) {
+    res.status(400).json({ error: "OpenAI API key not configured. Set it in Settings → Integrations." });
+    return;
+  }
+
   const { text } = await generateText({
-    model: openai("gpt-5-nano"),
+    model,
     system:
       "You are a senior support engineer drafting a reply on behalf of an agent. " +
       "Write a clear, professional, friendly response that addresses the customer's " +

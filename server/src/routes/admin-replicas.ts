@@ -60,18 +60,22 @@ interface HelperStatus {
 }
 
 async function helperStatus(): Promise<HelperStatus> {
+  const appDir = process.env.UPDATE_APP_DIR || "/opt/zentra/app";
+  // Single recovery command surfaced to the operator in both failure modes.
+  // It's idempotent — safe to re-run if pieces are already in place.
+  const fix = `sudo bash ${appDir}/scripts/enable-update-orchestrator.sh`;
+
   const helperExists = await fs.access(HELPER_PATH).then(() => true).catch(() => false);
   if (!helperExists) {
     return {
       helperPath:   HELPER_PATH,
       helperExists: false,
       sudoNoPass:   false,
-      reason: `Privileged helper not installed at ${HELPER_PATH}. ` +
-              `Run: sudo bash scripts/enable-update-orchestrator.sh`,
+      reason: `Privileged helper not installed at ${HELPER_PATH}. Run on the host:\n  ${fix}`,
     };
   }
   // `sudo -n -l <cmd>` returns 0 iff the calling user can run that exact
-  // command without a password. We don't care about output.
+  // command without a password. We don't care about output, only exit code.
   const sudoNoPass = await execAsync("sudo", ["-n", "-l", HELPER_PATH])
     .then(() => true)
     .catch(() => false);
@@ -80,8 +84,8 @@ async function helperStatus(): Promise<HelperStatus> {
     helperExists: true,
     sudoNoPass,
     reason: sudoNoPass ? null
-      : `Sudo NOPASSWD entry for ${HELPER_PATH} is missing. ` +
-        `Run: sudo bash scripts/enable-update-orchestrator.sh`,
+      : `Helper is installed at ${HELPER_PATH} but the sudo NOPASSWD entry ` +
+        `at /etc/sudoers.d/zentra-set-replicas is missing or incorrect. Run on the host:\n  ${fix}`,
   };
 }
 
@@ -105,65 +109,95 @@ interface ReplicaState {
 }
 
 /**
- * Discover enabled systemd template instances. On a non-systemd host (dev
- * laptop, Docker without systemd) we degrade gracefully: report a single
- * "self" replica on $PORT and disable the apply button.
+ * Discover the state of each candidate replica port [base..base+max-1].
+ *
+ * We deliberately do NOT rely on `systemctl list-unit-files` here:
+ * template instances (zentra-api@3000.service, @3001.service, …) have no
+ * unit file on disk — only an enable-symlink under
+ * /etc/systemd/system/multi-user.target.wants/ — and many systemd versions
+ * omit those from `list-unit-files` output. The original implementation hit
+ * exactly this bug: a 2-replica install reported as 1.
+ *
+ * Instead, for each candidate port we run two cheap probes in parallel:
+ *   • `systemctl is-enabled zentra-api@<port>.service` — authoritative for
+ *     the "enabled" state (returns "enabled" / "disabled" / "static" / etc;
+ *     exits non-zero for missing/disabled, which we treat as not-enabled).
+ *   • HTTP GET 127.0.0.1:<port>/api/health — authoritative for "healthy".
+ *
+ * On a non-systemd host (dev laptop, Docker without systemd), both calls
+ * fail cleanly and we fall back to "1 self replica" so the UI still renders.
  */
 async function discoverReplicas(thisPort: number): Promise<ReplicaState> {
   const helper = await helperStatus();
 
-  // `systemctl list-unit-files` covers enabled-but-stopped units. We then
-  // intersect with `list-units` to learn the runtime ActiveState.
-  const enabledPorts = await listEnabledPorts();
+  // Probe every slot, not just the ones systemctl thinks exist. Cheap —
+  // each is-enabled call returns in ~5 ms and we run them concurrently.
+  const candidatePorts: number[] = Array.from(
+    { length: MAX_REPLICAS },
+    (_, i) => APP_BASE_PORT + i,
+  );
 
-  // Probe each port's /api/health concurrently with a 1s budget — if the
-  // unit is enabled but the replica is dead, the UI shows a warning chip.
-  const ports = enabledPorts.length > 0
-    ? enabledPorts
-    : (Number.isFinite(thisPort) ? [thisPort] : [APP_BASE_PORT]);
-
-  const replicas: ReplicaNode[] = await Promise.all(
-    ports.map(async (port): Promise<ReplicaNode> => {
-      const healthy = await probePort(port, 1_000);
+  const probes = await Promise.all(
+    candidatePorts.map(async (port): Promise<ReplicaNode> => {
+      const [enabled, healthy] = await Promise.all([
+        isUnitEnabled(`${SERVICE_PREFIX}@${port}.service`),
+        probePort(port, 1_000),
+      ]);
       return {
         port,
-        enabled: enabledPorts.includes(port),
-        active:  healthy, // best-effort; for tighter fidelity we'd shell out to systemctl is-active
+        enabled,
+        active:  enabled && healthy,
         healthy,
         self:    port === thisPort,
       };
     }),
   );
-  replicas.sort((a, b) => a.port - b.port);
+
+  const enabledCount = probes.filter((p) => p.enabled).length;
+  const healthyCount = probes.filter((p) => p.healthy).length;
+
+  // "Current" replica count, in preference order:
+  //   1. systemctl-enabled count        (canonical source of truth)
+  //   2. health-probe responders        (fallback for non-systemd hosts)
+  //   3. 1                              (we exist, therefore something runs)
+  const current = enabledCount > 0
+    ? enabledCount
+    : Math.max(1, healthyCount);
+
+  // The UI renders MAX_REPLICAS slots; nodes for ports that are neither
+  // enabled nor healthy nor self are omitted, and the client renders those
+  // slots as "Disabled". This keeps the payload honest — we don't claim a
+  // replica exists when nothing's listening AND systemctl says it's off.
+  const replicas = probes
+    .filter((p) => p.enabled || p.healthy || p.self)
+    .sort((a, b) => a.port - b.port);
 
   return {
     basePort: APP_BASE_PORT,
     max:      MAX_REPLICAS,
-    current:  enabledPorts.length || 1,
+    current,
     replicas,
     helper,
   };
 }
 
-async function listEnabledPorts(): Promise<number[]> {
+/**
+ * Authoritative check for "is this systemd unit enabled?".
+ *
+ * `systemctl is-enabled` returns:
+ *   • exit 0 + "enabled" / "enabled-runtime"   → enabled
+ *   • exit non-zero + "disabled"/"masked"/"static"/missing → not enabled
+ *
+ * We resolve to a plain boolean and swallow the non-zero exit so missing
+ * units (slot 4 on a 2-replica install, for example) just read as false.
+ */
+async function isUnitEnabled(unit: string): Promise<boolean> {
   try {
-    const { stdout } = await execAsync("systemctl", [
-      "list-unit-files",
-      "--no-legend",
-      `${SERVICE_PREFIX}@*.service`,
-    ]);
-    const out: number[] = [];
-    for (const line of stdout.split("\n")) {
-      const [unit, state] = line.trim().split(/\s+/);
-      if (state !== "enabled" || !unit) continue;
-      const m = unit.match(new RegExp(`^${SERVICE_PREFIX}@(\\d+)\\.service`));
-      if (m && m[1]) out.push(Number(m[1]));
-    }
-    return out.sort((a, b) => a - b);
+    const { stdout } = await execAsync("systemctl", ["is-enabled", unit]);
+    const status = stdout.trim();
+    return status === "enabled" || status === "enabled-runtime";
   } catch {
-    // systemctl unavailable (dev/macOS/Windows). Empty result triggers
-    // the "single self replica" fallback in discoverReplicas().
-    return [];
+    return false;
   }
 }
 

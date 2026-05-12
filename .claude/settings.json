@@ -29,7 +29,8 @@
       "Bash(bash -n ../install.sh)",
       "Bash(bash -n ../scripts/zentra-set-replicas.sh)",
       "Bash(bash -n scripts/zentra-set-replicas.sh)",
-      "Bash(bash -n scripts/enable-update-orchestrator.sh)"
+      "Bash(bash -n scripts/enable-update-orchestrator.sh)",
+      "Bash(awk 'NR>=2527 && NR<=3500 && /errors|ErrorMessage/' client/src/pages/settings/sections.tsx)"
     ]
   }
 }

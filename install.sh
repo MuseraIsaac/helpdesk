@@ -344,14 +344,19 @@ EOF
     # with CDN proxy on (e.g. Cloudflare Full mode) sets TLS_FORCE=1.
     if [[ "$USE_TLS" == "1" && "$PROXY_DETECTED" == "1" && "${TLS_FORCE-}" != "1" ]]; then
       warn ""
-      warn "  Blocking origin TLS: $DOMAIN is behind a CDN/proxy."
-      warn "  Pick one of these paths:"
-      warn "    1. Stay with origin HTTP (recommended) — let the CDN terminate"
-      warn "       browser-facing TLS. Cloudflare: SSL/TLS → 'Flexible'."
-      warn "    2. Disable the CDN proxy (grey cloud in Cloudflare DNS), rerun."
-      warn "    3. Set TLS_FORCE=1 to override this check (advanced)."
+      warn "  Blocking origin Let's Encrypt: $DOMAIN is behind a CDN/proxy."
+      warn "  Don't worry — the install will still serve HTTPS at the origin via"
+      warn "  Caddy's internal self-signed cert, so EVERY Cloudflare mode works:"
+      warn "    • Flexible      → CF connects to origin on :80   (HTTP, plain)"
+      warn "    • Full          → CF connects to origin on :443  (HTTPS, any cert) ✓"
+      warn "    • Full (Strict) → CF connects to origin on :443  (HTTPS, valid cert)"
+      warn "                      Provide a Cloudflare Origin CA cert via"
+      warn "                      CLOUDFLARE_ORIGIN_CERT + CLOUDFLARE_ORIGIN_KEY"
+      warn "                      env vars, OR disable CF proxy to get a real LE cert."
       warn ""
-      warn "  Continuing with origin HTTP — your domain still works via the CDN."
+      warn "  Override with TLS_FORCE=1 if you want Let's Encrypt anyway (advanced —"
+      warn "  cert issuance requires CF orange-cloud OFF during HTTP-01 challenge)."
+      warn ""
       USE_TLS=0
       LE_EMAIL=""
     fi
@@ -817,10 +822,44 @@ EOF
 EOF
   )"
 
-  # Three install modes shape the Caddyfile:
-  #   1. IP-only          → single :80 block, auto_https off
-  #   2. Domain + TLS     → domain block with Let's Encrypt + IP fallback on :80
-  #   3. Domain no TLS    → domain + IP both on :80 (e.g. behind Cloudflare proxy)
+  # Cloudflare Origin CA support — operators who want CF Full (Strict) supply
+  # the cert + key (downloaded from Cloudflare dashboard → SSL/TLS → Origin Server)
+  # via env vars; we drop them into /etc/caddy/origin.{crt,key} and reference
+  # them from the :443 listener so CF's strict validation passes.
+  local has_cf_origin=0
+  if [[ -n "${CLOUDFLARE_ORIGIN_CERT:-}" && -n "${CLOUDFLARE_ORIGIN_KEY:-}" ]]; then
+    install -d -m 0750 -o caddy -g caddy /etc/caddy/tls 2>/dev/null \
+      || install -d -m 0750 /etc/caddy/tls
+    printf '%s\n' "$CLOUDFLARE_ORIGIN_CERT" > /etc/caddy/tls/origin.crt
+    printf '%s\n' "$CLOUDFLARE_ORIGIN_KEY"  > /etc/caddy/tls/origin.key
+    chmod 0644 /etc/caddy/tls/origin.crt
+    chmod 0600 /etc/caddy/tls/origin.key
+    chown -R caddy:caddy /etc/caddy/tls 2>/dev/null || true
+    has_cf_origin=1
+    ok "Cloudflare Origin CA cert installed at /etc/caddy/tls/origin.{crt,key}"
+  fi
+
+  # Caddyfile shape depends on three install modes. CRITICAL: when a domain is
+  # configured we ALWAYS listen on both :80 and :443 — even without Let's
+  # Encrypt — so every Cloudflare SSL/TLS mode works out of the box:
+  #
+  #   • Flexible      → CF connects to origin :80  (HTTP)
+  #   • Full          → CF connects to origin :443 (HTTPS, cert NOT validated)
+  #   • Full (Strict) → CF connects to origin :443 (HTTPS, cert MUST validate)
+  #
+  # We satisfy each as follows:
+  #   • :80  always listens (works for Flexible + direct IP / origin debugging)
+  #   • :443 listens with one of three certs, in priority order:
+  #       1. Cloudflare Origin CA cert (if CLOUDFLARE_ORIGIN_CERT/KEY provided)
+  #          → works for Full AND Full (Strict)
+  #       2. Real Let's Encrypt cert (if USE_TLS=1)
+  #          → works for Full AND Full (Strict), but requires CF proxy OFF
+  #            during HTTP-01 challenge or DNS-01 via API token (not handled here)
+  #       3. Caddy-internal self-signed cert (`tls internal`)
+  #          → works for Full only (Strict will reject as not-trusted)
+  #
+  # The historic "domain + no TLS" branch only opened :80, which silently broke
+  # CF Full / Full (Strict) — that's the bug this expansion fixes.
   if [[ "$IS_IP" == "1" ]]; then
     cat > /etc/caddy/Caddyfile <<EOF
 # Plain-HTTP install — accessed via http://$DOMAIN
@@ -834,7 +873,10 @@ $app_block
 EOF
   elif [[ "$USE_TLS" == "1" ]]; then
     cat > /etc/caddy/Caddyfile <<EOF
-# Domain install with Let's Encrypt TLS + plain-HTTP fallback for IP access.
+# Domain install with Let's Encrypt TLS at origin.
+# Compatible with: CF Flexible (origin :80) and CF Full / Full (Strict) (origin :443).
+# Note: HTTP-01 renewals fail when CF orange-cloud proxy is on — pause proxy
+# briefly or switch to DNS-01 via the Caddy Cloudflare DNS module.
 {
   email $LE_EMAIL
 }
@@ -849,15 +891,40 @@ $app_block
 }
 EOF
   else
+    # Domain install without Let's Encrypt — typical Cloudflare-fronted setup.
+    # We provide BOTH a :80 listener (Flexible mode) AND a :443 listener
+    # (Full / Full (Strict) mode) so the operator can pick any SSL mode in
+    # the Cloudflare dashboard without the origin breaking.
+    local tls_directive
+    if [[ "$has_cf_origin" == "1" ]]; then
+      # Real cert that CF trusts (signed by Cloudflare Origin CA) — passes
+      # CF Full (Strict).
+      tls_directive="tls /etc/caddy/tls/origin.crt /etc/caddy/tls/origin.key"
+    else
+      # Self-signed via Caddy's local PKI. Browsers won't trust it, but
+      # browsers never see it: only Cloudflare's edge does, and CF Full mode
+      # (the default for proxied domains) accepts ANY cert.
+      tls_directive="tls internal"
+    fi
+
     cat > /etc/caddy/Caddyfile <<EOF
-# Domain install without origin TLS — typical when a CDN (Cloudflare, etc.)
-# terminates TLS in front. Browser ↔ CDN is HTTPS; CDN ↔ origin is HTTP.
-# Both http://\$DOMAIN and http://\$SERVER_IP are served.
+# Domain install without origin Let's Encrypt — typical CDN-fronted setup.
+# Browser ↔ CDN is HTTPS; CDN ↔ origin can be HTTP or HTTPS depending on
+# the dashboard's SSL/TLS mode. We listen on BOTH ports so every mode works.
 {
   auto_https off
 }
 
+# :80 — used by CF "Flexible" mode and direct origin / IP debugging.
 http://$DOMAIN, http://$SERVER_IP, :80 {
+$app_block
+}
+
+# :443 — used by CF "Full" and "Full (Strict)" modes.
+# $( [[ "$has_cf_origin" == "1" ]] && echo "Origin CA cert from Cloudflare (CLOUDFLARE_ORIGIN_CERT) — works for Full (Strict)." \
+                                 || echo "Self-signed via Caddy's internal CA — works for Full, NOT Full (Strict)." )
+https://$DOMAIN, https://$SERVER_IP {
+  $tls_directive
 $app_block
 }
 EOF
@@ -1185,7 +1252,10 @@ EOF
 ║    Direct IP: http://$SERVER_IP
 EOF
   cat <<EOF
-║  TLS        : $([[ "$USE_TLS" == "1" ]] && echo "Let's Encrypt for $DOMAIN" || echo "off (plain HTTP — terminate at a CDN if you need HTTPS)")
+║  TLS        : $([[ "$USE_TLS" == "1" ]] && echo "Let's Encrypt for $DOMAIN (origin :443)" \
+                || [[ "$IS_IP" == "1" ]]  && echo "off (IP-only — plain HTTP)" \
+                || [[ -n "${CLOUDFLARE_ORIGIN_CERT:-}" ]] && echo "Cloudflare Origin CA cert (origin :443, valid at CF edge)" \
+                || echo "Caddy self-signed (origin :443) + plain HTTP (origin :80)")
 ║  Release    : $BRANCH
 ║  Replicas   : $REPLICAS  (ports $APP_BASE_PORT..$((APP_BASE_PORT + REPLICAS - 1)))
 ║  PostgreSQL : 127.0.0.1:5432  (db=$DB_NAME, user=$DB_USER)
@@ -1208,11 +1278,48 @@ EOF
 ║    Cert check : sudo systemctl start zentra-cert-watchdog.service
 ║    Cert log   : journalctl -t zentra-cert -n 30
 ╚══════════════════════════════════════════════════════════════════════════════╝
+EOF
+
+  # Cloudflare guidance — only meaningful for domain installs without LE.
+  # Helps the operator pick the right SSL/TLS mode in the CF dashboard so
+  # the origin actually accepts the connection.
+  if [[ "$IS_IP" != "1" && "$USE_TLS" != "1" ]]; then
+    cat <<EOF
+
+  Cloudflare SSL/TLS mode for $DOMAIN
+  ───────────────────────────────────
+EOF
+    if [[ -n "${CLOUDFLARE_ORIGIN_CERT:-}" ]]; then
+      cat <<EOF
+    ✓ Flexible      — works (origin :80 plain HTTP)
+    ✓ Full          — works (origin :443 with your Cloudflare Origin CA cert)
+    ✓ Full (Strict) — works (origin :443 with your Cloudflare Origin CA cert)
+    Recommended: Full (Strict)
+EOF
+    else
+      cat <<EOF
+    ✓ Flexible      — works (origin :80 plain HTTP)
+    ✓ Full          — works (origin :443 with Caddy self-signed; CF doesn't validate)
+    ✗ Full (Strict) — REJECTS the self-signed origin cert.
+                      To enable Full (Strict): download a Cloudflare Origin CA
+                      cert (CF dashboard → SSL/TLS → Origin Server → Create),
+                      then re-run install with:
+                        CLOUDFLARE_ORIGIN_CERT="\$(cat origin.pem)" \\
+                        CLOUDFLARE_ORIGIN_KEY="\$(cat origin.key)" \\
+                        sudo bash install.sh
+    Recommended: Full
+EOF
+    fi
+  fi
+
+  if [[ "$USE_TLS" == "1" ]]; then
+    cat <<EOF
 
 If https://$DOMAIN doesn't load within ~60 seconds, Caddy is still negotiating
 the TLS certificate with Let's Encrypt — tail journalctl -u caddy -f to watch.
 
 EOF
+  fi
 }
 
 # ════════════════════════════════════════════════════════════════════════════

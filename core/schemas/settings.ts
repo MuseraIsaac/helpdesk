@@ -520,7 +520,11 @@ export type VideoBridgeProvider = (typeof VIDEO_BRIDGE_PROVIDERS)[number];
 export const integrationsSettingsSchema = z.object({
   // ── Email ──────────────────────────────────────────────────────────────────
   emailEnabled:       z.boolean().default(false),
-  emailProvider:      z.enum(["sendgrid", "smtp", "ses"]).default("sendgrid"),
+  // .catch() coerces legacy / null / unknown stored values to a safe default
+  // so a stale DB row (or an externally edited settings blob) can never lock
+  // the Save button by failing form validation on a field the admin isn't
+  // even editing.
+  emailProvider:      z.enum(["sendgrid", "smtp", "ses"]).catch("sendgrid").default("sendgrid"),
   fromEmail:          z.string().default(""),
   sendgridApiKey:     z.string().default(""),   // server-only; never echoed to client
   smtpHost:           z.string().default(""),
@@ -560,7 +564,7 @@ export const integrationsSettingsSchema = z.object({
    *                 Message-ID so a single email never produces two tickets.
    *  - "disabled" → No inbound ingestion (default).
    */
-  inboundEmailMode:   z.enum(["disabled", "webhook", "imap", "both"]).default("disabled"),
+  inboundEmailMode:   z.enum(["disabled", "webhook", "imap", "both"]).catch("disabled").default("disabled"),
 
   // ── Inbound email webhook ──────────────────────────────────────────────────
   webhookSecret:      z.string().default(""),   // server-only
@@ -594,7 +598,7 @@ export const integrationsSettingsSchema = z.object({
   mailboxes: z.array(mailboxSchema).default([]),
   // ── Video Bridge (Incident Bridge Calls) ───────────────────────────────────
   // The active provider. Only one can be active at a time.
-  videoBridgeProvider: z.enum(VIDEO_BRIDGE_PROVIDERS).default("none"),
+  videoBridgeProvider: z.enum(VIDEO_BRIDGE_PROVIDERS).catch("none").default("none"),
   // Microsoft Teams (Azure AD App — requires OnlineMeetings.ReadWrite.All app permission)
   teamsClientId:          z.string().default(""),
   teamsTenantId:          z.string().default(""),

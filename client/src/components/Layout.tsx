@@ -95,12 +95,12 @@ function SidebarNavItem({ item, collapsed, onClick }: { item: NavItem; collapsed
       onClick={onClick}
       title={collapsed ? item.label : undefined}
       className={({ isActive }) => [
-        "group relative flex items-center rounded-lg text-[13px] font-medium transition-all duration-150",
+        "nav-row group relative flex items-center rounded-lg text-[13px] font-medium transition-all duration-150",
         collapsed ? "justify-center p-2.5 mx-0.5" : "gap-3 px-3 py-2",
         // Active item: gradient backdrop + soft inset highlight + subtle shadow
         // Inactive: keep low contrast so the active row visually pops
         isActive
-          ? "bg-gradient-to-r from-sidebar-primary/[0.18] via-sidebar-primary/[0.10] to-sidebar-primary/[0.04] text-sidebar-primary font-semibold shadow-[inset_0_1px_0_rgb(255_255_255_/_0.04)]"
+          ? "nav-row-active bg-gradient-to-r from-sidebar-primary/[0.18] via-sidebar-primary/[0.10] to-sidebar-primary/[0.04] text-sidebar-primary font-semibold shadow-[inset_0_1px_0_rgb(255_255_255_/_0.04)]"
           : "text-sidebar-foreground/55 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent",
       ].join(" ")}
     >
@@ -119,7 +119,7 @@ function SidebarNavItem({ item, collapsed, onClick }: { item: NavItem; collapsed
           )}
 
           <span className={[
-            "shrink-0 flex items-center justify-center h-[18px] w-[18px] transition-colors",
+            "nav-icon shrink-0 flex items-center justify-center h-[18px] w-[18px] transition-colors",
             isActive
               ? "text-sidebar-primary"
               : "text-sidebar-foreground/45 group-hover:text-sidebar-accent-foreground",
@@ -145,8 +145,9 @@ function SectionLabel({ label }: { label: string }) {
   return (
     <p className="px-3 pt-3 pb-1 text-[9.5px] font-bold uppercase tracking-[0.14em] select-none flex items-center gap-1.5 text-sidebar-foreground/45">
       {/* Tiny gradient stripe gives the label a colour identity without
-          fighting the overall neutral sidebar palette. */}
-      <span className="h-[2px] w-3 rounded-full bg-gradient-to-r from-sidebar-primary/60 to-sidebar-primary/0" />
+          fighting the overall neutral sidebar palette. Inherits the
+          section's accent via --nav-accent in dark mode. */}
+      <span className="nav-section-stripe h-[2px] w-3 rounded-full bg-gradient-to-r from-sidebar-primary/60 to-sidebar-primary/0" />
       {label}
     </p>
   );
@@ -308,7 +309,11 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
           // aren't rendered), so we always show every visible item there.
           const expanded = collapsed ? true : isSectionExpanded(section);
           return (
-            <div key={section.id}>
+            <div
+              key={section.id}
+              className="nav-section"
+              style={section.accent ? ({ ["--nav-accent" as string]: section.accent } as React.CSSProperties) : undefined}
+            >
               {!collapsed
                 ? section.collapsible
                     ? <CollapsibleSectionHeader

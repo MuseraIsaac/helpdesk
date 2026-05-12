@@ -131,7 +131,7 @@
   --sidebar-accent-foreground: oklch(0.94 0.004 268);
   --sidebar-border: oklch(0.198 0.022 277);
   --sidebar-ring: oklch(0.655 0.265 287);
-  --sidebar-glow: oklch(0.655 0.265 287 / 0.32);
+  --sidebar-glow: oklch(0.690 0.275 287 / 0.45);
   --success: oklch(0.65 0.18 145);
   --success-foreground: oklch(1 0 0);
   --warning: oklch(0.82 0.17 75);
@@ -148,11 +148,52 @@
 }
 
 .dark .sidebar-surface {
-  /* Layered radial + linear: violet top glow over deep navy base */
+  /* Multi-layer depth:
+     • Top violet halo (light-source effect)
+     • Mid-left teal accent — splits the panel into "lit / unlit" planes
+     • Bottom-right warm shadow pocket
+     • Deep navy base with a near-imperceptible vertical sheen */
   background:
-    radial-gradient(ellipse 180% 30% at 50% -2%, oklch(0.22 0.065 283) 0%, transparent 70%),
-    radial-gradient(ellipse 80% 25% at 0% 100%, oklch(0.16 0.04 270) 0%, transparent 60%),
-    linear-gradient(180deg, oklch(0.092 0.023 277) 0%, oklch(0.100 0.020 275) 100%);
+    radial-gradient(ellipse 200% 28% at 50% -4%,  oklch(0.245 0.075 285) 0%, transparent 65%),
+    radial-gradient(ellipse 60% 35% at -10% 38%, oklch(0.155 0.060 245) 0%, transparent 60%),
+    radial-gradient(ellipse 90% 30% at 100% 105%, oklch(0.175 0.050 295) 0%, transparent 55%),
+    linear-gradient(180deg,
+      oklch(0.092 0.024 277) 0%,
+      oklch(0.085 0.022 275) 50%,
+      oklch(0.098 0.020 273) 100%);
+  /* Inset hairline at the very top — the "lit edge" trick Linear/Raycast use.
+     Combined with a faint inner-right vignette so the panel feels carved out. */
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.06),
+    inset -1px 0 0 oklch(1 0 0 / 0.018),
+    inset -28px 0 32px -28px oklch(0 0 0 / 0.45);
+  position: relative;
+}
+
+/* Fine-grain noise overlay — breaks up the gradients so they don't band on
+   wide monitors. Pure CSS via inline SVG; renders once, GPU-composited. */
+.dark .sidebar-surface::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* Soft top "aurora" sliver — sits behind the wordmark to give the brand
+   area a luminous feel without overwhelming the rest of the panel. */
+.dark .sidebar-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 96px;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 100% at 22% 0%,
+      var(--sidebar-glow) 0%, transparent 70%);
+  opacity: 0.55;
 }
 
 @utility sidebar-scrollbar {
@@ -160,17 +201,211 @@
   scrollbar-color: var(--sidebar-border) transparent;
 }
 
-/* Active nav item: glowing left bar in dark mode */
+/* Active nav item: glowing left bar in dark mode.
+   Brighter, slightly taller, with a two-layer halo so the bar reads as
+   a real light-source rather than a flat coloured rectangle. */
 @utility sidebar-active-bar {
   position: absolute;
   left: 0;
   top: 50%;
   transform: translateY(-50%);
   width: 3px;
-  height: 20px;
+  height: 22px;
   border-radius: 0 9999px 9999px 0;
-  background-color: var(--sidebar-primary);
-  box-shadow: 0 0 10px var(--sidebar-glow);
+  background: linear-gradient(180deg,
+    var(--sidebar-primary) 0%,
+    color-mix(in oklch, var(--sidebar-primary) 70%, white) 50%,
+    var(--sidebar-primary) 100%);
+  box-shadow:
+    0 0 14px var(--sidebar-glow),
+    0 0 4px var(--sidebar-glow),
+    inset 0 0 0 1px color-mix(in oklch, white 25%, transparent);
+}
+
+/* ── Dark-mode sidebar polish ────────────────────────────────────────────
+   Layout.tsx drives base styles via Tailwind classes; these rules add the
+   "lit / pro" finishing touches without touching the component. */
+
+/* Active nav row: hairline top highlight + a soft right-side gradient
+   fadeout so the gradient bg doesn't feel like a chopped rectangle. */
+.dark .sidebar-surface a[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, oklch(1 0 0 / 0.05) 0%, transparent 6%),
+    linear-gradient(90deg,  transparent 60%, oklch(0 0 0 / 0.08) 100%);
+  mix-blend-mode: overlay;
+}
+
+/* Idle nav row hover: a slim left "lit edge" glides in. Communicates
+   interactivity without a heavy bg change — keeps the panel calm. */
+.dark .sidebar-surface a:not([aria-current="page"]) {
+  position: relative;
+}
+.dark .sidebar-surface a:not([aria-current="page"])::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%) scaleY(0.4);
+  transform-origin: center;
+  width: 2px;
+  height: 18px;
+  border-radius: 0 9999px 9999px 0;
+  background: color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 70%, transparent);
+  opacity: 0;
+  transition: opacity 160ms ease, transform 200ms ease;
+}
+.dark .sidebar-surface a:not([aria-current="page"]):hover::before {
+  opacity: 1;
+  transform: translateY(-50%) scaleY(1);
+}
+
+/* ── Section colour identity (dark mode only) ────────────────────────────
+   Each NAV_SECTIONS entry sets a CSS var --nav-accent on its wrapper.
+   These rules thread the colour through every visual element of the
+   section without touching the Layout component or light-mode styles. */
+
+/* Idle icon picks up the section's accent — gives the panel a colourful
+   scan-line. Active icon already uses sidebar-primary so its rule below
+   wins by specificity. */
+.dark .sidebar-surface .nav-section .nav-row:not(.nav-row-active) .nav-icon {
+  color: var(--nav-accent, currentColor);
+}
+
+/* On hover, the row label adopts a lightly tinted version of the accent
+   instead of the neutral accent-foreground — keeps the section identity
+   alive even before the user clicks. */
+.dark .sidebar-surface .nav-section .nav-row:not(.nav-row-active):hover {
+  color: color-mix(in oklch, var(--nav-accent, white) 65%, white);
+  background: color-mix(in oklch, var(--nav-accent, var(--sidebar-accent)) 9%, var(--sidebar-accent));
+}
+.dark .sidebar-surface .nav-section .nav-row:not(.nav-row-active):hover .nav-icon {
+  color: var(--nav-accent);
+  filter: drop-shadow(0 0 4px color-mix(in oklch, var(--nav-accent) 50%, transparent));
+}
+
+/* Active row recolours its gradient + glowing bar to the section accent.
+   The Tailwind sidebar-primary gradient classes are still applied by
+   Layout.tsx, but our gradient layer here paints on top of them. */
+.dark .sidebar-surface .nav-section .nav-row-active {
+  background:
+    linear-gradient(90deg,
+      color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 22%, transparent) 0%,
+      color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 12%, transparent) 35%,
+      color-mix(in oklch, var(--nav-accent, var(--sidebar-primary))  4%, transparent) 100%);
+  color: color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 75%, white);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.06),
+    inset 0 0 0 1px color-mix(in oklch, var(--nav-accent) 18%, transparent);
+}
+.dark .sidebar-surface .nav-section .nav-row-active .nav-icon {
+  color: var(--nav-accent, var(--sidebar-primary));
+  filter: drop-shadow(0 0 6px color-mix(in oklch, var(--nav-accent) 60%, transparent));
+}
+.dark .sidebar-surface .nav-section .nav-row-active .sidebar-active-bar {
+  background: linear-gradient(180deg,
+    var(--nav-accent, var(--sidebar-primary)) 0%,
+    color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 60%, white) 50%,
+    var(--nav-accent, var(--sidebar-primary)) 100%);
+  box-shadow:
+    0 0 14px color-mix(in oklch, var(--nav-accent) 50%, transparent),
+    0 0 4px  color-mix(in oklch, var(--nav-accent) 70%, transparent);
+}
+
+/* Section header tiny stripe inherits the accent — gives every uppercase
+   label its own coloured tick mark. */
+.dark .sidebar-surface .nav-section .nav-section-stripe {
+  background: linear-gradient(90deg,
+    color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 80%, transparent) 0%,
+    transparent 100%);
+}
+
+/* ── Light-mode colour identity ─────────────────────────────────────────
+   Same accent variable, but the chosen palette is tuned for dark BG
+   (saturated mid-light hues), so on a near-white sidebar we shift each
+   accent darker by mixing with black. This keeps the icon readable on
+   the light surface while preserving the per-section colour identity. */
+
+/* Idle icon — accent shifted darker for AA contrast on the light panel. */
+.sidebar-surface:not(.dark .sidebar-surface) .nav-section .nav-row:not(.nav-row-active) .nav-icon,
+:root:not(.dark) .sidebar-surface .nav-section .nav-row:not(.nav-row-active) .nav-icon {
+  color: color-mix(in oklch, var(--nav-accent, currentColor) 78%, black);
+  opacity: 0.85;
+}
+
+/* Hover: lift saturation, tint the row bg with a soft wash of the
+   accent, and bring the icon to full strength. */
+:root:not(.dark) .sidebar-surface .nav-section .nav-row:not(.nav-row-active):hover {
+  color: color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 55%, black);
+  background: color-mix(in oklch, var(--nav-accent, var(--sidebar-accent)) 10%, white);
+}
+:root:not(.dark) .sidebar-surface .nav-section .nav-row:not(.nav-row-active):hover .nav-icon {
+  color: color-mix(in oklch, var(--nav-accent) 70%, black);
+  opacity: 1;
+}
+
+/* Active row — coloured gradient wash + accent-tinted border + bold text. */
+:root:not(.dark) .sidebar-surface .nav-section .nav-row-active {
+  background:
+    linear-gradient(90deg,
+      color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 22%, white) 0%,
+      color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 12%, white) 35%,
+      color-mix(in oklch, var(--nav-accent, var(--sidebar-primary))  4%, white) 100%);
+  color: color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 55%, black);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--nav-accent) 22%, transparent),
+    0 1px 2px color-mix(in oklch, var(--nav-accent) 18%, transparent);
+}
+:root:not(.dark) .sidebar-surface .nav-section .nav-row-active .nav-icon {
+  color: color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 65%, black);
+  opacity: 1;
+}
+
+/* Active left-edge bar — solid accent with a soft outer halo. */
+:root:not(.dark) .sidebar-surface .nav-section .nav-row-active .sidebar-active-bar {
+  background: linear-gradient(180deg,
+    color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 90%, black) 0%,
+    var(--nav-accent, var(--sidebar-primary)) 50%,
+    color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 90%, black) 100%);
+  box-shadow:
+    0 0 8px color-mix(in oklch, var(--nav-accent) 35%, transparent),
+    0 0 2px color-mix(in oklch, var(--nav-accent) 55%, transparent);
+}
+
+/* Idle row hover-edge bar: in light mode the ::before isn't declared by
+   the .dark rules above, so set up its own positioning + transition here. */
+:root:not(.dark) .sidebar-surface a:not([aria-current="page"]) {
+  position: relative;
+}
+:root:not(.dark) .sidebar-surface a:not([aria-current="page"])::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%) scaleY(0.4);
+  transform-origin: center;
+  width: 2px;
+  height: 18px;
+  border-radius: 0 9999px 9999px 0;
+  background: color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 70%, black);
+  opacity: 0;
+  transition: opacity 160ms ease, transform 200ms ease;
+}
+:root:not(.dark) .sidebar-surface a:not([aria-current="page"]):hover::before {
+  opacity: 1;
+  transform: translateY(-50%) scaleY(1);
+}
+
+/* Section header tiny stripe in light mode — slightly darker tip so it
+   still reads against the white-ish surface. */
+:root:not(.dark) .sidebar-surface .nav-section .nav-section-stripe {
+  background: linear-gradient(90deg,
+    color-mix(in oklch, var(--nav-accent, var(--sidebar-primary)) 70%, black) 0%,
+    transparent 100%);
 }
 
 @layer base {

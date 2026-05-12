@@ -199,51 +199,94 @@ router.post("/public/articles/:slug/feedback", async (req, res) => {
   res.status(201).json({ ok: true });
 });
 
-// GET /api/kb/public/suggest?q=<text> — keyword-matched article suggestions
+// GET /api/kb/public/suggest?q=<text>&subject=<text>
+//   — keyword-matched article suggestions.
+//   `q` is the full ticket context (subject + body excerpt) and stays
+//   backwards-compatible with old callers. `subject` is optional but
+//   strongly recommended: when provided, subject keywords are required
+//   to be present in the candidate article AND are weighted ~3× higher
+//   than body keywords. Without subject weighting, common filler words
+//   in the body (e.g. "team", "account", "hello") match unrelated
+//   articles and crowd out the actually-relevant ones.
 router.get("/public/suggest", async (req, res) => {
-  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  const q       = typeof req.query.q       === "string" ? req.query.q.trim()       : "";
+  const subject = typeof req.query.subject === "string" ? req.query.subject.trim() : "";
   if (!q || q.length < 3) {
     res.json({ articles: [] });
     return;
   }
 
-  const keywords = extractKeywords(q);
-  if (!keywords.length) {
+  const allKeywords     = extractKeywords(q);
+  const subjectKeywords = subject ? extractKeywords(subject) : [];
+  // Body keywords = full set minus subject set (deduped). When no subject
+  // was passed, this is the full set and the loop below treats them all
+  // as body-weight, matching the legacy behaviour.
+  const bodyKeywords    = allKeywords.filter((kw) => !subjectKeywords.includes(kw));
+
+  if (!allKeywords.length) {
     res.json({ articles: [] });
     return;
   }
 
+  // Candidate filter:
+  //   • If we have subject keywords: candidate must contain AT LEAST ONE
+  //     subject keyword (in title or body). This is the key change — it
+  //     prevents a ticket about "Glovo refund" from surfacing articles
+  //     that only happen to share filler words like "account".
+  //   • If subject was empty / yielded no keywords: fall back to the
+  //     legacy "any keyword anywhere" filter.
+  const gateKeywords = subjectKeywords.length > 0 ? subjectKeywords : allKeywords;
   const candidates = await prisma.kbArticle.findMany({
     where: {
       status: "published",
       visibility: "public",
-      OR: keywords.flatMap((kw) => [
+      OR: gateKeywords.flatMap((kw) => [
         { title: { contains: kw, mode: "insensitive" } },
-        { body: { contains: kw, mode: "insensitive" } },
+        { body:  { contains: kw, mode: "insensitive" } },
       ]),
     },
     select: {
       id: true, title: true, slug: true, body: true,
       category: { select: { id: true, name: true, slug: true } },
     },
-    take: 20,
+    take: 30,
   });
 
+  // Scoring weights:
+  //   subject keyword in title : 6
+  //   subject keyword in body  : 3
+  //   body keyword in title    : 2
+  //   body keyword in body     : 1
+  // Articles with zero subject-keyword matches when subject keywords exist
+  // are dropped entirely — they only made it here because of body-keyword
+  // overlap (legacy fallback), not topical relevance.
   const scored = candidates
     .map((a) => {
       const titleLower = a.title.toLowerCase();
-      const bodyLower = a.body.toLowerCase();
-      const score = keywords.reduce((n, kw) => {
-        return n + (titleLower.includes(kw) ? 2 : 0) + (bodyLower.includes(kw) ? 1 : 0);
-      }, 0);
-      return { ...a, score };
+      const bodyLower  = a.body.toLowerCase();
+      let subjectHits = 0;
+      let score = 0;
+      for (const kw of subjectKeywords) {
+        const inTitle = titleLower.includes(kw);
+        const inBody  = bodyLower.includes(kw);
+        if (inTitle) { score += 6; subjectHits++; }
+        if (inBody)  { score += 3; subjectHits++; }
+      }
+      for (const kw of bodyKeywords) {
+        if (titleLower.includes(kw)) score += 2;
+        if (bodyLower.includes(kw))  score += 1;
+      }
+      return { ...a, score, subjectHits };
     })
-    .filter((a) => a.score > 0)
+    .filter((a) => {
+      if (subjectKeywords.length > 0) return a.subjectHits > 0;
+      return a.score > 0;
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, 3)
-    .map(({ score: _score, body, ...rest }) => ({
+    .map(({ score: _score, subjectHits: _h, body, ...rest }) => ({
       ...rest,
-      excerpt: buildExcerpt(body, keywords),
+      excerpt: buildExcerpt(body, allKeywords),
     }));
 
   res.json({ articles: scored });

@@ -612,27 +612,40 @@ function NodeCard({
 }
 
 function HelperUnavailableBanner({ status }: { status: HelperStatus }) {
+  // Server-side `reason` is a multi-line string ending with the exact
+  // recovery command on its own indented line. Split there so the prose
+  // and the copy-paste command render as separate visual blocks.
+  const lines    = (status.reason ?? "The privileged helper is not installed.").split("\n");
+  const cmdLine  = lines.find((l) => l.trim().startsWith("sudo "))?.trim();
+  const proseLns = lines.filter((l) => !l.trim().startsWith("sudo "));
+
   return (
     <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.04] p-4">
       <div className="flex items-start gap-3">
         <div className="size-8 rounded-md bg-amber-500/15 ring-1 ring-amber-500/20 flex items-center justify-center shrink-0">
           <ShieldAlert className="size-4 text-amber-600 dark:text-amber-400" />
         </div>
-        <div className="space-y-2 min-w-0">
+        <div className="space-y-2 min-w-0 flex-1">
           <div>
             <p className="text-sm font-semibold tracking-tight text-amber-900 dark:text-amber-200">
               Live scaling is not available on this host
             </p>
-            <p className="text-[12px] text-amber-800/80 dark:text-amber-300/80 mt-0.5 leading-relaxed">
-              {status.reason ?? "The privileged helper is not installed."}
+            <p className="text-[12px] text-amber-800/80 dark:text-amber-300/80 mt-0.5 leading-relaxed whitespace-pre-line">
+              {proseLns.join(" ").trim()}
             </p>
           </div>
-          <div className="rounded-md bg-amber-950/[0.04] dark:bg-amber-200/[0.04] border border-amber-500/20 p-2.5">
-            <p className="text-[10px] uppercase font-bold tracking-wider text-amber-700/70 dark:text-amber-400/70 mb-1">Run on the host</p>
-            <code className="block font-mono text-[11px] text-amber-900 dark:text-amber-200 break-all">
-              sudo bash /opt/zentra/app/scripts/enable-update-orchestrator.sh
-            </code>
-          </div>
+          {cmdLine && (
+            <div className="rounded-md bg-amber-950/[0.04] dark:bg-amber-200/[0.04] border border-amber-500/20 p-2.5">
+              <p className="text-[10px] uppercase font-bold tracking-wider text-amber-700/70 dark:text-amber-400/70 mb-1">Run on the host (one-time)</p>
+              <code className="block font-mono text-[11px] text-amber-900 dark:text-amber-200 break-all">
+                {cmdLine}
+              </code>
+              <p className="mt-1.5 text-[10px] text-amber-800/70 dark:text-amber-300/70 leading-snug">
+                This installs the NOPASSWD sudoers entry the helpdesk process needs to scale replicas.
+                It's idempotent — safe to re-run.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
