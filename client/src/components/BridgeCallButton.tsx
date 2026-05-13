@@ -48,14 +48,27 @@ const PROVIDER_COLOR: Record<string, string> = {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface BridgeDialIn {
+  label: string;
+  uri: string;
+  pin?: string;
+  regionCode?: string;
+}
+
+export interface BridgeCallDetails {
+  meetingId?: string | null;
+  passcode?: string | null;
+  startUrl?: string | null;
+  organizerEmail?: string | null;
+  dialIn?: BridgeDialIn[];
+}
+
 interface BridgeResponse {
   bridge: {
     joinUrl: string;
     provider: string;
     createdAt: string;
-    meetingId?: string;
-    startUrl?: string;
-  };
+  } & BridgeCallDetails;
 }
 
 interface VideoBridgeSetting {
@@ -66,17 +79,23 @@ interface VideoBridgeSetting {
 
 interface Props {
   incidentId: number;
+  incidentNumber?: string;
+  incidentTitle?: string;
   bridgeCallUrl: string | null;
   bridgeCallProvider: string | null;
   bridgeCallCreatedAt: string | null;
+  bridgeCallDetails?: BridgeCallDetails | null;
   canManage: boolean;
 }
 
 export default function BridgeCallButton({
   incidentId,
+  incidentNumber,
+  incidentTitle,
   bridgeCallUrl,
   bridgeCallProvider,
   bridgeCallCreatedAt,
+  bridgeCallDetails,
   canManage,
 }: Props) {
   const qc = useQueryClient();
@@ -118,10 +137,50 @@ export default function BridgeCallButton({
     },
   });
 
-  // Copy join URL to clipboard
+  // Build a multi-line meeting-details block for the clipboard. Falls back
+  // to URL-only if the rich details aren't available (e.g. bridges created
+  // before the bridgeCallDetails column existed).
+  function buildClipboardText(): string {
+    if (!bridgeCallUrl) return "";
+    const lines: string[] = [];
+    const providerName =
+      PROVIDER_LABEL[bridgeCallProvider ?? ""] ?? "Video bridge";
+
+    const heading = incidentNumber && incidentTitle
+      ? `${providerName} — INC ${incidentNumber}: ${incidentTitle}`
+      : `${providerName} bridge call`;
+    lines.push(heading);
+    lines.push("─".repeat(Math.min(heading.length, 60)));
+    lines.push("");
+    lines.push(`Join: ${bridgeCallUrl}`);
+
+    const d = bridgeCallDetails;
+    if (d?.meetingId)      lines.push(`Meeting ID: ${d.meetingId}`);
+    if (d?.passcode)       lines.push(`Passcode: ${d.passcode}`);
+    if (d?.organizerEmail) lines.push(`Organizer: ${d.organizerEmail}`);
+
+    if (d?.dialIn && d.dialIn.length > 0) {
+      lines.push("");
+      lines.push("Dial-in:");
+      for (const dialIn of d.dialIn) {
+        const region = dialIn.regionCode ? ` (${dialIn.regionCode})` : "";
+        const pin    = dialIn.pin ? ` — PIN ${dialIn.pin}` : "";
+        lines.push(`  • ${dialIn.label}${region}${pin}`);
+      }
+    }
+
+    if (bridgeCallCreatedAt) {
+      lines.push("");
+      lines.push(`Created: ${new Date(bridgeCallCreatedAt).toLocaleString()}`);
+    }
+    return lines.join("\n");
+  }
+
+  // Copy full meeting details to clipboard.
   async function handleCopy() {
     if (!bridgeCallUrl) return;
-    await navigator.clipboard.writeText(bridgeCallUrl);
+    const text = buildClipboardText();
+    await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -173,7 +232,7 @@ export default function BridgeCallButton({
                 }
               </button>
             </TooltipTrigger>
-            <TooltipContent>{copied ? "Copied!" : "Copy join link"}</TooltipContent>
+            <TooltipContent>{copied ? "Copied!" : "Copy meeting details"}</TooltipContent>
           </Tooltip>
 
           {/* End bridge */}

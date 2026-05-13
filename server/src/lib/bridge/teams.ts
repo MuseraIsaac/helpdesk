@@ -97,7 +97,9 @@ export class TeamsBridgeProvider implements BridgeProvider {
     const data = (await res.json()) as MsOnlineMeeting;
     return {
       joinUrl:   data.joinWebUrl,
-      meetingId: data.id,
+      // Prefer the human-readable conference-ID over the GUID when present.
+      meetingId: data.joinMeetingIdSettings?.joinMeetingId ?? data.id,
+      organizerEmail: this.organizerUserId.includes("@") ? this.organizerUserId : undefined,
     };
   }
 }

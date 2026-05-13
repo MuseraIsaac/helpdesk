@@ -106,6 +106,24 @@ const EVENT_LABELS: Record<string, (meta: Record<string, unknown>) => string> = 
   "incident.assigned":          (m)   => m.to ? "Assignee changed" : "Assignee removed",
   "incident.update_added":      (m)   => `Update added (${incidentUpdateTypeLabel[m.updateType as string] ?? m.updateType})`,
   "incident.promoted_to_problem": (m) => `Promoted to problem ${m.problemNumber ?? ""}`,
+  "bridge.created": (m) => {
+    const providerName =
+      m.provider === "teams"      ? "Microsoft Teams" :
+      m.provider === "googlemeet" ? "Google Meet" :
+      m.provider === "zoom"       ? "Zoom" :
+      m.provider === "webex"      ? "Cisco Webex" :
+      "video bridge";
+    return `${providerName} call created`;
+  },
+  "bridge.removed": (m) => {
+    const providerName =
+      m.provider === "teams"      ? "Microsoft Teams" :
+      m.provider === "googlemeet" ? "Google Meet" :
+      m.provider === "zoom"       ? "Zoom" :
+      m.provider === "webex"      ? "Cisco Webex" :
+      "video bridge";
+    return `${providerName} call link removed`;
+  },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -876,9 +894,12 @@ export default function IncidentDetailPage() {
               <WatchButton entityPath="incidents" entityId={incident.id} />
               <BridgeCallButton
                 incidentId={incident.id}
+                incidentNumber={incident.incidentNumber}
+                incidentTitle={incident.title}
                 bridgeCallUrl={incident.bridgeCallUrl ?? null}
                 bridgeCallProvider={incident.bridgeCallProvider ?? null}
                 bridgeCallCreatedAt={incident.bridgeCallCreatedAt ?? null}
+                bridgeCallDetails={(incident as { bridgeCallDetails?: import("@/components/BridgeCallButton").BridgeCallDetails | null }).bridgeCallDetails ?? null}
                 canManage={
                   session?.user?.role === "admin" ||
                   session?.user?.role === "supervisor" ||

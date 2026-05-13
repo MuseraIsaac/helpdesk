@@ -19,6 +19,12 @@ interface WebexMeetingResponse {
   id: string;
   webLink: string;
   sipAddress?: string;
+  meetingNumber?: string;
+  password?: string;
+  hostEmail?: string;
+  telephony?: {
+    callInNumbers?: Array<{ label?: string; callInNumber?: string; tollType?: string }>;
+  };
 }
 
 export class WebexBridgeProvider implements BridgeProvider {
@@ -66,9 +72,21 @@ export class WebexBridgeProvider implements BridgeProvider {
     }
 
     const data = (await res.json()) as WebexMeetingResponse;
+    const dialIn = (data.telephony?.callInNumbers ?? [])
+      .filter((n) => !!n.callInNumber)
+      .map((n) => ({
+        label: n.label ?? n.callInNumber ?? "",
+        uri:   `tel:${(n.callInNumber ?? "").replace(/\s+/g, "")}`,
+      }));
+    if (data.sipAddress) {
+      dialIn.push({ label: `SIP — ${data.sipAddress}`, uri: `sip:${data.sipAddress}` });
+    }
     return {
       joinUrl:   data.webLink,
-      meetingId: data.id,
+      meetingId: data.meetingNumber ?? data.id,
+      passcode:  data.password,
+      organizerEmail: data.hostEmail,
+      dialIn,
     };
   }
 }

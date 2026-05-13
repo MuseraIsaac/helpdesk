@@ -4,8 +4,13 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "./lib/theme";
+import { installAxios403Interceptor } from "./lib/axios-403-interceptor";
 import "./index.css";
 import App from "./App.tsx";
+
+// Catch permission-mismatch 403s globally and convert them into a clean
+// redirect-home + toast, instead of letting pages render red banners.
+installAxios403Interceptor();
 
 /**
  * Global TanStack Query defaults.

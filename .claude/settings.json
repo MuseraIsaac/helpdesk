@@ -30,7 +30,14 @@
       "Bash(bash -n ../scripts/zentra-set-replicas.sh)",
       "Bash(bash -n scripts/zentra-set-replicas.sh)",
       "Bash(bash -n scripts/enable-update-orchestrator.sh)",
-      "Bash(awk 'NR>=2527 && NR<=3500 && /errors|ErrorMessage/' client/src/pages/settings/sections.tsx)"
+      "Bash(awk 'NR>=2527 && NR<=3500 && /errors|ErrorMessage/' client/src/pages/settings/sections.tsx)",
+      "Bash(cat)",
+      "Bash(bash /tmp/analyze_perms.sh)",
+      "Bash(cd \"/c/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk\" && grep -o '| \"[^\"]*\"' core/constants/permission.ts | sed 's/| \"//; s/\"$//' | wc -l)",
+      "Read(//c/c/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/core/constants/**)",
+      "Bash(ssh-keyscan -t ed25519,rsa,ecdsa 138.199.153.57)",
+      "Bash(timeout 5 bash -c '\\(echo > /dev/tcp/135.181.87.179/5432\\) 2>&1 && echo \"✅ reachable on 5432\"')",
+      "Bash(timeout 5 bash -c '\\(echo > /dev/tcp/138.199.153.57/5432\\) 2>&1 && echo \"✅ reachable on 5432\"')"
     ]
   }
 }

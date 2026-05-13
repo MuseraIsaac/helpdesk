@@ -1,6 +1,7 @@
 import { Navigate, Outlet } from "react-router";
 import { can } from "core/constants/permission.ts";
 import { useSession } from "../lib/auth-client";
+import { usePermissionsVersion } from "@/hooks/usePermissionsVersion";
 
 interface PermissionRouteProps {
   /** The permission string that the current user must have to access child routes. */
@@ -26,6 +27,9 @@ export default function PermissionRoute({
   redirectTo = "/",
 }: PermissionRouteProps) {
   const { data: session, isPending } = useSession();
+  // Re-evaluate the permission check whenever the role map changes (e.g.
+  // an admin edits the role mid-session).
+  usePermissionsVersion();
 
   if (isPending) {
     return (

@@ -13,7 +13,9 @@ import { parseId }     from "../lib/parse-id";
 import { getSection }  from "../lib/settings";
 import prisma          from "../db";
 import { getVideoBridgeProvider, BridgeError } from "../lib/bridge";
+import { logIncidentEvent } from "../lib/incident-events";
 import type { IntegrationsSettings } from "core/schemas/settings.ts";
+import { Prisma } from "../generated/prisma/client";
 
 // ── Incident bridge ────────────────────────────────────────────────────────────
 
@@ -63,20 +65,41 @@ router.post("/", async (req, res) => {
     return;
   }
 
-  // Persist the join URL on the incident
+  // Persist the join URL + the rich details (meeting ID, dial-in, PIN, etc.)
+  // on the incident so the "Copy meeting details" action has everything it
+  // needs even after a page reload.
+  const detailsJson = {
+    meetingId:      meeting.meetingId ?? null,
+    passcode:       meeting.passcode ?? null,
+    startUrl:       meeting.startUrl ?? null,
+    organizerEmail: meeting.organizerEmail ?? null,
+    dialIn:         meeting.dialIn ?? [],
+  } as unknown as Prisma.InputJsonValue;
+
   const updated = await prisma.incident.update({
     where: { id: incidentId },
     data: {
       bridgeCallUrl:       meeting.joinUrl,
       bridgeCallProvider:  cfg.videoBridgeProvider,
       bridgeCallCreatedAt: new Date(),
+      bridgeCallDetails:   detailsJson,
     },
     select: {
       id: true,
       bridgeCallUrl: true,
       bridgeCallProvider: true,
       bridgeCallCreatedAt: true,
+      bridgeCallDetails: true,
     },
+  });
+
+  // Write an audit entry so the incident's Activity Log shows
+  // "Bridge call created" with provider + meeting metadata.
+  await logIncidentEvent(incidentId, req.user.id, "bridge.created", {
+    provider:       cfg.videoBridgeProvider,
+    joinUrl:        meeting.joinUrl,
+    meetingId:      meeting.meetingId ?? null,
+    organizerEmail: meeting.organizerEmail ?? null,
   });
 
   res.status(201).json({
@@ -85,7 +108,10 @@ router.post("/", async (req, res) => {
       provider:   updated.bridgeCallProvider,
       createdAt:  updated.bridgeCallCreatedAt,
       meetingId:  meeting.meetingId,
+      passcode:   meeting.passcode,
       startUrl:   meeting.startUrl,
+      organizerEmail: meeting.organizerEmail,
+      dialIn:     meeting.dialIn ?? [],
     },
   });
 });
@@ -105,7 +131,16 @@ router.delete("/", async (req, res) => {
 
   await prisma.incident.update({
     where: { id: incidentId },
-    data: { bridgeCallUrl: null, bridgeCallProvider: null, bridgeCallCreatedAt: null },
+    data: {
+      bridgeCallUrl:       null,
+      bridgeCallProvider:  null,
+      bridgeCallCreatedAt: null,
+      bridgeCallDetails:   Prisma.JsonNull,
+    },
+  });
+
+  await logIncidentEvent(incidentId, req.user.id, "bridge.removed", {
+    provider: incident.bridgeCallProvider,
   });
 
   res.status(204).end();

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useCan } from "@/hooks/useCan";
 import { Link, useNavigate } from "react-router";
 
 import { useQuery } from "@tanstack/react-query";
@@ -196,6 +197,7 @@ export default function ChangesPage() {
   const { data: session } = useSession();
   const currentUserId = session?.user?.id ?? "";
   const navigate = useNavigate();
+  const canCreateChange = useCan("changes.create");
 
   const [searchInput,  setSearchInput]  = useState("");
   const [search,       setSearch]       = useState(""); // debounced
@@ -285,10 +287,12 @@ export default function ChangesPage() {
             </p>
           </div>
         </div>
-        <Button size="sm" className="gap-1.5 shadow-sm" onClick={() => navigate("/changes/new")}>
-          <Plus className="h-3.5 w-3.5" />
-          New Change
-        </Button>
+        {canCreateChange && (
+          <Button size="sm" className="gap-1.5 shadow-sm" onClick={() => navigate("/changes/new")}>
+            <Plus className="h-3.5 w-3.5" />
+            New Change
+          </Button>
+        )}
       </div>
 
       {/* ── Stat strip ─────────────────────────────────────────────────────── */}

@@ -355,6 +355,10 @@ function RoleEditor({ open, onClose, role, duplicateFrom }: RoleEditorProps) {
       void queryClient.invalidateQueries({ queryKey: ["roles"] });
       void queryClient.invalidateQueries({ queryKey: ["roles-assignable"] });
       void queryClient.invalidateQueries({ queryKey: ["dict", "roles", "assignable"] });
+      // Invalidate every active /api/me query — if any open session belongs
+      // to a user on this role, their next render refetches their effective
+      // permissions and the sidebar / route gates update without a logout.
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
       onClose();
     },
   });

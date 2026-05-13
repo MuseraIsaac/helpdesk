@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Video Conferencing Integration — Setup Guide</title>
+<style>
+  /* ─── Page geometry ───────────────────────────────────────────────────── */
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  @media print {
+    body { font-size: 10.5pt; }
+    a { color: #1a4ed1 !important; text-decoration: none; }
+    h1, h2 { page-break-after: avoid; }
+    h2 { page-break-before: always; }
+    h2.no-break { page-break-before: avoid; }
+    table, .panel, figure { page-break-inside: avoid; }
+    .cover { page-break-after: always; }
+  }
+
+  /* ─── Base typography ──────────────────────────────────────────────────── */
+  :root {
+    --ink:    #14171c;
+    --mute:   #5a6470;
+    --line:   #d8dde4;
+    --pale:   #f5f7fa;
+    --brand:  #5b3df5;
+    --brandS: #ede9ff;
+    --ok:     #16a36b;
+    --warn:   #d2942a;
+    --bad:    #c0392b;
+  }
+  html, body { background: #fff; }
+  body {
+    color: var(--ink);
+    font: 11.5pt/1.55 -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    margin: 0; padding: 28px 36px 48px;
+    max-width: 900px; margin: 0 auto;
+  }
+  h1, h2, h3 { color: var(--ink); letter-spacing: -0.01em; }
+  h1 { font-size: 26pt; margin: 0 0 6px; font-weight: 700; }
+  h2 {
+    font-size: 17pt; margin: 28px 0 6px; padding-top: 14px;
+    border-top: 1px solid var(--line); font-weight: 700;
+  }
+  h3 { font-size: 13pt; margin: 18px 0 4px; font-weight: 600; }
+  h4 { font-size: 11pt; margin: 12px 0 2px; font-weight: 600; color: var(--mute); }
+  p  { margin: 6px 0; }
+  ul, ol { margin: 6px 0 6px 22px; }
+  li { margin: 2px 0; }
+  code {
+    background: var(--pale); padding: 1px 5px; border-radius: 4px;
+    font: 10pt "Fira Code", "Consolas", monospace; color: #2c1aa0;
+    border: 1px solid var(--line);
+  }
+  pre {
+    background: var(--pale); padding: 10px 12px; border-radius: 6px;
+    border: 1px solid var(--line); overflow-x: auto;
+    font: 9.5pt "Fira Code", "Consolas", monospace;
+  }
+  a { color: var(--brand); }
+
+  /* ─── Cover ───────────────────────────────────────────────────────────── */
+  .cover {
+    min-height: 250mm;
+    display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
+    padding: 0 6px;
+  }
+  .cover .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.18em; font-size: 9.5pt;
+    color: var(--brand); font-weight: 700; margin-bottom: 14px;
+  }
+  .cover h1 { font-size: 38pt; line-height: 1.05; max-width: 18ch; }
+  .cover .lede { font-size: 13pt; color: var(--mute); max-width: 56ch; margin-top: 16px; }
+  .cover .meta {
+    margin-top: auto; padding-top: 28px;
+    color: var(--mute); font-size: 10pt;
+    border-top: 1px solid var(--line); width: 100%;
+    display: flex; justify-content: space-between;
+  }
+  .cover .logo {
+    width: 64px; height: 64px; border-radius: 16px;
+    background: linear-gradient(135deg, var(--brand), #8d6dff);
+    box-shadow: 0 8px 24px -8px var(--brand);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 800; font-size: 22pt; margin-bottom: 32px;
+    letter-spacing: -0.02em;
+  }
+
+  /* ─── Cards & callouts ────────────────────────────────────────────────── */
+  .panel {
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; margin: 12px 0; background: #fff;
+  }
+  .panel.note   { border-left: 4px solid var(--brand); background: var(--brandS); }
+  .panel.warn   { border-left: 4px solid var(--warn);  background: #fbf6e9; }
+  .panel.danger { border-left: 4px solid var(--bad);   background: #fdecea; }
+  .panel.ok     { border-left: 4px solid var(--ok);    background: #e7f7ee; }
+  .panel .tag {
+    display: inline-block; font-size: 8.5pt; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 1px 6px; border-radius: 3px; margin-right: 6px;
+    background: #fff; border: 1px solid var(--line);
+  }
+
+  /* ─── Tables ──────────────────────────────────────────────────────────── */
+  table {
+    width: 100%; border-collapse: collapse; margin: 10px 0 6px;
+    font-size: 10.5pt;
+  }
+  th, td {
+    text-align: left; padding: 7px 9px; vertical-align: top;
+    border-bottom: 1px solid var(--line);
+  }
+  th { background: var(--pale); font-weight: 600; }
+  table.compare th:first-child, table.compare td:first-child { width: 24%; }
+
+  /* ─── Provider banner ─────────────────────────────────────────────────── */
+  .provider {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 16px; border-radius: 10px;
+    background: linear-gradient(120deg, var(--brandS), #fff);
+    border: 1px solid var(--line); margin-top: 6px;
+  }
+  .provider .pico {
+    width: 42px; height: 42px; border-radius: 10px; flex: 0 0 42px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 800; font-size: 16pt;
+  }
+  .p-google { background: #1a73e8; }
+  .p-teams  { background: #4b53bc; }
+  .p-zoom   { background: #2d8cff; }
+  .p-webex  { background: #0e9384; }
+  .provider .meta { color: var(--mute); font-size: 10pt; }
+
+  /* ─── Screenshot placeholders ─────────────────────────────────────────── */
+  figure.shot {
+    border: 1.5px dashed var(--line); border-radius: 8px;
+    padding: 30px 16px; margin: 14px 0; text-align: center;
+    color: var(--mute); background: var(--pale); font-size: 9.5pt;
+  }
+  figure.shot strong { color: var(--ink); display: block; font-size: 10pt; margin-bottom: 4px; }
+
+  /* ─── Steps ──────────────────────────────────────────────────────────── */
+  ol.steps { counter-reset: step; padding-left: 0; list-style: none; }
+  ol.steps > li {
+    position: relative; padding-left: 38px; margin: 10px 0;
+  }
+  ol.steps > li::before {
+    counter-increment: step; content: counter(step);
+    position: absolute; left: 0; top: 0;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--brand); color: #fff; font-weight: 700; font-size: 10pt;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ─── Footer-ish line for ToC ─────────────────────────────────────────── */
+  .toc { columns: 2; column-gap: 28px; margin: 18px 0; font-size: 11pt; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--brand); }
+  .toc .item { break-inside: avoid; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+  .toc .item span { color: var(--mute); font-size: 9pt; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════ COVER ═══ -->
+<section class="cover">
+  <div class="logo">Z</div>
+  <div class="eyebrow">Zentra Helpdesk · Integration Guide</div>
+  <h1>Video Conferencing Setup</h1>
+  <p class="lede">A practical walkthrough for connecting Google Meet, Microsoft Teams, Zoom, and Cisco Webex to the Video Bridge integration. Includes credential checklists, exact navigation paths, and troubleshooting for every common error.</p>
+  <div class="meta">
+    <span>Version 1.0</span>
+    <span>For administrators</span>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════ TOC ═══ -->
+<h2 class="no-break">Contents</h2>
+<div class="toc">
+  <div class="item"><a href="#how">1 · How it works</a> <span>— architecture &amp; flow</span></div>
+  <div class="item"><a href="#where">2 · Where credentials live</a> <span>— Settings → Integrations</span></div>
+  <div class="item"><a href="#google">3 · Google Meet</a> <span>— OAuth + Refresh Token</span></div>
+  <div class="item"><a href="#teams">4 · Microsoft Teams</a> <span>— Azure AD App</span></div>
+  <div class="item"><a href="#zoom">5 · Zoom</a> <span>— Server-to-Server OAuth</span></div>
+  <div class="item"><a href="#webex">6 · Cisco Webex</a> <span>— Bot Token</span></div>
+  <div class="item"><a href="#compare">7 · Comparison table</a> <span>— at a glance</span></div>
+  <div class="item"><a href="#troubleshoot">8 · Troubleshooting</a> <span>— common errors</span></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ HOW ═══ -->
+<h2 id="how">1 · How the integration works</h2>
+<p>When an agent clicks <strong>Start Bridge Call</strong> on an incident, the Helpdesk server does this:</p>
+<ol class="steps">
+  <li>Reads the <strong>Active provider</strong> from <code>Settings → Integrations → Video Bridge</code>.</li>
+  <li>Loads the credentials saved for that provider.</li>
+  <li>Calls the provider's API to create a real meeting.</li>
+  <li>Stamps the join URL onto the incident and notifies the on-call team.</li>
+</ol>
+
+<div class="panel note">
+  <span class="tag">Tip</span>
+  Only <strong>one</strong> provider is active at a time. The system stores credentials for all four simultaneously, so you can switch providers without re-entering anything.
+</div>
+
+<p>Provider implementations live in <code>server/src/lib/bridge/</code>. The <strong>Test Connection</strong> button creates and immediately deletes a real meeting — the only reliable way to verify credentials end-to-end.</p>
+
+<!-- ═══════════════════════════════════════════════ WHERE ═══ -->
+<h2 id="where">2 · Where to enter credentials</h2>
+<ol class="steps">
+  <li>Sign in to Helpdesk as an admin.</li>
+  <li>Open <strong>Settings → Integrations</strong>.</li>
+  <li>Scroll to <strong>Video Bridge (Incident Bridge Calls)</strong>.</li>
+  <li>Pick a provider from the <strong>Active provider</strong> dropdown.</li>
+  <li>Fill in the fields that appear, click <strong>Save</strong>.</li>
+  <li>Click <strong>Test Connection</strong>. ✓ <em>Connection successful</em> = done.</li>
+</ol>
+
+<figure class="shot">
+  <strong>Screenshot slot</strong>
+  Settings → Integrations → Video Bridge card with the four provider options.
+</figure>
+
+<!-- ═══════════════════════════════════════════════ GOOGLE MEET ═══ -->
+<h2 id="google">3 · Google Meet</h2>
+
+<div class="provider">
+  <div class="pico p-google">G</div>
+  <div>
+    <strong>Google Meet</strong>
+    <div class="meta">OAuth 2.0 + long-lived Refresh Token · Setup ~15 min · Tokens never expire if consent screen is Internal or Published</div>
+  </div>
+</div>
+
+<h3>What you need</h3>
+<table>
+  <tr><th>Field</th><th>Source</th></tr>
+  <tr><td>OAuth Client ID</td><td>Google Cloud Console → Credentials → OAuth 2.0 Client IDs</td></tr>
+  <tr><td>OAuth Client Secret</td><td>Same credential entry</td></tr>
+  <tr><td>Refresh Token</td><td>Generated via OAuth Playground</td></tr>
+</table>
+
+<h3>3.1 Create a Google Cloud project</h3>
+<ol class="steps">
+  <li>Open <a href="https://console.cloud.google.com">console.cloud.google.com</a>.</li>
+  <li>Top-left <strong>project picker → New Project</strong>.</li>
+  <li>Name: <code>Zentra Video Meet</code>. If the <strong>Organization</strong> dropdown shows your Workspace domain, keep it selected.</li>
+  <li><strong>Create</strong> and wait ~10 s.</li>
+</ol>
+
+<figure class="shot">
+  <strong>Screenshot slot</strong>
+  Google Cloud Console — New Project dialog.
+</figure>
+
+<h3>3.2 Enable the Calendar API</h3>
+<p>From the project, open <strong>APIs &amp; Services → Library</strong>, search for <strong>Google Calendar API</strong>, click <strong>Enable</strong>. Optionally also enable <strong>Google Meet API</strong> for richer metadata.</p>
+
+<div class="panel warn">
+  <span class="tag">Note</span>
+  Skipping this step is the #1 cause of <code>403 accessNotConfigured</code> when you click Test Connection.
+</div>
+
+<h3>3.3 Configure the OAuth consent screen</h3>
+<ol class="steps">
+  <li>Open <strong>APIs &amp; Services → OAuth consent screen</strong>.</li>
+  <li>User type: <strong>Internal</strong> (if on Workspace) or <strong>External</strong> (personal Gmail).</li>
+  <li>Fill in App name, support email, developer email → <strong>Save and continue</strong>.</li>
+  <li>Skip Scopes → continue.</li>
+  <li>External only: add the authorizing user under <strong>Test users</strong>.</li>
+  <li>If status is "Testing" and user type is External, click <strong>Publish app</strong> — this is what gives the refresh token an indefinite lifetime.</li>
+</ol>
+
+<h3>3.4 Create the OAuth client</h3>
+<ol class="steps">
+  <li><strong>APIs &amp; Services → Credentials → + Create Credentials → OAuth client ID</strong>.</li>
+  <li><strong>Application type</strong>: must be <strong>Web application</strong> (other types can't use the refresh-token flow).</li>
+  <li>Name: <code>Zentra Helpdesk Bridge</code>.</li>
+  <li>
+    <strong>Authorized JavaScript origins</strong>:
+    <pre>https://developers.google.com</pre>
+  </li>
+  <li>
+    <strong>Authorized redirect URIs</strong>:
+    <pre>https://developers.google.com/oauthplayground</pre>
+  </li>
+  <li>Click <strong>Create</strong>. Copy <strong>Client ID</strong> and <strong>Client Secret</strong> from the dialog — the secret is shown only at creation.</li>
+</ol>
+
+<figure class="shot">
+  <strong>Screenshot slot</strong>
+  Create OAuth client — Web application form with JS origin and redirect URI filled.
+</figure>
+
+<h3>3.5 Generate a refresh token via OAuth Playground</h3>
+<ol class="steps">
+  <li>Open <a href="https://developers.google.com/oauthplayground">developers.google.com/oauthplayground</a>.</li>
+  <li>Click the <strong>⚙ gear</strong> (top right) → tick <strong>Use your own OAuth credentials</strong> → paste your Client ID and Secret → Close.</li>
+  <li>Step 1 — in the <strong>Input your own scopes</strong> box paste:
+    <pre>https://www.googleapis.com/auth/calendar.events</pre>
+    Click <strong>Authorize APIs</strong>, sign in, click <strong>Allow</strong>.
+  </li>
+  <li>Step 2 — click <strong>Exchange authorization code for tokens</strong>. Copy the <strong>Refresh token</strong> (starts <code>1//…</code>).</li>
+</ol>
+
+<figure class="shot">
+  <strong>Screenshot slot</strong>
+  OAuth Playground Step 2 showing the refresh token after exchange.
+</figure>
+
+<h3>3.6 Paste into Helpdesk</h3>
+<table>
+  <tr><th>Field</th><th>Value</th></tr>
+  <tr><td>Active provider</td><td><strong>Google Meet</strong></td></tr>
+  <tr><td>OAuth Client ID</td><td>from 3.4</td></tr>
+  <tr><td>OAuth Client Secret</td><td>from 3.4</td></tr>
+  <tr><td>Refresh Token</td><td>from 3.5</td></tr>
+</table>
+
+<h3>Common Google Meet errors</h3>
+<table>
+  <tr><th>Error</th><th>Cause &amp; fix</th></tr>
+  <tr><td><code>accessNotConfigured</code> / 403</td><td>Calendar API not enabled → step 3.2.</td></tr>
+  <tr><td><code>unauthorized_client</code></td><td>Client Secret rotated, or app type isn't "Web application" → step 3.4.</td></tr>
+  <tr><td><code>invalid_grant</code></td><td>Refresh token revoked / cross-bound / has whitespace → regenerate in 3.5.</td></tr>
+  <tr><td>"Request access" page</td><td>Wrong Google account signed in → switch via the avatar top-right.</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════ TEAMS ═══ -->
+<h2 id="teams">4 · Microsoft Teams</h2>
+
+<div class="provider">
+  <div class="pico p-teams">T</div>
+  <div>
+    <strong>Microsoft Teams</strong>
+    <div class="meta">Azure AD App Registration with application permissions · Setup ~30 min · Requires Global Admin consent + Teams policy grant</div>
+  </div>
+</div>
+
+<h3>What you need</h3>
+<table>
+  <tr><th>Field</th><th>Source</th></tr>
+  <tr><td>Tenant ID</td><td>Azure AD Overview</td></tr>
+  <tr><td>Client ID</td><td>App Registration Overview</td></tr>
+  <tr><td>Client Secret</td><td>App Registration → Certificates &amp; secrets</td></tr>
+  <tr><td>Organizer User ID</td><td>UPN (email) or Object ID of the meeting organizer</td></tr>
+</table>
+
+<h3>4.1 Register the app</h3>
+<ol class="steps">
+  <li>Open <a href="https://portal.azure.com">portal.azure.com</a> as a tenant admin.</li>
+  <li>Search <strong>Azure Active Directory</strong> (now <strong>Microsoft Entra ID</strong>).</li>
+  <li><strong>App registrations → + New registration</strong>.</li>
+  <li>Name: <code>Zentra Helpdesk Bridge</code>.</li>
+  <li>Supported account types: <strong>Single tenant</strong>.</li>
+  <li>Redirect URI: leave blank.</li>
+  <li><strong>Register</strong>.</li>
+</ol>
+
+<figure class="shot">
+  <strong>Screenshot slot</strong>
+  Azure — App Registration form.
+</figure>
+
+<h3>4.2 Copy Tenant ID and Client ID</h3>
+<p>On the Overview page: copy <strong>Application (client) ID</strong> and <strong>Directory (tenant) ID</strong>.</p>
+
+<h3>4.3 Create a Client Secret</h3>
+<ol class="steps">
+  <li><strong>Certificates &amp; secrets → + New client secret</strong>.</li>
+  <li>Expires: 24 months (or per policy).</li>
+  <li><strong>Add</strong>.</li>
+  <li><strong>Copy the Value column immediately</strong> — shown once only.</li>
+</ol>
+
+<div class="panel danger">
+  <span class="tag">Critical</span>
+  If you don't copy the secret value at this exact moment, delete the secret and create a new one. Azure will not show it again.
+</div>
+
+<h3>4.4 Grant API permissions</h3>
+<ol class="steps">
+  <li><strong>API permissions → + Add a permission → Microsoft Graph → Application permissions</strong> (not Delegated).</li>
+  <li>Tick <strong><code>OnlineMeetings.ReadWrite.All</code></strong> → <strong>Add permissions</strong>.</li>
+  <li>Click <strong>Grant admin consent for &lt;tenant&gt;</strong> — needs Global Admin.</li>
+</ol>
+
+<h3>4.5 Authorize the app to impersonate the organizer</h3>
+<p>Teams meeting creation via application permissions also requires an <strong>application access policy</strong>:</p>
+<pre>Install-Module MicrosoftTeams -Scope CurrentUser
+Connect-MicrosoftTeams
+New-CsApplicationAccessPolicy -Identity Zentra-Bridge -AppIds "&lt;APP_ID&gt;" -Description "Allow Zentra to schedule meetings on behalf of users"
+Grant-CsApplicationAccessPolicy -PolicyName Zentra-Bridge -Identity "&lt;UPN&gt;"</pre>
+<p>Wait ~30 min for the policy to propagate.</p>
+
+<h3>4.6 Paste into Helpdesk</h3>
+<table>
+  <tr><th>Field</th><th>Value</th></tr>
+  <tr><td>Active provider</td><td><strong>Microsoft Teams</strong></td></tr>
+  <tr><td>Tenant ID</td><td>from 4.2</td></tr>
+  <tr><td>Client ID</td><td>from 4.2</td></tr>
+  <tr><td>Client Secret</td><td>from 4.3</td></tr>
+  <tr><td>Organizer User ID</td><td>UPN e.g. <code>support@yourcompany.com</code></td></tr>
+</table>
+
+<h3>Common Teams errors</h3>
+<table>
+  <tr><th>Error</th><th>Cause &amp; fix</th></tr>
+  <tr><td><code>AADSTS7000215: Invalid client secret</code></td><td>Secret wrong or rotated → regenerate in 4.3.</td></tr>
+  <tr><td><code>Forbidden</code> on meeting create</td><td>Application access policy not granted, or wrong UPN → step 4.5.</td></tr>
+  <tr><td><code>AADSTS500011</code></td><td>Admin consent not granted on Graph permissions → step 4.4.</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════ ZOOM ═══ -->
+<h2 id="zoom">5 · Zoom</h2>
+
+<div class="provider">
+  <div class="pico p-zoom">Z</div>
+  <div>
+    <strong>Zoom</strong>
+    <div class="meta">Server-to-Server OAuth · Setup ~5 min · No user consent, no expiry</div>
+  </div>
+</div>
+
+<h3>What you need</h3>
+<table>
+  <tr><th>Field</th><th>Source</th></tr>
+  <tr><td>Account ID</td><td>Zoom Marketplace → App Credentials</td></tr>
+  <tr><td>Client ID</td><td>Same page</td></tr>
+  <tr><td>Client Secret</td><td>Same page</td></tr>
+</table>
+
+<h3>5.1 Create the Server-to-Server OAuth app</h3>
+<ol class="steps">
+  <li>Open <a href="https://marketplace.zoom.us">marketplace.zoom.us</a>, sign in.</li>
+  <li>Top-right <strong>Develop → Build App</strong>.</li>
+  <li>Pick <strong>Server-to-Server OAuth</strong> → <strong>Create</strong>.</li>
+  <li>Name: <code>Zentra Helpdesk Bridge</code>.</li>
+</ol>
+
+<h3>5.2 Copy credentials</h3>
+<p>On <strong>App Credentials</strong>: copy <strong>Account ID</strong>, <strong>Client ID</strong>, <strong>Client Secret</strong>.</p>
+
+<h3>5.3 Configure scopes</h3>
+<ol class="steps">
+  <li><strong>Information</strong>: fill mandatory fields.</li>
+  <li><strong>Scopes</strong> → add:
+    <ul>
+      <li><code>meeting:write:admin</code> — create meetings</li>
+      <li><code>meeting:read:admin</code> — read meetings (Test Connection uses this)</li>
+    </ul>
+  </li>
+  <li><strong>Continue → Activation → Activate your app</strong>.</li>
+</ol>
+
+<h3>5.4 Paste into Helpdesk</h3>
+<table>
+  <tr><th>Field</th><th>Value</th></tr>
+  <tr><td>Active provider</td><td><strong>Zoom</strong></td></tr>
+  <tr><td>Account ID</td><td>from 5.2</td></tr>
+  <tr><td>Client ID</td><td>from 5.2</td></tr>
+  <tr><td>Client Secret</td><td>from 5.2</td></tr>
+</table>
+
+<h3>Common Zoom errors</h3>
+<table>
+  <tr><th>Error</th><th>Cause &amp; fix</th></tr>
+  <tr><td><code>Invalid client_id or client_secret</code></td><td>Wrong creds → re-copy from 5.2.</td></tr>
+  <tr><td>Invalid access token immediately after save</td><td>App not activated → 5.3 → Activate.</td></tr>
+  <tr><td><code>4711</code> missing scopes</td><td>Scopes not granted → add both, reactivate.</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════ WEBEX ═══ -->
+<h2 id="webex">6 · Cisco Webex</h2>
+
+<div class="provider">
+  <div class="pico p-webex">W</div>
+  <div>
+    <strong>Cisco Webex</strong>
+    <div class="meta">Bot Token · Setup ~3 min · No OAuth, no expiry (bot tokens are permanent)</div>
+  </div>
+</div>
+
+<h3>What you need</h3>
+<table>
+  <tr><th>Field</th><th>Source</th></tr>
+  <tr><td>Bot Token</td><td>developer.webex.com → your bot</td></tr>
+  <tr><td>Site URL</td><td>Your Webex domain, e.g. <code>company.webex.com</code></td></tr>
+</table>
+
+<h3>6.1 Create a bot</h3>
+<ol class="steps">
+  <li>Open <a href="https://developer.webex.com/my-apps">developer.webex.com/my-apps</a>, sign in.</li>
+  <li><strong>Create a New App → Bot</strong>.</li>
+  <li>Bot name: <code>Zentra Helpdesk</code>; bot username must be globally unique, e.g. <code>zentra-helpdesk@webex.bot</code>.</li>
+  <li><strong>Add Bot</strong>.</li>
+  <li>Copy the <strong>Bot Access Token</strong> — shown once. Regenerate via My Apps → bot → Regenerate access token if lost.</li>
+</ol>
+
+<div class="panel warn">
+  <span class="tag">Production note</span>
+  Use a <strong>bot token</strong> in production — permanent. <strong>Personal Access Tokens</strong> from developer.webex.com expire after 12 h and are fine only for short-lived testing.
+</div>
+
+<h3>6.2 Site URL</h3>
+<p>The domain you sign in to, e.g. <code>company.webex.com</code> — no <code>https://</code> and no path.</p>
+
+<h3>6.3 Paste into Helpdesk</h3>
+<table>
+  <tr><th>Field</th><th>Value</th></tr>
+  <tr><td>Active provider</td><td><strong>Cisco Webex</strong></td></tr>
+  <tr><td>Bot Token</td><td>from 6.1</td></tr>
+  <tr><td>Site URL</td><td>from 6.2</td></tr>
+</table>
+
+<h3>Common Webex errors</h3>
+<table>
+  <tr><th>Error</th><th>Cause &amp; fix</th></tr>
+  <tr><td><code>401 Unauthorized</code></td><td>Wrong or expired token → regenerate.</td></tr>
+  <tr><td><code>403 Forbidden — meeting:create</code></td><td>Bot not licensed for meetings — use a licensed user's PAT or an Integration.</td></tr>
+  <tr><td><code>404</code> on <code>/meetings</code></td><td>Wrong site URL → no <code>https://</code>, no trailing path.</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════ COMPARE ═══ -->
+<h2 id="compare">7 · Provider comparison</h2>
+<table class="compare">
+  <tr><th>Provider</th><th>Auth method</th><th>Setup</th><th>Lifetime</th><th>Admin consent</th></tr>
+  <tr><td><strong>Google Meet</strong></td><td>OAuth 2.0 + Refresh Token</td><td>~15 min</td><td>Indefinite if Published / Internal</td><td>Workspace admin if Internal</td></tr>
+  <tr><td><strong>Teams</strong></td><td>OAuth 2.0 Client Credentials</td><td>~30 min</td><td>Secret 24 mo</td><td>Yes — Global Admin</td></tr>
+  <tr><td><strong>Zoom</strong></td><td>Server-to-Server OAuth</td><td>~5 min</td><td>Indefinite</td><td>No</td></tr>
+  <tr><td><strong>Webex</strong></td><td>Bot Token</td><td>~3 min</td><td>Indefinite</td><td>No</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════ TROUBLESHOOT ═══ -->
+<h2 id="troubleshoot">8 · Troubleshooting cheat sheet</h2>
+<ol>
+  <li><strong><code>[none] No video bridge provider is configured</code></strong> — Active provider is still set to None.</li>
+  <li><strong><code>Incomplete &lt;provider&gt; configuration</code></strong> — one of the required fields is blank.</li>
+  <li><strong>Test passes but agents see no link</strong> — check incident detail page; check server logs for the provider-specific error.</li>
+  <li><strong>Worked yesterday, fails today</strong> — rotated Google secret, expired Webex PAT (12 h), or revoked OAuth consent. Bot tokens, refreshed Google tokens (Published), and Zoom S2S do not expire.</li>
+</ol>
+
+<div class="panel ok">
+  <span class="tag">Pro tip</span>
+  When Test Connection fails, server logs print the exact provider response. Open <code>server</code> stdout (or your hosting log viewer) and look for lines starting with <code>[googlemeet]</code>, <code>[teams]</code>, <code>[zoom]</code>, <code>[webex]</code>. The error is always more specific in the log than in the toast.
+</div>
+
+<p style="margin-top:42px;color:var(--mute);font-size:9.5pt;text-align:center;border-top:1px solid var(--line);padding-top:14px;">
+Zentra Helpdesk · Video Conferencing Setup Guide v1.0 · Update this doc whenever the providers' UIs materially change.
+</p>
+
+</body>
+</html>

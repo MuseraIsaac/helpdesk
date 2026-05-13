@@ -60,6 +60,7 @@ const LIST_SELECT = {
   bridgeCallUrl: true,
   bridgeCallProvider: true,
   bridgeCallCreatedAt: true,
+  bridgeCallDetails: true,
 } as const;
 
 const CI_SUMMARY_SELECT = {

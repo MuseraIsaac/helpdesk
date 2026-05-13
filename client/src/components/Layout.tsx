@@ -12,6 +12,9 @@ import {
 } from "../lib/nav-config";
 import { signOut, useSession } from "../lib/auth-client";
 import { useBranding } from "../lib/useBranding";
+import { useMe } from "@/hooks/useMe";
+import { usePermissionsVersion } from "@/hooks/usePermissionsVersion";
+import { can } from "core/constants/permission.ts";
 import ProfileMenu from "./ProfileMenu";
 import NotificationBell from "./NotificationBell";
 import GlobalSearch from "./GlobalSearch";
@@ -296,61 +299,101 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
         )}
       </div>
 
-      {/* ── Navigation ── */}
+      {/* ── Navigation ──
+          Sections and items are filtered by `isNavSectionVisible` /
+          `isNavItemVisible` against the user's role. Anything the role
+          cannot view is removed from the DOM entirely — not just visually
+          hidden — so there's no risk of leaking restricted module names.
+          The first render fades each row in with a staggered delay so
+          the filtered list feels intentional rather than abrupt. */}
       <nav className="flex-1 overflow-y-auto py-2 px-2 min-h-0 sidebar-scrollbar">
-        {NAV_SECTIONS
-          .filter((s) => {
-            if (s.id === "demo-data" && !showDemoData) return false;
-            return isNavSectionVisible(s, role);
-          })
-          .map((section: NavSection) => {
-          const visibleItems = section.items.filter((item) => isNavItemVisible(item, role));
-          // In collapsed-rail mode the chevron is meaningless (the labels
-          // aren't rendered), so we always show every visible item there.
-          const expanded = collapsed ? true : isSectionExpanded(section);
-          return (
-            <div
-              key={section.id}
-              className="nav-section"
-              style={section.accent ? ({ ["--nav-accent" as string]: section.accent } as React.CSSProperties) : undefined}
-            >
-              {!collapsed
-                ? section.collapsible
-                    ? <CollapsibleSectionHeader
-                        label={section.label}
-                        count={visibleItems.length}
-                        expanded={expanded}
-                        onToggle={() => toggleSection(section.id)}
-                      />
-                    : <SectionLabel label={section.label} />
-                : <div className="h-px bg-sidebar-border mx-2 my-2" aria-hidden />
-              }
-              {/* Smooth expand/collapse — uses grid-template-rows trick so
-                  height transitions even though the inner content height
-                  is unknown at compile time. */}
+        {(() => {
+          const visibleSections = NAV_SECTIONS
+            .filter((s) => {
+              if (s.id === "demo-data" && !showDemoData) return false;
+              return isNavSectionVisible(s, role);
+            });
+
+          // If the user has zero modules visible (e.g. a custom role with
+          // only `dashboard.manage_own`), show a polite empty-state instead
+          // of a barren strip of section labels.
+          if (visibleSections.length === 0 && !collapsed) {
+            return (
+              <div className="px-3 py-10 flex flex-col items-center text-center gap-2 animate-in fade-in duration-500">
+                <div className="h-9 w-9 rounded-xl bg-sidebar-accent/60 border border-sidebar-border flex items-center justify-center">
+                  <Settings className="h-4 w-4 text-sidebar-foreground/40" />
+                </div>
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-sidebar-foreground/40">
+                  Limited access
+                </p>
+                <p className="text-[11px] text-sidebar-foreground/45 leading-relaxed max-w-[180px]">
+                  Your role doesn't include any modules yet. Ask an admin to grant view access.
+                </p>
+              </div>
+            );
+          }
+
+          let runningRowIndex = 0;
+          return visibleSections.map((section: NavSection) => {
+            const visibleItems = section.items.filter((item) => isNavItemVisible(item, role));
+            const expanded = collapsed ? true : isSectionExpanded(section);
+            return (
               <div
-                className={[
-                  "grid transition-[grid-template-rows] duration-200 ease-out",
-                  expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-                ].join(" ")}
+                key={section.id}
+                className="nav-section"
+                style={section.accent ? ({ ["--nav-accent" as string]: section.accent } as React.CSSProperties) : undefined}
               >
-                <div className="overflow-hidden">
-                  <div className="space-y-0.5">
-                    {visibleItems.map((item) => (
-                      <SidebarNavItem key={item.id} item={item} collapsed={collapsed} onClick={onClose} />
-                    ))}
+                {!collapsed
+                  ? section.collapsible
+                      ? <CollapsibleSectionHeader
+                          label={section.label}
+                          count={visibleItems.length}
+                          expanded={expanded}
+                          onToggle={() => toggleSection(section.id)}
+                        />
+                      : <SectionLabel label={section.label} />
+                  : <div className="h-px bg-sidebar-border mx-2 my-2" aria-hidden />
+                }
+                <div
+                  className={[
+                    "grid transition-[grid-template-rows] duration-200 ease-out",
+                    expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+                  ].join(" ")}
+                >
+                  <div className="overflow-hidden">
+                    <div className="space-y-0.5">
+                      {visibleItems.map((item) => {
+                        // Staggered fade-in: each row starts ~22 ms after the
+                        // previous one, capped so the last item doesn't lag
+                        // unreasonably on the rare role with 20+ items.
+                        const delay = Math.min(runningRowIndex++ * 22, 360);
+                        return (
+                          <div
+                            key={item.id}
+                            className="nav-row-enter"
+                            style={{ animationDelay: `${delay}ms` }}
+                          >
+                            <SidebarNavItem item={item} collapsed={collapsed} onClick={onClose} />
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          });
+        })()}
       </nav>
 
       {/* ── Footer ── */}
       <div className="shrink-0 border-t border-sidebar-border">
 
-        {/* Settings link */}
+        {/* Settings link — gated on settings.view so we don't show a gear
+            that lands the user on a page they can't access. Admins have
+            this by default; admins can grant it to any other role via
+            Roles & Permissions. */}
+        {can(role, "settings.view") && (
         <div className="px-2 pt-2 pb-1">
           <NavLink
             to="/settings"
@@ -378,6 +421,7 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
             )}
           </NavLink>
         </div>
+        )}
 
         {/* User block */}
         {collapsed ? (
@@ -457,6 +501,20 @@ export default function Layout() {
   const { pathname } = useLocation();
   const { collapsed, toggle } = useSidebarCollapsed();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Pull the user's effective permissions from /api/me and hydrate the
+  // client-side ROLE_PERMISSIONS map. Without this, the client uses the
+  // BUILTIN_ROLE_PERMISSIONS seeds forever — meaning admin edits in
+  // Roles & Permissions visibly affect the API but not the sidebar /
+  // route gates / button gates until the user logs out and back in. The
+  // hook itself dedupes via TanStack Query (queryKey "me") so this is a
+  // free call on top of the existing /api/me usage elsewhere.
+  useMe();
+  // Subscribe to the global ROLE_PERMISSIONS map so the sidebar re-renders
+  // whenever /api/me hydrates the map or an admin saves a role change.
+  // The returned version number isn't used directly — its identity is
+  // what triggers the re-render.
+  usePermissionsVersion();
 
   const role  = session?.user?.role  ?? "";
   const name  = session?.user?.name  ?? "";

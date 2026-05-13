@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { Link, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth-client";
+import { useCan } from "@/hooks/useCan";
 import axios from "axios";
 import type { Problem } from "core/constants/problem.ts";
 import { problemStatuses, problemStatusLabel } from "core/constants/problem-status.ts";
@@ -141,6 +142,7 @@ function StatChip({
 
 export default function ProblemsPage() {
   const navigate = useNavigate();
+  const canManageProblems = useCan("problems.manage");
   const { data: session } = useSession();
   const currentUserId = session?.user?.id ?? "";
   void currentUserId;
@@ -238,10 +240,12 @@ export default function ProblemsPage() {
             </p>
           </div>
         </div>
-        <Button size="sm" className="gap-1.5 shadow-sm" onClick={() => navigate("/problems/new")}>
-          <Plus className="h-4 w-4" />
-          New Problem
-        </Button>
+        {canManageProblems && (
+          <Button size="sm" className="gap-1.5 shadow-sm" onClick={() => navigate("/problems/new")}>
+            <Plus className="h-4 w-4" />
+            New Problem
+          </Button>
+        )}
       </div>
 
       {/* ── Stat strip ── */}
@@ -392,12 +396,12 @@ export default function ProblemsPage() {
               <Filter className="h-3 w-3" />
               Clear filters
             </Button>
-          ) : (
+          ) : canManageProblems ? (
             <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => navigate("/problems/new")}>
               <Plus className="h-3.5 w-3.5" />
               New Problem
             </Button>
-          )}
+          ) : null}
         </div>
       ) : (
         <div className="rounded-xl border bg-card shadow-sm overflow-hidden">

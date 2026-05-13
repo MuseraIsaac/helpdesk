@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useCan } from "@/hooks/useCan";
 import { Link } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
@@ -221,6 +222,7 @@ const FILTER_CHIPS: FilterChip[] = [
 ];
 
 export default function SaaSSubscriptionsPage() {
+  const canCreateSoftware = useCan("software.create");
   const [chipKey,      setChipKey]      = useState("all");
   const [search,       setSearch]       = useState("");
   const [catFilter,    setCatFilter]    = useState<string>("");
@@ -307,7 +309,7 @@ export default function SaaSSubscriptionsPage() {
             </p>
           </div>
         </div>
-        <NewSubscriptionDialog onCreated={() => {}} />
+        {canCreateSoftware && <NewSubscriptionDialog onCreated={() => {}} />}
       </div>
 
       {/* Stats bar */}

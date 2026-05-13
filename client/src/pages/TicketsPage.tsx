@@ -14,6 +14,7 @@ import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
+import { useCan } from "@/hooks/useCan";
 import { type TicketStatus }   from "core/constants/ticket-status.ts";
 import { type TicketType }     from "core/constants/ticket-type.ts";
 import { type TicketCategory, categoryLabel } from "core/constants/ticket-category.ts";
@@ -368,7 +369,8 @@ interface TicketScope {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function TicketsPage() {
-  const navigate     = useNavigate();
+  const navigate          = useNavigate();
+  const canCreateTicket   = useCan("tickets.create");
   const qc           = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [customizerOpen, setCustomizerOpen] = useState(false);
@@ -517,9 +519,11 @@ export default function TicketsPage() {
             <Columns3 className="h-4 w-4" />
             Columns
           </Button>
-          <Button onClick={() => navigate("/tickets/new")} size="sm" className="h-8 shadow-sm">
-            <Plus className="h-4 w-4 mr-1" />New Ticket
-          </Button>
+          {canCreateTicket && (
+            <Button onClick={() => navigate("/tickets/new")} size="sm" className="h-8 shadow-sm">
+              <Plus className="h-4 w-4 mr-1" />New Ticket
+            </Button>
+          )}
         </div>
       </div>
 

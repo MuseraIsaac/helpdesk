@@ -1560,6 +1560,11 @@ model Incident {
   bridgeCallProvider  String?   @map("bridge_call_provider")
   /// When the bridge was created — shown in the UI for context.
   bridgeCallCreatedAt DateTime? @map("bridge_call_created_at")
+  /// Rich meeting details (dial-in numbers, meeting ID, PIN). Provider-shaped
+  /// JSON; consumed by the "Copy meeting details" action so the clipboard
+  /// includes more than just the URL. Optional — older bridge calls created
+  /// before this column existed will gracefully fall back to URL-only copy.
+  bridgeCallDetails   Json?     @map("bridge_call_details")
 
   updates          IncidentUpdate[]
   attachments      IncidentAttachment[]

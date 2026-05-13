@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import type {
@@ -5,6 +6,7 @@ import type {
   UpdatePreferencesInput,
   ChangePasswordInput,
 } from "core/schemas/preferences.ts";
+import { setRolePermissions, type Permission } from "core/constants/permission.ts";
 
 export interface UserPreference {
   jobTitle: string | null;
@@ -28,10 +30,17 @@ export interface MeUser {
   role: string;
   createdAt: string;
   preference: UserPreference | null;
+  /**
+   * Server-computed effective permissions for the current user's role.
+   * Reflects any admin edits to the role definition since boot, so the
+   * client UI gates (sidebar, route guards, button visibility) stay in
+   * sync with what the API will actually authorise.
+   */
+  permissions: Permission[];
 }
 
 export function useMe() {
-  return useQuery<{ user: MeUser }>({
+  const query = useQuery<{ user: MeUser }>({
     queryKey: ["me"],
     queryFn: async () => {
       const { data } = await axios.get("/api/me");
@@ -43,6 +52,21 @@ export function useMe() {
     // prevents redundant fetches on every page mount.
     staleTime: 5 * 60 * 1000,
   });
+
+  // Hydrate the in-memory ROLE_PERMISSIONS map with the server's effective
+  // permission list whenever /api/me resolves. Without this, the client
+  // permanently uses BUILTIN_ROLE_PERMISSIONS (the seeds from
+  // permission.ts), so admin edits in Roles & Permissions never visibly
+  // affect the sidebar / route gates / button gates for live sessions.
+  const role  = query.data?.user?.role;
+  const perms = query.data?.user?.permissions;
+  useEffect(() => {
+    if (role && perms) {
+      setRolePermissions({ [role]: perms });
+    }
+  }, [role, perms]);
+
+  return query;
 }
 
 export function useUpdateProfile() {

@@ -146,12 +146,8 @@ export type Permission =
   | "tickets.view"
   | "tickets.create"
   | "tickets.update"
-  | "notes.view"
-  | "notes.create"
-  | "notes.manage_any"
-  | "attachments.delete_any"
-  | "replies.create"
-  | "macros.view"
+  | "notes.manage_any"        // Delete or modify any note (not just your own)
+  | "attachments.delete_any"  // Delete attachments uploaded by others
   | "macros.create"
   | "macros.manage"
   | "templates.view"
@@ -167,22 +163,17 @@ export type Permission =
   | "problems.manage"
 
   // ── Change Management ─────────────────────────────────────────────────────
-  // Granular lifecycle permissions allow routes and middleware to enforce
-  // phase-appropriate access without a blanket manage gate.
+  // Lifecycle permissions are scoped to the four transitions actually enforced
+  // in routes today: view, create, update (during draft/assess), approve (CAB),
+  // and a blanket `manage` for admins. Granular lifecycle gates that were never
+  // wired (schedule / implement / review / close / cancel / manage_conflicts)
+  // were removed in the permission audit — re-add them only when the matching
+  // route enforcement and UI gating is implemented together.
   | "changes.view"             // Read any change, tasks, and history
   | "changes.create"           // Draft and submit new change requests
   | "changes.update"           // Edit fields during draft/assess/authorize
-  | "changes.schedule"         // Place an authorized change on the change calendar
-  | "changes.implement"        // Advance to implementation; update task progress
-  | "changes.review"           // Record PIR outcomes; close review tasks
-  | "changes.close"            // Formally close after review
-  | "changes.cancel"           // Cancel before implementation begins
   | "changes.approve"          // CAB / ECAB formal approval authority
-  | "changes.manage_conflicts" // Detect and resolve change-calendar conflicts
   | "changes.manage"           // Full CRUD override (admin/supervisor; implies all above)
-
-  | "tasks.view"
-  | "tasks.manage"
 
   // ── Asset & Configuration Management ──────────────────────────────────────
   | "cmdb.view"
@@ -197,12 +188,9 @@ export type Permission =
   | "software.view"    // View software licenses and SaaS subscriptions
   | "software.create"  // Register new licenses / subscriptions; assign seats
   | "software.manage"  // Full CRUD including revoke, delete, lifecycle management
-  | "services.view"
-  | "services.manage"
 
   // ── Contacts (Customers & Organizations) ──────────────────────────────────
   | "contacts.view"
-  | "contacts.manage"
 
   // ── Catalog & Workflow ─────────────────────────────────────────────────────
   | "catalog.view"
@@ -211,7 +199,6 @@ export type Permission =
   | "approvals.view"
   | "approvals.respond"
   | "workflows.view"
-  | "workflows.manage"
   | "scenarios.run"
   | "scenarios.manage"
 
@@ -227,15 +214,14 @@ export type Permission =
   | "teams.manage"
   | "cab.manage"
   | "kb.manage"
-  | "integrations.manage"
-  | "audit.view"
   | "reports.view"
   | "reports.advanced_view"
   | "reports.manage"    // Create, edit, delete saved/custom reports
   | "reports.share"     // Share reports with other users or teams
   | "reports.schedule"  // Schedule report delivery via email
   | "reports.export"    // Export report data as CSV / XLSX
-  | "ticket_types.manage";
+  | "ticket_types.manage"
+  | "settings.view";    // Access the /settings/* pages (sidebar gear icon)
 
 // ── Role permission arrays ─────────────────────────────────────────────────────
 //
@@ -251,12 +237,8 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "tickets.view",
   "tickets.create",
   "tickets.update",
-  "notes.view",
-  "notes.create",
   "notes.manage_any",
   "attachments.delete_any",
-  "replies.create",
-  "macros.view",
   "macros.create",
   "macros.manage",
   "templates.view",
@@ -269,20 +251,12 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "requests.manage",
   "problems.view",
   "problems.manage",
-  // Change Management — full lifecycle authority for admin
+  // Change Management — admin has the blanket override
   "changes.view",
   "changes.create",
   "changes.update",
-  "changes.schedule",
-  "changes.implement",
-  "changes.review",
-  "changes.close",
-  "changes.cancel",
   "changes.approve",
-  "changes.manage_conflicts",
   "changes.manage",
-  "tasks.view",
-  "tasks.manage",
   // Asset & Configuration Management
   "cmdb.view",
   "cmdb.manage",
@@ -296,11 +270,8 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "software.view",
   "software.create",
   "software.manage",
-  "services.view",
-  "services.manage",
   // Contacts
   "contacts.view",
-  "contacts.manage",
   // Catalog & Workflow
   "catalog.view",
   "catalog.manage",
@@ -308,7 +279,6 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "approvals.view",
   "approvals.respond",
   "workflows.view",
-  "workflows.manage",
   "scenarios.run",
   "scenarios.manage",
   // Automation Platform
@@ -322,8 +292,6 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "teams.manage",
   "cab.manage",
   "kb.manage",
-  "integrations.manage",
-  "audit.view",
   "reports.view",
   "reports.advanced_view",
   "reports.manage",
@@ -331,6 +299,7 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "reports.schedule",
   "reports.export",
   "ticket_types.manage",
+  "settings.view",
 ];
 
 /**
@@ -347,12 +316,8 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "tickets.view",
   "tickets.create",
   "tickets.update",
-  "notes.view",
-  "notes.create",
   "notes.manage_any",
   "attachments.delete_any",
-  "replies.create",
-  "macros.view",
   "macros.create",
   "macros.manage",
   "templates.view",
@@ -365,20 +330,12 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "requests.manage",
   "problems.view",
   "problems.manage",
-  // Change Management — supervisor has full lifecycle + CAB approval authority
+  // Change Management — supervisor has CAB approval + blanket manage
   "changes.view",
   "changes.create",
   "changes.update",
-  "changes.schedule",         // Supervisor governs the change calendar
-  "changes.implement",
-  "changes.review",
-  "changes.close",
-  "changes.cancel",
-  "changes.approve",          // CAB / change approval authority
-  "changes.manage_conflicts", // Conflict detection across the change calendar
+  "changes.approve",
   "changes.manage",
-  "tasks.view",
-  "tasks.manage",
   // Asset & Configuration Management
   "cmdb.view",
   "cmdb.manage",
@@ -392,18 +349,15 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "software.view",
   "software.create",
   "software.manage",
-  "services.view",
-  "services.manage",
   // Contacts
   "contacts.view",
-  "contacts.manage",
   // Catalog & Workflow
   "catalog.view",
   "catalog.manage",
   "catalog.request",
   "approvals.view",
   "approvals.respond",
-  "workflows.view",    // Read-only workflow visibility; cannot edit definitions
+  "workflows.view",
   "scenarios.run",
   "scenarios.manage",
   // Automation Platform — supervisor can view and test but not manage
@@ -411,7 +365,6 @@ const SUPERVISOR_PERMISSIONS: Permission[] = [
   "automations.test",
   // Platform Administration
   "kb.manage",
-  "audit.view",
   "reports.view",
   "reports.advanced_view",
   "reports.manage",
@@ -439,42 +392,32 @@ const AGENT_PERMISSIONS: Permission[] = [
   "tickets.view",
   "tickets.create",
   "tickets.update",
-  "notes.view",
-  "notes.create",
-  "replies.create",
-  "macros.view",
   "macros.create",
   "templates.view",
   "templates.create",
   // ITSM Modules
   "incidents.view",
-  "incidents.manage",  // Agents work and resolve incidents
+  "incidents.manage",
   "requests.view",
-  "requests.manage",   // Agents fulfill service requests
-  "problems.view",     // Reference only — problem management is supervisor+
-  // Change Management — agents can create/implement but not approve/govern
+  "requests.manage",
+  "problems.view",
+  // Change Management — agents can draft and edit but not approve
   "changes.view",
-  "changes.create",    // Draft and submit change requests on behalf of teams
-  "changes.update",    // Edit own drafts during authoring phase
-  "changes.implement", // Update implementation progress when assigned as implementor
-  "changes.review",    // Participate in post-implementation review when assigned
-  "tasks.view",
-  "tasks.manage",      // Agents own and complete tasks
+  "changes.create",
+  "changes.update",
   // Asset & Configuration Management
-  "cmdb.view",              // Look up CIs when working incidents/requests
-  "assets.view",            // Look up assets when working tickets
-  "assets.manage_lifecycle", // Agents can update asset lifecycle (assign, in_use, under_maintenance)
-  "software.view",          // View software licenses and SaaS subscriptions
-  "services.view",          // Browse service definitions
+  "cmdb.view",
+  "assets.view",
+  "assets.manage_lifecycle",
+  "software.view",
   // Contacts
   "contacts.view",
-  "contacts.manage",   // Agents can create and update customer records
   // Catalog & Workflow
   "catalog.view",
-  "catalog.request",   // Submit requests on behalf of users
+  "catalog.request",
   "approvals.view",
-  "approvals.respond", // Respond to approvals directed at the agent
-  "scenarios.run",     // Invoke scenarios on tickets
+  "approvals.respond",
+  "scenarios.run",
   // Platform Administration
   "reports.view",
   "reports.export",
@@ -490,20 +433,16 @@ const READONLY_PERMISSIONS: Permission[] = [
   "dashboard.manage_own",
   // Service Desk
   "tickets.view",
-  "notes.view",
-  "macros.view",
   "templates.view",
   // ITSM Modules
   "incidents.view",
   "requests.view",
   "problems.view",
   "changes.view",
-  "tasks.view",
   // Asset & Configuration Management
   "cmdb.view",
   "assets.view",
   "software.view",
-  "services.view",
   // Contacts
   "contacts.view",
   // Catalog & Workflow
@@ -513,7 +452,6 @@ const READONLY_PERMISSIONS: Permission[] = [
   // Automation Platform — readonly can see rules but not manage or test
   "automations.view",
   // Platform Administration
-  "audit.view",
   "reports.view",
 ];
 
@@ -553,6 +491,30 @@ export const ROLE_PERMISSIONS: Record<string, Set<Permission>> = {
   customer:   new Set<Permission>(),
 };
 
+// ── Reactive change notifications ─────────────────────────────────────────────
+//
+// `setRolePermissions` mutates the map in place. Without a notification
+// channel, React components that compute visibility via `can()` have no way
+// to know the underlying data changed — they'll render once with the seed
+// permissions and stay frozen even after `/api/me` syncs the real list.
+//
+// We expose a tiny pub/sub: every `setRolePermissions` call bumps `_version`
+// and notifies subscribers. The client uses `useSyncExternalStore` over
+// these two functions to make `can()` reactive in component trees.
+// Server-side, no one subscribes, so the cost is a no-op `forEach`.
+
+let _version = 0;
+const _listeners = new Set<() => void>();
+
+export function subscribeRolePermissions(listener: () => void): () => void {
+  _listeners.add(listener);
+  return () => _listeners.delete(listener);
+}
+
+export function getRolePermissionsVersion(): number {
+  return _version;
+}
+
 /**
  * Replace the runtime role cache with a fresh map.
  * Called by `server/src/lib/role-cache.ts` after loading from the DB and
@@ -571,6 +533,11 @@ export function setRolePermissions(roles: Record<string, Permission[]>): void {
   for (const [key, perms] of Object.entries(roles)) {
     ROLE_PERMISSIONS[key] = new Set(perms);
   }
+  // Notify React subscribers (sidebar, useCan, PermissionRoute) so they
+  // re-render with the new permission set instead of staying frozen on
+  // whatever the BUILTIN_ROLE_PERMISSIONS seeded.
+  _version++;
+  for (const listener of _listeners) listener();
 }
 
 // ── Helper ────────────────────────────────────────────────────────────────────

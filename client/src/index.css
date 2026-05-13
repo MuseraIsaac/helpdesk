@@ -201,6 +201,21 @@
   scrollbar-color: var(--sidebar-border) transparent;
 }
 
+/* Sidebar nav row entry — staggered fade + slide-up on mount.
+   Used by Layout.tsx to make the filtered nav list feel intentional
+   rather than abrupt. Each row's animationDelay is set inline. */
+@keyframes nav-row-enter-kf {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.nav-row-enter {
+  animation: nav-row-enter-kf 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Respect users who've requested reduced motion — instant render. */
+@media (prefers-reduced-motion: reduce) {
+  .nav-row-enter { animation: none; }
+}
+
 /* Active nav item: glowing left bar in dark mode.
    Brighter, slightly taller, with a two-layer halo so the bar reads as
    a real light-source rather than a flat coloured rectangle. */

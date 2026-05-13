@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { Link, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth-client";
+import { useCan } from "@/hooks/useCan";
 import axios from "axios";
 import { type Incident } from "core/constants/incident.ts";
 import {
@@ -188,6 +189,7 @@ function StatChip({
 
 export default function IncidentsPage() {
   const navigate = useNavigate();
+  const canManageIncidents = useCan("incidents.manage");
   const { data: session } = useSession();
   const currentUserId = session?.user?.id ?? "";
 
@@ -272,14 +274,16 @@ export default function IncidentsPage() {
             </p>
           </div>
         </div>
-        <Button
-          size="sm"
-          className="gap-1.5 shadow-sm bg-red-600 hover:bg-red-700 text-white border-0"
-          onClick={() => navigate("/incidents/new")}
-        >
-          <Siren className="h-3.5 w-3.5" />
-          Declare Incident
-        </Button>
+        {canManageIncidents && (
+          <Button
+            size="sm"
+            className="gap-1.5 shadow-sm bg-red-600 hover:bg-red-700 text-white border-0"
+            onClick={() => navigate("/incidents/new")}
+          >
+            <Siren className="h-3.5 w-3.5" />
+            Declare Incident
+          </Button>
+        )}
       </div>
 
       {/* ── Stat strip ─────────────────────────────────────────────────────── */}

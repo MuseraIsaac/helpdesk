@@ -170,7 +170,22 @@ app.use(
 // Threshold of 1 KB skips compressing tiny responses where the CPU cost
 // outweighs the saving. Uses the default zlib level for a balanced
 // CPU / size trade-off.
-app.use(compression({ threshold: 1024 }));
+//
+// SSE streams (text/event-stream) MUST be excluded — compression buffers
+// chunks until it has enough to gzip efficiently, which breaks live
+// streaming entirely. Symptom before this filter: presence indicators
+// (eye / pencil) never update because the client never sees the SSE
+// frames until the response finally closes.
+app.use(
+  compression({
+    threshold: 1024,
+    filter: (req, res) => {
+      const ct = res.getHeader("Content-Type");
+      if (typeof ct === "string" && ct.startsWith("text/event-stream")) return false;
+      return compression.filter(req, res);
+    },
+  }),
+);
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

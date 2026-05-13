@@ -37,6 +37,12 @@ export default function ErrorAlert({
   // form into "Failed to …" before the user has typed anything.
   if (!message && (error == null)) return null;
 
+  // 403 errors are handled globally by the axios interceptor (toast +
+  // redirect to /). Suppress the inline banner so the user doesn't see a
+  // red "Forbidden" splash on a page they're about to be redirected from.
+  if (axios.isAxiosError(error) && error.response?.status === 403) return null;
+  if (error && (error as { _suppressed?: boolean })._suppressed) return null;
+
   const text = message ?? getErrorMessage(error, fallback);
 
   return (

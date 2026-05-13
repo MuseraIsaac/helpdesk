@@ -24,14 +24,24 @@ router.get("/stream", requireAuth, (req, res) => {
   if (!incidentId) { res.status(400).json({ error: "Invalid incident ID" }); return; }
 
   res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
+  // Block proxy buffering (nginx / Caddy / Cloudflare default to buffering).
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   addSseClient(incidentId, res);
 
+  // Keep the connection warm so idle proxies don't sever it.
+  const keepAlive = setInterval(() => {
+    try { res.write(": keep-alive\n\n"); } catch { /* socket gone */ }
+  }, 25_000);
+
+  // Heartbeat eviction (35 s) is the authoritative liveness check — don't
+  // remove on SSE close so transient reconnects don't make the eye icon
+  // flicker off. Explicit DELETE on unmount still removes immediately.
   req.on("close", () => {
-    removeViewer(incidentId, req.user.id);
+    clearInterval(keepAlive);
     removeSseClient(incidentId, res);
   });
 });

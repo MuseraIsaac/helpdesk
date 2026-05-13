@@ -1,11 +1,16 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/require-auth";
+import { requirePermission } from "../middleware/require-permission";
 import { parseId } from "../lib/parse-id";
 import { validate } from "../lib/validate";
 import { createCustomerSchema, updateCustomerSchema } from "core/schemas/customers.ts";
 import prisma from "../db";
 
 const router = Router();
+// Every customer endpoint requires the contacts.view permission. Revoking
+// it on a role now actually blocks API access — before this change the
+// permission existed only as a sidebar gate and was bypassable via curl.
+router.use(requireAuth, requirePermission("contacts.view"));
 
 // ── List customers ────────────────────────────────────────────────────────────
 

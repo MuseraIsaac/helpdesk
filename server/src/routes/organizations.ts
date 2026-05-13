@@ -1,12 +1,15 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/require-auth";
 import { requireAdmin } from "../middleware/require-admin";
+import { requirePermission } from "../middleware/require-permission";
 import { parseId } from "../lib/parse-id";
 import { validate } from "../lib/validate";
 import { createOrganizationSchema, updateOrganizationSchema } from "core/schemas/organizations.ts";
 import prisma from "../db";
 
 const router = Router();
+// Every organization endpoint requires the contacts.view permission.
+router.use(requireAuth, requirePermission("contacts.view"));
 
 // ── List organizations ────────────────────────────────────────────────────────
 

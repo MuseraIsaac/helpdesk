@@ -20,6 +20,20 @@ interface ZoomMeetingResponse {
   id: number;
   join_url: string;
   start_url: string;
+  password?: string;
+  encrypted_password?: string;
+  h323_password?: string;
+  pstn_password?: string;
+  host_email?: string;
+  settings?: {
+    global_dial_in_numbers?: Array<{
+      country_name?: string;
+      country?: string;
+      number: string;
+      city?: string;
+      type?: string;
+    }>;
+  };
 }
 
 export class ZoomBridgeProvider implements BridgeProvider {
@@ -83,10 +97,18 @@ export class ZoomBridgeProvider implements BridgeProvider {
     }
 
     const data = (await res.json()) as ZoomMeetingResponse;
+    const dialIn = (data.settings?.global_dial_in_numbers ?? []).map((n) => ({
+      label:      [n.city, n.country_name].filter(Boolean).join(", ") || n.number,
+      uri:        `tel:${n.number.replace(/\s+/g, "")}`,
+      regionCode: n.country,
+    }));
     return {
       joinUrl:   data.join_url,
       startUrl:  data.start_url,
       meetingId: String(data.id),
+      passcode:  data.password,
+      organizerEmail: data.host_email,
+      dialIn,
     };
   }
 }

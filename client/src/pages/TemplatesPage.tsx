@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCan } from "@/hooks/useCan";
 import axios from "axios";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -600,6 +601,7 @@ export default function TemplatesPage() {
   const { data: session } = useSession();
   const userId = session?.user?.id ?? "";
   const isPrivileged = session?.user?.role === "admin" || session?.user?.role === "supervisor";
+  const canCreateTemplate = useCan("templates.create");
   // Per-template manage check: own templates are always editable by their
   // creator; admins/supervisors can manage every template regardless of
   // ownership. Mirrors the server-side rule in routes/templates.ts.
@@ -663,10 +665,12 @@ export default function TemplatesPage() {
             Agents can save templates directly from any entity's detail page.
           </p>
         </div>
-        <Button onClick={() => setDialog({ mode: "create", type: activeTab })} className="gap-2 shrink-0">
-          <Plus className="h-4 w-4" />
-          New Template
-        </Button>
+        {canCreateTemplate && (
+          <Button onClick={() => setDialog({ mode: "create", type: activeTab })} className="gap-2 shrink-0">
+            <Plus className="h-4 w-4" />
+            New Template
+          </Button>
+        )}
       </div>
 
       {error && <ErrorAlert message="Failed to load templates" />}

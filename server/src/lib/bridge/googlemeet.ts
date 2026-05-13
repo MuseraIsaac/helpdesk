@@ -25,11 +25,14 @@ interface GoogleTokenResponse {
 
 interface GoogleCalendarEvent {
   id: string;
+  organizer?: { email?: string };
   conferenceData?: {
     entryPoints?: Array<{
       entryPointType: string;
       uri: string;
       label?: string;
+      pin?: string;
+      regionCode?: string;
     }>;
     conferenceId?: string;
   };
@@ -128,9 +131,22 @@ export class GoogleMeetBridgeProvider implements BridgeProvider {
       );
     }
 
+    // Collect PSTN / Tel-Meet entry points for the "copy meeting details"
+    // clipboard block. Skip the "video" entry — that's already joinUrl.
+    const dialIn = (data.conferenceData?.entryPoints ?? [])
+      .filter(ep => ep.entryPointType !== "video")
+      .map(ep => ({
+        label:      ep.label ?? ep.uri,
+        uri:        ep.uri,
+        pin:        ep.pin,
+        regionCode: ep.regionCode,
+      }));
+
     return {
       joinUrl,
       meetingId: data.conferenceData?.conferenceId ?? data.id,
+      organizerEmail: data.organizer?.email,
+      dialIn,
     };
   }
 }

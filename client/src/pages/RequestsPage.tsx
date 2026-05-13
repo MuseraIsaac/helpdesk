@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useCan } from "@/hooks/useCan";
 import { Link, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth-client";
@@ -114,6 +115,7 @@ export default function RequestsPage() {
   const navigate = useNavigate();
   const { data: session } = useSession();
   const currentUserId = session?.user?.id ?? "";
+  const canManageRequests = useCan("requests.manage");
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
@@ -164,10 +166,12 @@ export default function RequestsPage() {
             )}
           </p>
         </div>
-        <Button size="sm" className="gap-1.5" onClick={() => navigate("/requests/new")}>
-          <Plus className="h-4 w-4" />
-          New Request
-        </Button>
+        {canManageRequests && (
+          <Button size="sm" className="gap-1.5" onClick={() => navigate("/requests/new")}>
+            <Plus className="h-4 w-4" />
+            New Request
+          </Button>
+        )}
       </div>
 
       {/* Filters */}

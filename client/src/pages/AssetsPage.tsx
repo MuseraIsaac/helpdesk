@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useCan } from "@/hooks/useCan";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -208,6 +209,7 @@ export default function AssetsPage() {
   const navigate = useNavigate();
   const qc       = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const canCreateAsset = useCan("assets.create");
 
   // ── Saved views ────────────────────────────────────────────────────────────
   const { viewList, activeView, activeConfig } = useAssetViews();
@@ -637,7 +639,9 @@ export default function AssetsPage() {
             <Columns3 className="h-4 w-4" />
             {activeView ? activeView.name : "Columns"}
           </Button>
-          <NewAssetDialog onCreated={() => { refetch(); qc.invalidateQueries({ queryKey: ["assets-stats"] }); }} />
+          {canCreateAsset && (
+            <NewAssetDialog onCreated={() => { refetch(); qc.invalidateQueries({ queryKey: ["assets-stats"] }); }} />
+          )}
         </div>
       </div>
 

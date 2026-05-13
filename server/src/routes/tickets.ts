@@ -100,7 +100,7 @@ const router = Router();
 
 // ─── Stats ─────────────────────────────────────────────────────────────────
 
-router.get("/stats", requireAuth, async (_req, res) => {
+router.get("/stats", requireAuth, requirePermission("tickets.view"), async (_req, res) => {
   const [row] = await prisma.$queryRaw<
     [TicketStatsRow]
   >`SELECT * FROM get_ticket_stats(${AI_AGENT_ID})`;
@@ -114,7 +114,7 @@ router.get("/stats", requireAuth, async (_req, res) => {
   });
 });
 
-router.get("/stats/daily-volume", requireAuth, async (_req, res) => {
+router.get("/stats/daily-volume", requireAuth, requirePermission("tickets.view"), async (_req, res) => {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
   thirtyDaysAgo.setHours(0, 0, 0, 0);
@@ -292,7 +292,7 @@ router.post("/", requireAuth, requirePermission("tickets.create"), async (req, r
 
 // ─── List ──────────────────────────────────────────────────────────────────
 
-router.get("/", requireAuth, async (req, res) => {
+router.get("/", requireAuth, requirePermission("tickets.view"), async (req, res) => {
   const query = validate(ticketListQuerySchema, req.query, res);
   if (!query) return;
 
@@ -527,7 +527,7 @@ router.get("/", requireAuth, async (req, res) => {
 
 // ─── Search (for merge picker) — must be before /:id ──────────────────────
 
-router.get("/search", requireAuth, async (req, res) => {
+router.get("/search", requireAuth, requirePermission("tickets.view"), async (req, res) => {
   const q = String(req.query.q ?? "").trim();
   const excludeId = parseId(String(req.query.exclude ?? "")) ?? undefined;
   if (!q) { res.json({ tickets: [] }); return; }
@@ -719,7 +719,7 @@ export async function loadTicketDetail(id: number) {
   return withSlaInfo(shaped);
 }
 
-router.get("/:id", requireAuth, async (req, res) => {
+router.get("/:id", requireAuth, requirePermission("tickets.view"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     res.status(400).json({ error: "Invalid ticket ID" });

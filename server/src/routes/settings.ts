@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod/v4";
 import { requireAuth } from "../middleware/require-auth";
 import { requireAdmin } from "../middleware/require-admin";
+import { requirePermission } from "../middleware/require-permission";
 import {
   isSettingsSection,
   sectionSchemas,
@@ -55,7 +56,7 @@ router.get("/branding/public", async (_req, res) => {
  * Returns all sections with defaults applied.
  * Admin-only: exposes all sections including sensitive integrations data.
  */
-router.get("/", requireAuth, requireAdmin, async (_req, res) => {
+router.get("/", requireAuth, requirePermission("settings.view"), async (_req, res) => {
   const all = await getAllSettings();
 
   // Redact sensitive fields in each section
@@ -71,7 +72,7 @@ router.get("/", requireAuth, requireAdmin, async (_req, res) => {
  * GET /api/settings/sections
  * Returns the list of available section keys (for the UI sidebar).
  */
-router.get("/sections", requireAuth, requireAdmin, (_req, res) => {
+router.get("/sections", requireAuth, requirePermission("settings.view"), (_req, res) => {
   res.json({ sections: settingsSections });
 });
 

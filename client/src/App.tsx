@@ -197,48 +197,73 @@ function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<DefaultLandingRoute />} />
           <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/tickets" element={<TicketsPage />} />
-          <Route path="/tickets/new" element={<NewTicketPage />} />
-          <Route path="/tickets/:id" element={<TicketDetailPage />} />
-          {/* ITSM modules */}
-          <Route path="/requests" element={<RequestsPage />} />
-          <Route path="/requests/new" element={<NewRequestPage />} />
-          <Route path="/requests/:id" element={<RequestDetailPage />} />
-          <Route path="/incidents" element={<IncidentsPage />} />
-          <Route path="/incidents/new" element={<NewIncidentPage />} />
-          <Route path="/incidents/:id" element={<IncidentDetailPage />} />
-          <Route path="/problems" element={<ProblemsPage />} />
-          <Route path="/problems/new" element={<NewProblemPage />} />
-          <Route path="/problems/:id" element={<ProblemDetailPage />} />
-          <Route path="/changes" element={<ChangesPage />} />
-          <Route path="/changes/new" element={<NewChangePage />} />
-          <Route path="/changes/:id" element={<ChangeDetailPage />} />
+          {/* Service Desk — tickets.view gates list+detail; create requires tickets.create at the server */}
+          <Route element={<PermissionRoute permission="tickets.view" />}>
+            <Route path="/tickets" element={<TicketsPage />} />
+            <Route path="/tickets/new" element={<NewTicketPage />} />
+            <Route path="/tickets/:id" element={<TicketDetailPage />} />
+          </Route>
+          {/* ITSM modules — each gated by its own view permission */}
+          <Route element={<PermissionRoute permission="requests.view" />}>
+            <Route path="/requests" element={<RequestsPage />} />
+            <Route path="/requests/new" element={<NewRequestPage />} />
+            <Route path="/requests/:id" element={<RequestDetailPage />} />
+          </Route>
+          <Route element={<PermissionRoute permission="incidents.view" />}>
+            <Route path="/incidents" element={<IncidentsPage />} />
+            <Route path="/incidents/new" element={<NewIncidentPage />} />
+            <Route path="/incidents/:id" element={<IncidentDetailPage />} />
+          </Route>
+          <Route element={<PermissionRoute permission="problems.view" />}>
+            <Route path="/problems" element={<ProblemsPage />} />
+            <Route path="/problems/new" element={<NewProblemPage />} />
+            <Route path="/problems/:id" element={<ProblemDetailPage />} />
+          </Route>
+          <Route element={<PermissionRoute permission="changes.view" />}>
+            <Route path="/changes" element={<ChangesPage />} />
+            <Route path="/changes/new" element={<NewChangePage />} />
+            <Route path="/changes/:id" element={<ChangeDetailPage />} />
+          </Route>
           <Route path="/notifications" element={<NotificationsPage />} />
           {/* Duty Plans */}
           <Route path="/duty-plans" element={<DutyPlanPage />} />
           <Route path="/duty-plans/:teamId" element={<DutyPlanTeamPage />} />
           <Route path="/duty-plans/:teamId/:planId" element={<DutyPlanDetailPage />} />
-          <Route path="/cmdb" element={<CmdbPage />} />
-          <Route path="/cmdb/:id" element={<CmdbDetailPage />} />
-          <Route path="/catalog" element={<CatalogPage />} />
-          <Route path="/catalog/:id" element={<CatalogItemPage />} />
-          <Route path="/assets" element={<AssetsPage />} />
-          <Route path="/assets/:id" element={<AssetDetailPage />} />
-          <Route path="/inventory-locations" element={<InventoryLocationsPage />} />
-          <Route path="/contracts" element={<ContractsPage />} />
-          <Route path="/discovery" element={<DiscoveryPage />} />
-          <Route path="/discovery/:id" element={<DiscoveryPage />} />
-          <Route path="/discovery/runs/:id" element={<DiscoverySyncRunPage />} />
-          <Route path="/software/licenses" element={<SoftwareLicensesPage />} />
-          <Route path="/software/licenses/:id" element={<SoftwareLicenseDetailPage />} />
-          <Route path="/software/saas" element={<SaaSSubscriptionsPage />} />
-          <Route path="/software/saas/:id" element={<SaaSSubscriptionDetailPage />} />
-          <Route path="/approvals" element={<ApprovalsPage />} />
+          <Route element={<PermissionRoute permission="cmdb.view" />}>
+            <Route path="/cmdb" element={<CmdbPage />} />
+            <Route path="/cmdb/:id" element={<CmdbDetailPage />} />
+          </Route>
+          <Route element={<PermissionRoute permission="catalog.view" />}>
+            <Route path="/catalog" element={<CatalogPage />} />
+            <Route path="/catalog/:id" element={<CatalogItemPage />} />
+          </Route>
+          <Route element={<PermissionRoute permission="assets.view" />}>
+            <Route path="/assets" element={<AssetsPage />} />
+            <Route path="/assets/:id" element={<AssetDetailPage />} />
+            <Route path="/inventory-locations" element={<InventoryLocationsPage />} />
+            <Route path="/contracts" element={<ContractsPage />} />
+          </Route>
+          <Route element={<PermissionRoute permission="assets.manage" />}>
+            <Route path="/discovery" element={<DiscoveryPage />} />
+            <Route path="/discovery/:id" element={<DiscoveryPage />} />
+            <Route path="/discovery/runs/:id" element={<DiscoverySyncRunPage />} />
+          </Route>
+          <Route element={<PermissionRoute permission="software.view" />}>
+            <Route path="/software/licenses" element={<SoftwareLicensesPage />} />
+            <Route path="/software/licenses/:id" element={<SoftwareLicenseDetailPage />} />
+            <Route path="/software/saas" element={<SaaSSubscriptionsPage />} />
+            <Route path="/software/saas/:id" element={<SaaSSubscriptionDetailPage />} />
+          </Route>
+          <Route element={<PermissionRoute permission="approvals.view" />}>
+            <Route path="/approvals" element={<ApprovalsPage />} />
+          </Route>
           {/* Contacts */}
-          <Route path="/customers" element={<CustomersPage />} />
-          <Route path="/customers/:id" element={<CustomerDetailPage />} />
-          <Route path="/organizations" element={<OrganizationsPage />} />
-          <Route path="/organizations/:id" element={<OrganizationDetailPage />} />
+          <Route element={<PermissionRoute permission="contacts.view" />}>
+            <Route path="/customers" element={<CustomersPage />} />
+            <Route path="/customers/:id" element={<CustomerDetailPage />} />
+            <Route path="/organizations" element={<OrganizationsPage />} />
+            <Route path="/organizations/:id" element={<OrganizationDetailPage />} />
+          </Route>
           {/* /settings redirects non-admins to home; admin sub-routes below */}
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
 
@@ -249,38 +274,84 @@ function App() {
 
           {/* Templates: all authenticated agents can manage personal templates;
               the server scopes visibility (private / team / everyone). */}
-          <Route path="/templates" element={<TemplatesPage />} />
+          <Route element={<PermissionRoute permission="templates.view" />}>
+            <Route path="/templates" element={<TemplatesPage />} />
+          </Route>
 
-          <Route element={<AdminRoute />}>
+          {/* Settings — gated on a permission (admin by default, but admins
+              can grant it to other roles via Roles & Permissions). Sitting
+              outside the AdminRoute wrapper below so a non-admin who's been
+              granted settings.view can reach /settings/* without redirect. */}
+          <Route element={<PermissionRoute permission="settings.view" />}>
             <Route path="/settings/:section" element={<SettingsPage />} />
-            <Route path="/catalog/admin" element={<CatalogAdminPage />} />
-            <Route path="/demo-data" element={<DemoDataPage />} />
+          </Route>
 
-            {/* ── Administration hub ──────────────────────────────────────
-                Every page below shares the AdminHubLayout chrome (gradient
-                hero + tabbed switcher) so admins can move between tools
-                without leaving the umbrella page. URLs are unchanged. */}
-            <Route element={<AdminHubLayout />}>
+          {/* Catalog authoring requires catalog.manage. */}
+          <Route element={<PermissionRoute permission="catalog.manage" />}>
+            <Route path="/catalog/admin" element={<CatalogAdminPage />} />
+          </Route>
+
+          {/* Demo data tooling stays admin-only. */}
+          <Route element={<AdminRoute />}>
+            <Route path="/demo-data" element={<DemoDataPage />} />
+          </Route>
+
+          {/* ── Administration hub ──────────────────────────────────────
+              Every page below shares the AdminHubLayout chrome (gradient
+              hero + tabbed switcher) so admins can move between tools
+              without leaving the umbrella page. URLs are unchanged.
+
+              Each route is now gated by the specific permission required
+              for that tool — admins can grant any subset to other roles
+              via Roles & Permissions and those users will see exactly the
+              tabs they're allowed. Before this refactor the whole hub was
+              admin-only via a single wrapping <AdminRoute>, so finer
+              permission toggles in the union were effectively cosmetic. */}
+          <Route element={<AdminHubLayout />}>
+            {/* Overview — visible to anyone with at least one admin permission. */}
+            <Route element={<AdminRoute />}>
               <Route path="/admin" element={<AdminOverviewPage />} />
+            </Route>
+            <Route element={<PermissionRoute permission="users.manage" />}>
               <Route path="/users" element={<UsersPage />} />
+              <Route path="/admin/roles" element={<RolesPage />} />
+            </Route>
+            <Route element={<PermissionRoute permission="teams.manage" />}>
               <Route path="/teams" element={<TeamsPage />} />
+            </Route>
+            <Route element={<PermissionRoute permission="macros.manage" />}>
               <Route path="/macros" element={<MacrosPage />} />
+            </Route>
+            <Route element={<PermissionRoute permission="ticket_types.manage" />}>
               <Route path="/admin/forms" element={<FormBuilderPage />} />
-              <Route path="/admin/cab-groups" element={<CabGroupsPage />} />
               <Route path="/admin/ticket-types" element={<TicketTypesPage />} />
               <Route path="/admin/ticket-statuses" element={<TicketStatusConfigsPage />} />
+            </Route>
+            <Route element={<PermissionRoute permission="cab.manage" />}>
+              <Route path="/admin/cab-groups" element={<CabGroupsPage />} />
+            </Route>
+            {/* Monitoring / Updates / Audit are admin-only operational tools. */}
+            <Route element={<AdminRoute />}>
               <Route path="/admin/monitoring" element={<AdminMonitoringPage />} />
-              <Route path="/admin/audit-log" element={<AuditLogPage />} />
               <Route path="/admin/updates"   element={<UpdatesPage />} />
-              <Route path="/admin/roles" element={<RolesPage />} />
-              {/* Automation Platform */}
+              <Route path="/admin/audit-log" element={<AuditLogPage />} />
+            </Route>
+            {/* Automation Platform — view permission gates list pages;
+                rule editing and webhook config require .manage. */}
+            <Route element={<PermissionRoute permission="automations.view" />}>
               <Route path="/automations" element={<AutomationPlatformPage />} />
+              <Route path="/automations/executions" element={<AutomationExecutionsPage />} />
+              <Route path="/automations/routing" element={<RoutingConfigPage />} />
+            </Route>
+            <Route element={<PermissionRoute permission="automations.manage" />}>
               <Route path="/automations/rules/new" element={<AutomationRuleFormPage />} />
               <Route path="/automations/rules/:id" element={<AutomationRuleFormPage />} />
-              <Route path="/automations/executions" element={<AutomationExecutionsPage />} />
+            </Route>
+            <Route element={<PermissionRoute permission="webhooks.view" />}>
               <Route path="/automations/webhooks" element={<OutboundWebhooksPage />} />
-              <Route path="/automations/routing" element={<RoutingConfigPage />} />
-              {/* Legacy scenarios — kept for backward compatibility */}
+            </Route>
+            {/* Legacy scenarios — kept for backward compatibility. */}
+            <Route element={<PermissionRoute permission="scenarios.run" />}>
               <Route path="/automations/scenarios" element={<ScenariosPage />} />
             </Route>
           </Route>
