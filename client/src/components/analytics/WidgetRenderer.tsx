@@ -2,14 +2,36 @@
  * WidgetRenderer — dispatches a QueryResult to the correct chart component.
  * Also handles empty state and gauge (rendered as a stat with progress ring).
  */
+import { lazy, Suspense } from "react";
 import type { QueryResult } from "@/lib/reports/analytics-types";
 import { StatWidget, StatChangeWidget } from "./widgets/StatWidget";
-import { TimeSeriesWidget } from "./widgets/TimeSeriesWidget";
-import { BarWidget } from "./widgets/BarWidget";
-import { DonutWidget } from "./widgets/DonutWidget";
 import { LeaderboardWidget } from "./widgets/LeaderboardWidget";
 import { DataTableWidget } from "./widgets/DataTableWidget";
 import { BarChart2 } from "lucide-react";
+
+// Recharts-backed widgets are heavy (~150 KB). Lazy-load them so the
+// initial bundle stays slim — they only mount inside dashboards / reports
+// pages anyway, and most page loads don't include them on the hot path.
+const TimeSeriesWidget = lazy(() =>
+  import("./widgets/TimeSeriesWidget").then(m => ({ default: m.TimeSeriesWidget })),
+);
+const BarWidget = lazy(() =>
+  import("./widgets/BarWidget").then(m => ({ default: m.BarWidget })),
+);
+const DonutWidget = lazy(() =>
+  import("./widgets/DonutWidget").then(m => ({ default: m.DonutWidget })),
+);
+
+function ChartFallback({ height }: { height?: number }) {
+  return (
+    <div
+      className="rounded-md bg-muted/30 animate-pulse w-full"
+      style={{ minHeight: height ?? 200 }}
+      aria-busy="true"
+      aria-label="Loading chart"
+    />
+  );
+}
 
 interface Props {
   result: QueryResult;
@@ -28,32 +50,42 @@ export function WidgetRenderer({ result, visualization, height = 200, onDrillDow
 
     case "time_series":
       return (
-        <TimeSeriesWidget
-          result={result}
-          visualization={visualization as "line" | "area"}
-          height={height}
-        />
+        <Suspense fallback={<ChartFallback height={height} />}>
+          <TimeSeriesWidget
+            result={result}
+            visualization={visualization as "line" | "area"}
+            height={height}
+          />
+        </Suspense>
       );
 
     case "grouped_count":
       if (visualization === "donut") {
-        return <DonutWidget result={result} height={height} />;
+        return (
+          <Suspense fallback={<ChartFallback height={height} />}>
+            <DonutWidget result={result} height={height} />
+          </Suspense>
+        );
       }
       return (
-        <BarWidget
-          result={result}
-          visualization={visualization as "bar" | "bar_horizontal" | "stacked_bar"}
-          height={height}
-        />
+        <Suspense fallback={<ChartFallback height={height} />}>
+          <BarWidget
+            result={result}
+            visualization={visualization as "bar" | "bar_horizontal" | "stacked_bar"}
+            height={height}
+          />
+        </Suspense>
       );
 
     case "distribution":
       return (
-        <BarWidget
-          result={result}
-          visualization={visualization === "histogram" ? "histogram" : "bar"}
-          height={height}
-        />
+        <Suspense fallback={<ChartFallback height={height} />}>
+          <BarWidget
+            result={result}
+            visualization={visualization === "histogram" ? "histogram" : "bar"}
+            height={height}
+          />
+        </Suspense>
       );
 
     case "leaderboard":

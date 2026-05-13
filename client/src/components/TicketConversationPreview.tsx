@@ -15,6 +15,8 @@
 
 import { useState, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import { MessageCircle, StickyNote, User, Bot, Clock } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -45,11 +47,22 @@ interface OriginalMessage {
 }
 
 interface Props {
-  lastReply: LastReply | null | undefined;
-  lastNote:  LastNote  | null | undefined;
+  /**
+   * Ticket numeric ID. Preview data (last reply + last note) is fetched
+   * lazily via /api/tickets/:id/conversation-preview only when the user
+   * actually hovers a row. Removes the per-row subselect cost from the
+   * list endpoint, which used to dominate ticket-list query time at
+   * scale.
+   */
+  ticketId: number;
   /** Original customer message — shown only when there is no reply or note. */
   original?: OriginalMessage | null;
   children:  ReactNode;
+}
+
+interface PreviewResponse {
+  lastReply: LastReply | null;
+  lastNote:  LastNote  | null;
 }
 
 type EntryKind = "reply-customer" | "reply-agent" | "note";
@@ -153,10 +166,25 @@ function PreviewCard({ entry }: { entry: Entry }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function TicketConversationPreview({ lastReply, lastNote, original, children }: Props) {
+export default function TicketConversationPreview({ ticketId, original, children }: Props) {
   const [pos,     setPos]     = useState({ x: 0, y: 0 });
   const [visible, setVisible] = useState(false);
+  /** Only true once the user has *intended* to hover (350 ms after enter). */
+  const [armed, setArmed] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Lazy-fetch the preview when the user actually hovers. Query is enabled
+  // only after the 350 ms hover-intent timer fires so a quick mouse drag
+  // across the table doesn't issue a request per row.
+  const { data: preview } = useQuery<PreviewResponse>({
+    queryKey: ["ticket-preview", ticketId],
+    queryFn:  () => axios.get(`/api/tickets/${ticketId}/conversation-preview`).then(r => r.data),
+    enabled:  armed,
+    staleTime: 60_000,
+  });
+
+  const lastReply = preview?.lastReply ?? null;
+  const lastNote  = preview?.lastNote  ?? null;
 
   // Pick only the single most-recent activity
   const replyTime = lastReply ? new Date(lastReply.createdAt).getTime() : 0;
@@ -188,11 +216,15 @@ export default function TicketConversationPreview({ lastReply, lastNote, origina
     };
   }
 
-  // No conversation and no original body — skip wrapper entirely
-  if (!entry) return <>{children}</>;
+  // If we have no original body and no fetched data yet, we still need to
+  // wrap the children so the hover handler can fire and arm the fetch.
+  // The popover renders only when an entry resolves.
 
   function handleMouseEnter(e: React.MouseEvent) {
     updatePos(e);
+    // Arm the lazy preview fetch immediately so the data is ready by the
+    // time the 350 ms intent-delay fires.
+    if (!armed) setArmed(true);
     timerRef.current = setTimeout(() => setVisible(true), 350);
   }
 
@@ -235,7 +267,7 @@ export default function TicketConversationPreview({ lastReply, lastNote, origina
         {children}
       </span>
 
-      {visible && createPortal(
+      {visible && entry && createPortal(
         <div
           style={{
             position:   "fixed",

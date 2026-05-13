@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import ErrorAlert from "@/components/ErrorAlert";
-import RichTextEditor from "@/components/RichTextEditor";
+import RichTextEditor from "@/components/RichTextEditorLazy";
 import RichTextRenderer from "@/components/RichTextRenderer";
 import BackLink from "@/components/BackLink";
 import { useFormConfig } from "@/hooks/useFormConfig";

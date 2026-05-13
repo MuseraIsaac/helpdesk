@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import RichTextEditor from "@/components/RichTextEditor";
+import RichTextEditor from "@/components/RichTextEditorLazy";
 import RichTextRenderer from "@/components/RichTextRenderer";
 import SearchableSelect from "@/components/SearchableSelect";
 import LinkedChangeSelect from "@/components/LinkedChangeSelect";

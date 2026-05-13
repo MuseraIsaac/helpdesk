@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import ErrorAlert from "@/components/ErrorAlert";
 import ArticleSuggestions from "@/components/ArticleSuggestions";
-import RichTextEditor from "@/components/RichTextEditor";
+import RichTextEditor from "@/components/RichTextEditorLazy";
 import {
   ArrowLeft, Paperclip, X, FileText, Image, File,
   Upload, CheckCircle2, AlertTriangle, Loader2,

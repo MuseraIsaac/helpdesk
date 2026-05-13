@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import ErrorAlert from "@/components/ErrorAlert";
 import BackLink from "@/components/BackLink";
 import CsatRatingWidget from "@/components/CsatRatingWidget";
-import RichTextEditor from "@/components/RichTextEditor";
+import RichTextEditor from "@/components/RichTextEditorLazy";
 import RichTextRenderer from "@/components/RichTextRenderer";
 import {
   Loader2, Paperclip, X, FileText, Image, File,

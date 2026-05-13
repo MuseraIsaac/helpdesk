@@ -51,22 +51,38 @@ router.get("/ticket-scope", requireAuth, async (req, res) => {
 });
 
 // GET /api/me — current user + their preferences + effective permissions
+//
+// Returns enough data for the layout shell in a single request so the
+// client doesn't fire 2-3 parallel calls on every page load. Admins also
+// get the `showDemoData` flag (derived from the demo_data settings
+// section) embedded here, replacing what used to be a separate
+// `/api/settings/demo_data` query.
 router.get("/", requireAuth, async (req, res) => {
-  const user = await prisma.user.findUniqueOrThrow({
-    where: { id: req.user.id },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      createdAt: true,
-      preference: true,
-      roleRef: { select: { name: true, color: true } },
-    },
-  });
-  // Effective permissions reflect any admin edits to the user's role.
-  const permissions = await permissionsForRole(user.role);
-  res.json({ user: { ...user, permissions } });
+  const [user, permissions, demoSettings] = await Promise.all([
+    prisma.user.findUniqueOrThrow({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+        preference: true,
+        roleRef: { select: { name: true, color: true } },
+      },
+    }),
+    permissionsForRole(req.user.role),
+    // Only admins need this flag; for everyone else it's always false.
+    req.user.role === "admin"
+      ? import("../lib/settings").then((m) => m.getSection("demo_data"))
+      : Promise.resolve(null),
+  ]);
+
+  const showDemoData =
+    user.role === "admin" &&
+    !!(demoSettings as { enableDemoDataTools?: boolean } | null)?.enableDemoDataTools;
+
+  res.json({ user: { ...user, permissions, showDemoData } });
 });
 
 // PATCH /api/me/profile — update name + profile extras

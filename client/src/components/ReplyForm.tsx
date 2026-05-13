@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import ErrorAlert from "@/components/ErrorAlert";
 import MacroPicker from "@/components/MacroPicker";
 import SaveMacroDialog from "@/components/SaveMacroDialog";
-import RichTextEditor, { type RichTextEditorHandle } from "@/components/RichTextEditor";
+import RichTextEditor, { type RichTextEditorHandle } from "@/components/RichTextEditorLazy";
 import EmailChipsInput from "@/components/EmailChipsInput";
 import { useSession } from "@/lib/auth-client";
 import { useMe } from "@/hooks/useMe";

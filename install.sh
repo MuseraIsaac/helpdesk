@@ -1312,6 +1312,76 @@ EOF
     fi
   fi
 
+  # ── Cloudflare-fronted domain — DNS + origin reachability check ─────────
+  #
+  # When PROXY_DETECTED=1 the operator's public DNS resolves to the CDN's
+  # anycast IPs, not this server. That is exactly the configuration that
+  # produces Cloudflare error 521 ("Web server is down") when the CDN's
+  # *internal* origin record happens to point at a different host (e.g. a
+  # decommissioned VM). The install itself is fine — the breakage is at the
+  # CDN's DNS layer, which this script cannot reach.
+  #
+  # Two things help the operator land this safely:
+  #   1. **Prove the origin is healthy** with a `curl --resolve` request
+  #      that bypasses public DNS and hits THIS server directly using the
+  #      domain in the Host header. A 2xx/3xx here means the Caddy + app
+  #      stack is serving correctly; any 521 the operator sees from a
+  #      browser is therefore a DNS/proxy issue, not an install issue.
+  #   2. **Show the exact A-record values** they must set on Cloudflare,
+  #      with the recommended proxy + SSL/TLS posture for this install.
+  if [[ "$IS_IP" != "1" && "${PROXY_DETECTED:-0}" == "1" ]]; then
+    local origin_status_https origin_status_http
+    origin_status_https=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 \
+      --resolve "$DOMAIN:443:$SERVER_IP" "https://$DOMAIN/" 2>/dev/null || echo "000")
+    origin_status_http=$(curl -s  -o /dev/null -w "%{http_code}" --max-time 5 \
+      --resolve "$DOMAIN:80:$SERVER_IP"  "http://$DOMAIN/"  2>/dev/null || echo "000")
+
+    local origin_health
+    if [[ "$origin_status_https" =~ ^[23] || "$origin_status_http" =~ ^[23] ]]; then
+      origin_health="HEALTHY — Caddy responds for $DOMAIN at $SERVER_IP (HTTP $origin_status_http / HTTPS $origin_status_https)"
+    else
+      origin_health="UNCERTAIN — origin returned HTTP $origin_status_http / HTTPS $origin_status_https. Run: journalctl -u caddy -n 50"
+    fi
+
+    cat <<EOF
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  📡 Cloudflare DNS — REQUIRED CONFIGURATION                                  ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║  $DOMAIN is behind a CDN (orange-cloud proxy), so visitors do not reach
+║  this server directly. Until your Cloudflare DNS A-records point at this
+║  origin, every browser request will return:
+║
+║      Cloudflare error 521 — Web server is down
+║
+║  Fix it in Cloudflare → DNS → Records:
+║
+║      Type   Name                              Content              Proxy
+║      ────   ─────────────────────────────     ──────────────────   ──────
+║      A      $DOMAIN                          $SERVER_IP           Proxied
+║      A      www                               $SERVER_IP           Proxied
+║      A      *           (optional wildcard)   $SERVER_IP           Proxied
+║
+║  Cloudflare → SSL/TLS → Overview:
+║      Mode: Full $([[ -n "${CLOUDFLARE_ORIGIN_CERT:-}" ]] && echo "(Strict)" || echo "(NOT Strict — origin uses Caddy self-signed)")
+║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  Origin self-check (bypasses public DNS, hits this server directly):         ║
+║                                                                              ║
+║      $origin_health
+║
+║  Reproduce the same check from anywhere:                                     ║
+║    curl -sk -o /dev/null -w "%{http_code}\\n" \\
+║      --resolve $DOMAIN:443:$SERVER_IP https://$DOMAIN/
+║                                                                              ║
+║  Any 2xx/3xx from that command means the origin is fine — the only fix      ║
+║  left is pointing Cloudflare's A-records at $SERVER_IP.
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+EOF
+  fi
+
   if [[ "$USE_TLS" == "1" ]]; then
     cat <<EOF
 

@@ -1,7 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
-import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
 import {
   NAV_SECTIONS,
   isNavItemVisible,
@@ -88,8 +86,12 @@ function NavBadgePill({ badge }: { badge: NonNullable<NavItem["badge"]> }) {
 }
 
 // ── Nav item ──────────────────────────────────────────────────────────────────
+//
+// Memoised so each route change (which re-renders the Layout owner) only
+// reconciles the rows whose props actually change — typically zero. Without
+// this, a 17-item sidebar runs ~50 NavLink reconciliations on every click.
 
-function SidebarNavItem({ item, collapsed, onClick }: { item: NavItem; collapsed: boolean; onClick?: () => void }) {
+const SidebarNavItem = memo(function SidebarNavItem({ item, collapsed, onClick }: { item: NavItem; collapsed: boolean; onClick?: () => void }) {
   const Icon = item.icon;
   return (
     <NavLink
@@ -140,7 +142,7 @@ function SidebarNavItem({ item, collapsed, onClick }: { item: NavItem; collapsed
       )}
     </NavLink>
   );
-}
+});
 
 // ── Section label ─────────────────────────────────────────────────────────────
 
@@ -308,11 +310,15 @@ function SidebarContent({ collapsed, role, name, email, showDemoData, onToggleCo
           the filtered list feels intentional rather than abrupt. */}
       <nav className="flex-1 overflow-y-auto py-2 px-2 min-h-0 sidebar-scrollbar">
         {(() => {
-          const visibleSections = NAV_SECTIONS
-            .filter((s) => {
-              if (s.id === "demo-data" && !showDemoData) return false;
-              return isNavSectionVisible(s, role);
-            });
+          // visibleSections is computed inline here intentionally — the
+          // permission version subscription higher up means the parent
+          // component re-renders on permission map changes, and the
+          // filter is cheap (~20 items × 3 checks each). useMemo would
+          // need permissionVersion as a dep and isn't worth the noise.
+          const visibleSections = NAV_SECTIONS.filter((s) => {
+            if (s.id === "demo-data" && !showDemoData) return false;
+            return isNavSectionVisible(s, role);
+          });
 
           // If the user has zero modules visible (e.g. a custom role with
           // only `dashboard.manage_own`), show a polite empty-state instead
@@ -502,14 +508,10 @@ export default function Layout() {
   const { collapsed, toggle } = useSidebarCollapsed();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Pull the user's effective permissions from /api/me and hydrate the
-  // client-side ROLE_PERMISSIONS map. Without this, the client uses the
-  // BUILTIN_ROLE_PERMISSIONS seeds forever — meaning admin edits in
-  // Roles & Permissions visibly affect the API but not the sidebar /
-  // route gates / button gates until the user logs out and back in. The
-  // hook itself dedupes via TanStack Query (queryKey "me") so this is a
-  // free call on top of the existing /api/me usage elsewhere.
-  useMe();
+  // /api/me — single source of truth for: effective permissions, demo-data
+  // flag, profile. Replaces what used to be 3 separate calls firing in
+  // parallel on every layout mount.
+  const { data: meData } = useMe();
   // Subscribe to the global ROLE_PERMISSIONS map so the sidebar re-renders
   // whenever /api/me hydrates the map or an admin saves a role change.
   // The returned version number isn't used directly — its identity is
@@ -523,18 +525,9 @@ export default function Layout() {
   // Register the application-wide keyboard shortcuts (chord nav, `n`, `?`, `/`).
   useGlobalShortcuts();
 
-  // Fetch demo_data setting only for admins — determines sidebar section visibility.
-  // staleTime is generous (5 min) since this rarely changes during a session.
-  const { data: demoSettings } = useQuery({
-    queryKey: ["settings", "demo_data"],
-    queryFn:  () =>
-      axios
-        .get<{ section: string; data: { enableDemoDataTools: boolean } }>("/api/settings/demo_data")
-        .then((r) => r.data.data),
-    enabled:   role === "admin",
-    staleTime: 5 * 60_000,
-  });
-  const showDemoData = role === "admin" && (demoSettings?.enableDemoDataTools ?? false);
+  // The demo-data flag now ships with /api/me (see useMe), so no separate
+  // fetch is needed. Defaults to false until /api/me resolves.
+  const showDemoData = meData?.user?.showDemoData ?? false;
 
   const breadcrumb = resolveModuleBreadcrumb(pathname, role);
 

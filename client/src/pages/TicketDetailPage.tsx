@@ -11,7 +11,6 @@ import UpdateTicket from "@/components/UpdateTicket";
 import ConversationTimeline from "@/components/ConversationTimeline";
 import ReplyForm, { type ReplyType, type QuoteData } from "@/components/ReplyForm";
 import NoteForm from "@/components/NoteForm";
-import TicketSummary from "@/components/TicketSummary";
 import AuditTimeline from "@/components/AuditTimeline";
 import CustomerHistory from "@/components/CustomerHistory";
 import RunScenarioButton from "@/components/RunScenarioButton";
@@ -756,9 +755,9 @@ export default function TicketDetailPage() {
 
               {/* AI Copilot — opens the side drawer with summary, draft
                *  reply, KB articles, and similar tickets. Tinted violet so
-               *  it visually pairs with other AI surfaces (TicketSummary,
-               *  ArticleSuggestions). Hidden when admins have switched the
-               *  feature off in Tickets → AI Copilot. */}
+               *  it visually pairs with the ArticleSuggestions surface.
+               *  Hidden when admins have switched the feature off in
+               *  Tickets → AI Copilot. */}
               {copilotEnabled && (
                 <Button
                   type="button"
@@ -1079,7 +1078,11 @@ export default function TicketDetailPage() {
                   ticket={ticket}
                   onCompose={(mode, quote) => openCompose(mode, quote)}
                 />
-                <TicketSummary ticket={ticket} />
+                {/* Summarize button removed — the same functionality lives in
+                 *  the AI Copilot drawer (header "Copilot" button or ⌘/Ctrl+I)
+                 *  under the Summary tab, alongside Draft / Articles / Similar.
+                 *  Keeping a duplicate inline button created two paths to the
+                 *  same AI endpoint and cluttered the conversation card. */}
               </div>
             </SectionCard>
 

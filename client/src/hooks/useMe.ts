@@ -37,6 +37,12 @@ export interface MeUser {
    * sync with what the API will actually authorise.
    */
   permissions: Permission[];
+  /**
+   * Whether to surface the Demo Data / Developer sidebar section. Always
+   * false unless the user is an admin AND `demo_data.enableDemoDataTools`
+   * is on. Embedded in /api/me so Layout doesn't need a separate fetch.
+   */
+  showDemoData: boolean;
 }
 
 export function useMe() {

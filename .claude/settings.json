@@ -37,7 +37,22 @@
       "Read(//c/c/Users/IMusera/OneDrive - CopyCat Group/Desktop/ITSM/helpdesk/core/constants/**)",
       "Bash(ssh-keyscan -t ed25519,rsa,ecdsa 138.199.153.57)",
       "Bash(timeout 5 bash -c '\\(echo > /dev/tcp/135.181.87.179/5432\\) 2>&1 && echo \"✅ reachable on 5432\"')",
-      "Bash(timeout 5 bash -c '\\(echo > /dev/tcp/138.199.153.57/5432\\) 2>&1 && echo \"✅ reachable on 5432\"')"
+      "Bash(timeout 5 bash -c '\\(echo > /dev/tcp/138.199.153.57/5432\\) 2>&1 && echo \"✅ reachable on 5432\"')",
+      "Bash(grep -nE \"^const |^} \\(as|satisfies|;$\\)|^};$|^// \\(Tickets|Incidents|Problems|Changes|Service Requests|Assets|Approvals|Customers|Teams|Reports|Authentication|Auth|System|Settings|User|Lifecycle\\)\" client/src/pages/AuditLogPage.tsx)",
+      "Bash(awk -F'\"' '{print NR\": L\"$0}')",
+      "Bash(awk -F'\"' '/^  \"[a-z._]*\":/ {print NR\" \"$2}' client/src/pages/AuditLogPage.tsx)",
+      "Bash(sort -k2)",
+      "Bash(uniq -c -f1)",
+      "Bash(awk '$1>1')",
+      "Bash(awk -F'\"' '/^  \"[a-z._]*\":/ {print $2}' client/src/pages/AuditLogPage.tsx)",
+      "Bash(sed -i '237,329d' client/src/pages/AuditLogPage.tsx)",
+      "Bash(grep -nE \"^const ACTION_CONFIG|^};$|^const CATEGORY_LABELS\" client/src/pages/AuditLogPage.tsx)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\IMusera\\\\OneDrive - CopyCat Group\\\\Desktop\\\\ITSM\\\\helpdesk\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(xargs tail -100)",
+      "Bash(grep -A 20 \"async \\(req, res\\) => {\" server/src/routes/tickets.ts)",
+      "Bash(awk '{print $5, $9}')",
+      "Bash(grep -v \".sql$\")"
     ]
   }
 }

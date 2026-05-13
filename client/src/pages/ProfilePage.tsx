@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import ErrorAlert from "@/components/ErrorAlert";
 import ErrorMessage from "@/components/ErrorMessage";
-import RichTextEditor from "@/components/RichTextEditor";
+import RichTextEditor from "@/components/RichTextEditorLazy";
 import { ShortcutBoard } from "@/components/ShortcutBoard";
 import { User, Sliders, ShieldCheck, Keyboard, Sparkles, Mail, BadgeCheck } from "lucide-react";
 import { useMe, useUpdateProfile, useUpdatePreferences, useChangePassword } from "@/hooks/useMe";

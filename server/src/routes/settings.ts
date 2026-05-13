@@ -21,6 +21,13 @@ const router = Router();
 router.get("/branding/public", async (_req, res) => {
   const data = await getSection("branding");
   const d = data as Record<string, unknown>;
+  // Cache for 60 s in the browser and 5 min in any intermediate proxy.
+  // Branding rarely changes; this slashes load on the unauthenticated
+  // login + portal pages which call this on every paint.
+  res.setHeader(
+    "Cache-Control",
+    "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+  );
   res.json({
     data: {
       logoDataUrl:          d.logoDataUrl          ?? "",

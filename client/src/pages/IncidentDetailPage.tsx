@@ -19,7 +19,7 @@ import {
 } from "core/schemas/incidents.ts";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import RichTextEditor from "@/components/RichTextEditor";
+import RichTextEditor from "@/components/RichTextEditorLazy";
 import RichTextRenderer from "@/components/RichTextRenderer";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";

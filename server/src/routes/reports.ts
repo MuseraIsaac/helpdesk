@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/require-auth";
+import { cacheGet } from "../middleware/cache-get";
 import { AI_AGENT_ID } from "core/constants/ai-agent.ts";
 import { categoryLabel } from "core/constants/ticket-category.ts";
 import { priorityLabel } from "core/constants/ticket-priority.ts";
@@ -7,6 +8,13 @@ import prisma from "../db";
 
 const router = Router();
 router.use(requireAuth);
+// Every report endpoint here is a read-only aggregation. Cache responses
+// for 60 s per-user so dashboard reloads and the 15+ parallel widget
+// queries on HomePage hit memory instead of re-running aggregations.
+// Mutations to underlying data don't need to invalidate here — staleness
+// up to 60 s is acceptable for dashboards (matches the client's 5-min
+// TanStack Query staleTime).
+router.use(cacheGet({ ttl: 60 }));
 
 // ── Date-filter helpers ───────────────────────────────────────────────────────
 

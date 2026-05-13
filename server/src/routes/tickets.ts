@@ -82,18 +82,10 @@ const LIST_SELECT = {
   // lastAgentReplyAt the customer is waiting on the team).
   lastAgentReplyAt: true,
   lastCustomerReplyAt: true,
-  // Last reply preview for hover card
-  replies: {
-    select: { body: true, senderType: true, user: { select: { name: true } }, createdAt: true },
-    orderBy: { createdAt: "desc" as const },
-    take: 1,
-  },
-  // Last internal note preview for hover card
-  notes: {
-    select: { body: true, author: { select: { name: true } }, createdAt: true },
-    orderBy: { createdAt: "desc" as const },
-    take: 1,
-  },
+  // Last-reply / last-note PREVIEWS used to live here. They were a hover-card
+  // nicety paid for by every row: two extra subselects with joins to user
+  // and author, for thousands of rows. Now fetched on demand via
+  // GET /api/tickets/:id/conversation-preview (see below).
 } as const;
 
 const router = Router();
@@ -481,49 +473,88 @@ router.get("/", requireAuth, requirePermission("tickets.view"), async (req, res)
     prisma.ticket.count({ where }),
   ]);
 
+  // Hover-card previews removed from the row payload — fetched on demand
+  // by TicketConversationPreview via /api/tickets/:id/conversation-preview.
+  const PREVIEW_LEN = 280;
+  const truncate = (s: string) =>
+    s.length > PREVIEW_LEN ? s.slice(0, PREVIEW_LEN) + "…" : s;
+
   res.json({
-    tickets: tickets.map(t => {
-      const raw = t as typeof t & {
-        replies?: { body: string; senderType: string; user: { name: string } | null; createdAt: Date }[];
-        notes?:   { body: string; author: { name: string } | null; createdAt: Date }[];
-      };
-      const lastReplyRow = raw.replies?.[0] ?? null;
-      const lastNoteRow  = raw.notes?.[0]   ?? null;
-
-      // The hover preview only renders a short excerpt — truncate so a single
-      // huge inbound email body doesn't bloat the list response by megabytes.
-      const PREVIEW_LEN = 280;
-      const truncate = (s: string) =>
-        s.length > PREVIEW_LEN ? s.slice(0, PREVIEW_LEN) + "…" : s;
-
-      return {
-        ...withSlaInfo(t),
-        // Replace the full body with a truncated preview — the hover card
-        // only shows ~160 chars, so 280 is more than enough and keeps the
-        // list payload bounded for tickets with megabyte-sized email HTML.
-        body:         truncate(t.body ?? ""),
-        organization: t.customer?.organization?.name ?? null,
-        customer:     undefined,
-        replies:      undefined,
-        notes:        undefined,
-        lastReply: lastReplyRow ? {
-          body:       truncate(lastReplyRow.body),
-          senderType: lastReplyRow.senderType as "agent" | "customer",
-          authorName: lastReplyRow.user?.name ?? null,
-          createdAt:  lastReplyRow.createdAt.toISOString(),
-        } : null,
-        lastNote: lastNoteRow ? {
-          body:       truncate(lastNoteRow.body),
-          authorName: lastNoteRow.author?.name ?? null,
-          createdAt:  lastNoteRow.createdAt.toISOString(),
-        } : null,
-      };
-    }),
+    tickets: tickets.map((t) => ({
+      ...withSlaInfo(t),
+      // Replace the full body with a truncated preview — the hover card
+      // only shows ~160 chars, so 280 is more than enough and keeps the
+      // list payload bounded for tickets with megabyte-sized email HTML.
+      body:         truncate(t.body ?? ""),
+      organization: t.customer?.organization?.name ?? null,
+      customer:     undefined,
+    })),
     total,
     page: query.page,
     pageSize: query.pageSize,
   });
 });
+
+// ─── Conversation preview (lazy hover-card) ────────────────────────────────
+//
+// Lightweight per-ticket endpoint that returns just the last reply + last
+// internal note, used by `TicketConversationPreview` only when the user
+// actually hovers a row. Mounting this after the list endpoint above so
+// the list response stays free of expensive subselects.
+
+router.get(
+  "/:id/conversation-preview",
+  requireAuth,
+  requirePermission("tickets.view"),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    if (!id) { res.status(400).json({ error: "Invalid ticket ID" }); return; }
+
+    const [lastReply, lastNote] = await Promise.all([
+      prisma.reply.findFirst({
+        where: { ticketId: id },
+        orderBy: { createdAt: "desc" },
+        select: {
+          body: true,
+          senderType: true,
+          createdAt: true,
+          user: { select: { name: true } },
+        },
+      }),
+      prisma.note.findFirst({
+        where: { ticketId: id },
+        orderBy: { createdAt: "desc" },
+        select: {
+          body: true,
+          createdAt: true,
+          author: { select: { name: true } },
+        },
+      }),
+    ]);
+
+    const PREVIEW_LEN = 280;
+    const truncate = (s: string) =>
+      s.length > PREVIEW_LEN ? s.slice(0, PREVIEW_LEN) + "…" : s;
+
+    res.json({
+      lastReply: lastReply
+        ? {
+            body:       truncate(lastReply.body),
+            senderType: lastReply.senderType as "agent" | "customer",
+            authorName: lastReply.user?.name ?? null,
+            createdAt:  lastReply.createdAt.toISOString(),
+          }
+        : null,
+      lastNote: lastNote
+        ? {
+            body:       truncate(lastNote.body),
+            authorName: lastNote.author?.name ?? null,
+            createdAt:  lastNote.createdAt.toISOString(),
+          }
+        : null,
+    });
+  },
+);
 
 // ─── Search (for merge picker) — must be before /:id ──────────────────────
 

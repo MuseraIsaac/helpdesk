@@ -103,8 +103,7 @@ const ALL_COLUMN_DEFS: Record<ColumnId, ColumnDef<Ticket>> = {
     // nothing is hidden — just visually contained.
     cell: ({ row }) => (
       <TicketConversationPreview
-        lastReply={row.original.lastReply}
-        lastNote={row.original.lastNote}
+        ticketId={row.original.id}
         original={{
           body:       row.original.body,
           senderName: row.original.senderName,

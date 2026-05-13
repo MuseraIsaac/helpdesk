@@ -15,26 +15,35 @@ installAxios403Interceptor();
 /**
  * Global TanStack Query defaults.
  *
- * `staleTime: 30s` — every query is considered fresh for 30 seconds after
- * a successful fetch, so quick navigations (e.g. ticket detail → back to
- * list) reuse cached data instead of paying a network round-trip. Mutations
- * still invalidate by query key as usual.
+ * `staleTime: 2 min` — most ITSM data (tickets, incidents, assets…) changes
+ * on the order of minutes, not seconds. Treating every fresh fetch as good
+ * for 2 minutes eliminates the redundant refetches that were happening on
+ * almost every cross-page navigation (e.g. dashboard → tickets list →
+ * back to dashboard fired the dashboard widgets again). Mutations still
+ * invalidate by query key, so user actions surface immediately.
  *
- * `gcTime: 5min` — keep cached data around for 5 min after the last
- * subscriber unmounts, then garbage-collect.
+ * `gcTime: 10 min` — keep cached data around for 10 min after the last
+ * subscriber unmounts. Longer than staleTime so quick back-navigations
+ * read from cache without a network roundtrip even after staleness.
  *
- * `refetchOnWindowFocus: false` — the helpdesk doesn't need refetch-on-tab-
- * focus everywhere; pages that *do* need live data subscribe via SSE.
+ * `refetchOnWindowFocus: false` / `refetchOnReconnect: false` — pages
+ * that genuinely need live data subscribe via SSE.
  *
- * Individual `useQuery` calls override these by passing their own values
- * (e.g. dictionary endpoints with `staleTime: 5 * 60_000`).
+ * `retry: 1` — a single retry is enough for transient network blips;
+ * the default of 3 made failing pages take ~10 s to settle into their
+ * error state.
+ *
+ * Individual `useQuery` calls override these (e.g. dictionary endpoints
+ * with `staleTime: 5 * 60_000`, presence streams with explicit zero).
  */
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
-      gcTime: 5 * 60_000,
+      staleTime: 2 * 60_000,
+      gcTime: 10 * 60_000,
       refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      retry: 1,
     },
   },
 });
