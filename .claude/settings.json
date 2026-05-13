@@ -52,7 +52,9 @@
       "Bash(xargs tail -100)",
       "Bash(grep -A 20 \"async \\(req, res\\) => {\" server/src/routes/tickets.ts)",
       "Bash(awk '{print $5, $9}')",
-      "Bash(grep -v \".sql$\")"
+      "Bash(grep -v \".sql$\")",
+      "Bash(dig +short onlinefileconvertor.com @1.1.1.1)",
+      "Bash(timeout 5 bash -c '\\(echo > /dev/tcp/204.168.187.86/__TRACKED_VAR__\\) 2>&1 && echo '\\\\'':__TRACKED_VAR__ reachable'\\\\''')"
     ]
   }
 }
